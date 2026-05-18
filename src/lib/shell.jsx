@@ -167,7 +167,6 @@ export function Sidebar({ current, onNav }) {
         <Item id="contract-types" icon="fileCheck" label="ประเภทสัญญา" count="8" />
         <Item id="units"          icon="ruler"     label="หน่วยนับ" count="24" />
         <Item id="approval-roles" icon="fileCheck" label="ตำแหน่งผู้อนุมัติ" count="5" />
-        <Item id="workspace"      icon="settings"  label="ตั้งค่าพื้นที่ทำงาน" />
       </div>
 
       {/* Bottom group: account + admin functions — pushed to bottom via marginTop:auto.
@@ -175,7 +174,8 @@ export function Sidebar({ current, onNav }) {
           stays glued below, so SideFooter sits flush against this group. */}
       <div className="side-group" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
         <div className="side-group-label">ระบบ</div>
-        <Item id="team" icon="fileCheck" label="ทีมงานและสิทธิ์" />
+        <Item id="workspace" icon="settings"  label="ตั้งค่าพื้นที่ทำงาน" />
+        <Item id="team"      icon="fileCheck" label="ทีมงานและสิทธิ์" />
       </div>
 
       <SideFooter onNav={onNav} />
