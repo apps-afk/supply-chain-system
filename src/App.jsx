@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar, Topbar } from './lib/shell';
 
 import { ScreenDashboard } from './screens/screen-dashboard';
@@ -78,16 +78,32 @@ const ACTIVE_NAV = {
 };
 
 export default function App() {
-  const [screen, setScreen] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const hash = window.location.hash.replace('#', '');
-      return CRUMBS[hash] ? hash : 'dashboard';
-    }
-    return 'dashboard';
-  });
+  // Always start with 'dashboard' so server-side HTML matches client-side
+  // hydration (reading window.location.hash here would cause a mismatch
+  // and trigger a full client re-render after hydration)
+  const [screen, setScreen] = useState('dashboard');
+  const isFirstMount = useRef(true);
 
+  // After hydration, sync screen from the URL hash and listen for back/forward
   useEffect(() => {
-    window.location.hash = screen;
+    const syncFromHash = () => {
+      const hash = window.location.hash.replace('#', '');
+      if (CRUMBS[hash]) setScreen(prev => (prev !== hash ? hash : prev));
+    };
+    syncFromHash();
+    window.addEventListener('hashchange', syncFromHash);
+    return () => window.removeEventListener('hashchange', syncFromHash);
+  }, []);
+
+  // Update URL hash + scroll when the user navigates (but NOT on first mount,
+  // otherwise we'd overwrite any deep-link the user opened)
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    const current = window.location.hash.replace('#', '');
+    if (current !== screen) window.location.hash = screen;
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [screen]);
 

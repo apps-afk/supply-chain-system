@@ -114,8 +114,10 @@ function SideFooter() {
 }
 
 /* ----------------------- Sidebar ----------------------- */
-export function Sidebar({ current, onNav }) {
-  const Item = ({ id, icon, label, count }) => (
+// Defined outside Sidebar so React keeps a stable component identity and
+// doesn't remount every nav item on each parent re-render.
+function SideItem({ id, icon, label, count, current, onNav }) {
+  return (
     <div
       className={"side-item" + (current === id ? " active" : "")}
       onClick={() => onNav(id)}
@@ -125,6 +127,10 @@ export function Sidebar({ current, onNav }) {
       {count != null && <span className="count">{count}</span>}
     </div>
   );
+}
+
+export function Sidebar({ current, onNav }) {
+  const Item = (props) => <SideItem {...props} current={current} onNav={onNav} />;
   return (
     <aside className="side">
       <div className="side-brand">

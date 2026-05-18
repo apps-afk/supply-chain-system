@@ -1,9 +1,15 @@
 import './globals.css';
+import { getServerSession } from 'next-auth';
 import { Providers } from '../providers';
+import { authOptions } from '../lib/auth';
 
 export const metadata = { title: 'Initial Estate — Supply Chain System' };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  // Pre-fetch the session on the server so SessionProvider doesn't need
+  // to hit /api/auth/session on initial mount — saves ~500ms on cold starts
+  const session = await getServerSession(authOptions);
+
   return (
     <html lang="th">
       <head>
@@ -12,7 +18,7 @@ export default function RootLayout({ children }) {
         <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers session={session}>{children}</Providers>
       </body>
     </html>
   );
