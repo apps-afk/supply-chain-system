@@ -1,0 +1,44 @@
+name: Add Custom Domain
+
+on:
+  workflow_dispatch:
+
+jobs:
+  add-domain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      - name: Pull Vercel project config
+        run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Add supplychain.initialestate.com to project
+        run: |
+          PROJECT_ID=$(python3 -c "import json; d=json.load(open('.vercel/project.json')); print(d['projectId'])")
+          echo "Project ID: $PROJECT_ID"
+
+          RESPONSE=$(curl -sS -X POST "https://api.vercel.com/v10/projects/$PROJECT_ID/domains" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"name": "supplychain.initialestate.com"}')
+
+          echo "$RESPONSE" | python3 -m json.tool
+
+          # Extract the required DNS config
+          echo ""
+          echo "=== DNS Record to add in Cloudflare ==="
+          echo "$RESPONSE" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          cfg = d.get('verification', [{}])
+          if cfg:
+            for v in cfg:
+              print(f\"Type:   {v.get('type')}\")
+              print(f\"Name:   {v.get('domain')}\")
+              print(f\"Value:  {v.get('value')}\")
+          else:
+            print('Domain may already be added or no verification needed.')
+          " 2>/dev/null || echo "$RESPONSE"
