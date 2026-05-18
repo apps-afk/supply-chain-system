@@ -471,3 +471,11 @@ input, textarea, select { font-family: inherit; }
 /* Risk row stripe */
 .row-flag-warn { box-shadow: inset 3px 0 0 var(--ochre); }
 .row-flag-err  { box-shadow: inset 3px 0 0 var(--clay); }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

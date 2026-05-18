@@ -3,7 +3,7 @@ import React, { useState, useEffect, useId } from 'react';
 import { signIn, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 
-/* ---- Inline logo (same as shell.jsx but self-contained for login page) ---- */
+/* ---- Logo ---- */
 function InitialEstateLogo({ width = 200 }) {
   const uid = useId().replace(/:/g, '-');
   const clipId = `login-logo-n${uid}`;
@@ -37,7 +37,7 @@ function InitialEstateLogo({ width = 200 }) {
   );
 }
 
-/* ---- Google G logo ---- */
+/* ---- Google icon ---- */
 const GoogleIcon = () => (
   <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
     <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
@@ -47,20 +47,38 @@ const GoogleIcon = () => (
   </svg>
 );
 
+/* ---- Check icon ---- */
+const CheckIcon = () => (
+  <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+    <circle cx="20" cy="20" r="20" fill="#DEE7E3" />
+    <path d="M12 20.5 17.5 26 28 14" stroke="#1F4D40" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+
 const ERROR_MESSAGES = {
-  AccessDenied: 'อนุญาตเฉพาะบัญชี @initialestate.com เท่านั้น',
-  OAuthSignin:  'ไม่สามารถเชื่อมต่อ Google ได้ กรุณาลองใหม่',
-  OAuthCallback:'เกิดข้อผิดพลาดจาก Google กรุณาลองใหม่',
-  default:      'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง',
+  AccessDenied:  'อนุญาตเฉพาะบัญชี @initialestate.com เท่านั้น',
+  OAuthSignin:   'ไม่สามารถเชื่อมต่อ Google ได้ กรุณาลองใหม่',
+  OAuthCallback: 'เกิดข้อผิดพลาดจาก Google กรุณาลองใหม่',
+  default:       'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง',
 };
 
 export default function LoginPage() {
   const router = useRouter();
-  const { data: session, status } = useSession();
-  const [email, setEmail]     = useState('');
+  const { status } = useSession();
+  const [mode, setMode]         = useState('login');   // 'login' | 'register'
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
+  const [success, setSuccess]   = useState(false);
+
+  // Login fields
+  const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState('');
+
+  // Register fields
+  const [rName, setRName]       = useState('');
+  const [rEmail, setREmail]     = useState('');
+  const [rPass, setRPass]       = useState('');
+  const [rPass2, setRPass2]     = useState('');
 
   useEffect(() => {
     if (status === 'authenticated') router.replace('/');
@@ -68,11 +86,16 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get('error');
+      const code = new URLSearchParams(window.location.search).get('error');
       if (code) setError(ERROR_MESSAGES[code] || ERROR_MESSAGES.default);
     }
   }, []);
+
+  function switchMode(m) {
+    setMode(m);
+    setError('');
+    setSuccess(false);
+  }
 
   async function handleGoogle() {
     setLoading(true);
@@ -80,23 +103,15 @@ export default function LoginPage() {
     await signIn('google', { callbackUrl: '/' });
   }
 
-  async function handleCredentials(e) {
+  async function handleLogin(e) {
     e.preventDefault();
-    setLoading(true);
     setError('');
-
     if (!email.toLowerCase().endsWith('@initialestate.com')) {
       setError('อนุญาตเฉพาะบัญชี @initialestate.com เท่านั้น');
-      setLoading(false);
       return;
     }
-
-    const res = await signIn('credentials', {
-      email,
-      password,
-      redirect: false,
-    });
-
+    setLoading(true);
+    const res = await signIn('credentials', { email, password, redirect: false });
     if (res?.error) {
       setError(ERROR_MESSAGES[res.error] || ERROR_MESSAGES.default);
       setLoading(false);
@@ -105,102 +120,195 @@ export default function LoginPage() {
     }
   }
 
+  async function handleRegister(e) {
+    e.preventDefault();
+    setError('');
+    if (!rEmail.toLowerCase().endsWith('@initialestate.com')) {
+      setError('อนุญาตเฉพาะบัญชี @initialestate.com เท่านั้น');
+      return;
+    }
+    if (rPass.length < 8) {
+      setError('รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร');
+      return;
+    }
+    if (rPass !== rPass2) {
+      setError('รหัสผ่านไม่ตรงกัน');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: rName, email: rEmail, password: rPass }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || ERROR_MESSAGES.default);
+      } else {
+        setSuccess(true);
+      }
+    } catch {
+      setError(ERROR_MESSAGES.default);
+    }
+    setLoading(false);
+  }
+
   if (status === 'loading' || status === 'authenticated') {
     return (
-      <div style={styles.page}>
-        <div style={styles.spinner} />
+      <div style={S.page}>
+        <div style={S.spinner} />
       </div>
     );
   }
 
   return (
-    <div style={styles.page}>
-      {/* Decorative top bar */}
-      <div style={styles.topAccent} />
+    <div style={S.page}>
+      <div style={S.topAccent} />
 
-      <div style={styles.card}>
+      <div style={S.card}>
         {/* Logo */}
-        <div style={styles.logoWrap}>
+        <div style={S.logoWrap}>
           <InitialEstateLogo width={188} />
         </div>
 
-        {/* Heading */}
-        <div style={styles.heading}>เข้าสู่ระบบ</div>
-        <div style={styles.sub}>
-          ระบบจัดการ Supply Chain ·{' '}
-          <span style={{ color: '#C09535', fontWeight: 500 }}>@initialestate.com</span>{' '}
-          เท่านั้น
+        {/* Tabs */}
+        <div style={S.tabs}>
+          <button style={{ ...S.tab, ...(mode === 'login'    ? S.tabActive : {}) }} onClick={() => switchMode('login')}>เข้าสู่ระบบ</button>
+          <button style={{ ...S.tab, ...(mode === 'register' ? S.tabActive : {}) }} onClick={() => switchMode('register')}>สมัครสมาชิก</button>
         </div>
 
         {/* Error */}
-        {error && <div style={styles.errBox}>{error}</div>}
+        {error && <div style={S.errBox}>{error}</div>}
 
-        {/* Google button */}
-        <button
-          style={{ ...styles.googleBtn, opacity: loading ? 0.7 : 1 }}
-          onClick={handleGoogle}
-          disabled={loading}
-        >
-          <GoogleIcon />
-          <span>Continue with Google</span>
-        </button>
+        {/* ===== LOGIN MODE ===== */}
+        {mode === 'login' && (
+          <div style={{ animation: 'fadeIn 0.18s ease' }}>
+            <div style={S.sub}>
+              เข้าด้วยบัญชี{' '}
+              <span style={{ color: '#C09535', fontWeight: 500 }}>@initialestate.com</span>
+            </div>
 
-        {/* Divider */}
-        <div style={styles.divider}>
-          <span style={styles.dividerLine} />
-          <span style={styles.dividerText}>หรือเข้าด้วยอีเมล</span>
-          <span style={styles.dividerLine} />
-        </div>
+            <button
+              style={{ ...S.googleBtn, opacity: loading ? 0.7 : 1 }}
+              onClick={handleGoogle}
+              disabled={loading}
+            >
+              <GoogleIcon />
+              <span>Continue with Google</span>
+            </button>
 
-        {/* Credentials form */}
-        <form onSubmit={handleCredentials} style={styles.form}>
-          <label style={styles.label}>อีเมล</label>
-          <input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="yourname@initialestate.com"
-            required
-            style={styles.input}
-            autoComplete="email"
-          />
+            <div style={S.divider}>
+              <span style={S.dividerLine} />
+              <span style={S.dividerText}>หรือเข้าด้วยอีเมล</span>
+              <span style={S.dividerLine} />
+            </div>
 
-          <label style={styles.label} style={{ marginTop: 12 }}>รหัสผ่าน</label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="••••••••"
-            required
-            style={styles.input}
-            autoComplete="current-password"
-          />
+            <form onSubmit={handleLogin} style={S.form}>
+              <label style={S.label}>อีเมล</label>
+              <input
+                type="email" value={email} onChange={e => setEmail(e.target.value)}
+                placeholder="yourname@initialestate.com" required
+                style={S.input} autoComplete="email"
+              />
+              <label style={{ ...S.label, marginTop: 4 }}>รหัสผ่าน</label>
+              <input
+                type="password" value={password} onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••" required
+                style={S.input} autoComplete="current-password"
+              />
+              <button type="submit" disabled={loading}
+                style={{ ...S.submitBtn, opacity: loading ? 0.7 : 1 }}>
+                {loading ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
+              </button>
+            </form>
+          </div>
+        )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{ ...styles.submitBtn, opacity: loading ? 0.7 : 1 }}
-          >
-            {loading ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
-          </button>
-        </form>
+        {/* ===== REGISTER MODE ===== */}
+        {mode === 'register' && !success && (
+          <div style={{ animation: 'fadeIn 0.18s ease' }}>
+            <div style={S.sub}>
+              สมัครด้วยอีเมล{' '}
+              <span style={{ color: '#C09535', fontWeight: 500 }}>@initialestate.com</span>
+            </div>
 
-        {/* Footer */}
-        <div style={styles.footer}>
+            <button
+              style={{ ...S.googleBtn, opacity: loading ? 0.7 : 1, marginBottom: 4 }}
+              onClick={handleGoogle}
+              disabled={loading}
+            >
+              <GoogleIcon />
+              <span>Sign up with Google</span>
+            </button>
+
+            <div style={S.divider}>
+              <span style={S.dividerLine} />
+              <span style={S.dividerText}>หรือตั้งรหัสผ่าน</span>
+              <span style={S.dividerLine} />
+            </div>
+
+            <form onSubmit={handleRegister} style={S.form}>
+              <label style={S.label}>ชื่อ-นามสกุล</label>
+              <input
+                type="text" value={rName} onChange={e => setRName(e.target.value)}
+                placeholder="ชื่อจริง นามสกุล" required
+                style={S.input} autoComplete="name"
+              />
+              <label style={{ ...S.label, marginTop: 4 }}>อีเมลบริษัท</label>
+              <input
+                type="email" value={rEmail} onChange={e => setREmail(e.target.value)}
+                placeholder="yourname@initialestate.com" required
+                style={S.input} autoComplete="email"
+              />
+              <label style={{ ...S.label, marginTop: 4 }}>รหัสผ่าน</label>
+              <input
+                type="password" value={rPass} onChange={e => setRPass(e.target.value)}
+                placeholder="อย่างน้อย 8 ตัวอักษร" required minLength={8}
+                style={S.input} autoComplete="new-password"
+              />
+              <label style={{ ...S.label, marginTop: 4 }}>ยืนยันรหัสผ่าน</label>
+              <input
+                type="password" value={rPass2} onChange={e => setRPass2(e.target.value)}
+                placeholder="••••••••" required
+                style={{ ...S.input, marginBottom: 16 }} autoComplete="new-password"
+              />
+              <button type="submit" disabled={loading}
+                style={{ ...S.submitBtn, opacity: loading ? 0.7 : 1 }}>
+                {loading ? 'กำลังสมัคร…' : 'สมัครสมาชิก'}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* ===== REGISTER SUCCESS ===== */}
+        {mode === 'register' && success && (
+          <div style={{ ...S.successBox, animation: 'fadeIn 0.25s ease' }}>
+            <CheckIcon />
+            <div style={S.successTitle}>สมัครสำเร็จ!</div>
+            <div style={S.successSub}>
+              บัญชีของคุณถูกสร้างเรียบร้อยแล้ว<br />
+              กรุณาเข้าสู่ระบบด้วยอีเมลและรหัสผ่านที่ตั้งไว้
+            </div>
+            <button style={S.submitBtn} onClick={() => switchMode('login')}>
+              ไปหน้าเข้าสู่ระบบ
+            </button>
+          </div>
+        )}
+
+        <div style={S.footer}>
           Initial Estate Supply Chain System · เวอร์ชัน 1.0
         </div>
       </div>
 
-      {/* Bottom credit */}
-      <div style={styles.copyright}>
+      <div style={S.copyright}>
         © 2025 Initial Estate Co.,Ltd. · ระบบสำหรับพนักงานภายในเท่านั้น
       </div>
     </div>
   );
 }
 
-/* ---- Styles ---- */
-const styles = {
+const S = {
   page: {
     minHeight: '100vh',
     background: 'var(--paper)',
@@ -209,7 +317,6 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     padding: '24px 16px 48px',
-    position: 'relative',
   },
   topAccent: {
     position: 'fixed',
@@ -222,7 +329,7 @@ const styles = {
     borderRadius: 12,
     border: '1px solid var(--rule)',
     boxShadow: '0 8px 40px -12px rgba(20,18,14,0.16), 0 2px 8px -2px rgba(20,18,14,0.06)',
-    padding: '44px 40px 36px',
+    padding: '40px 40px 32px',
     width: '100%',
     maxWidth: 420,
     display: 'flex',
@@ -231,23 +338,39 @@ const styles = {
   logoWrap: {
     display: 'flex',
     justifyContent: 'center',
-    marginBottom: 28,
+    marginBottom: 24,
     paddingBottom: 24,
     borderBottom: '1px solid var(--rule)',
   },
-  heading: {
-    fontFamily: 'var(--font-serif)',
-    fontSize: 22,
+  tabs: {
+    display: 'flex',
+    gap: 0,
+    marginBottom: 20,
+    borderBottom: '1px solid var(--rule)',
+  },
+  tab: {
+    flex: 1,
+    padding: '10px 0',
+    background: 'none',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    marginBottom: -1,
+    fontSize: 14,
     fontWeight: 500,
-    color: 'var(--ink)',
-    marginBottom: 6,
-    textAlign: 'center',
+    color: 'var(--ink-3)',
+    cursor: 'pointer',
+    fontFamily: 'var(--font-sans)',
+    transition: 'color 0.15s, border-color 0.15s',
+  },
+  tabActive: {
+    color: 'var(--teal)',
+    borderBottomColor: 'var(--teal)',
   },
   sub: {
     fontSize: 13,
     color: 'var(--ink-3)',
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   errBox: {
     background: '#FDE8E4',
@@ -275,13 +398,12 @@ const styles = {
     cursor: 'pointer',
     fontFamily: 'var(--font-sans)',
     boxShadow: '0 1px 2px rgba(20,18,14,0.06)',
-    transition: 'border-color 0.15s, box-shadow 0.15s',
   },
   divider: {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
-    margin: '20px 0',
+    margin: '18px 0',
   },
   dividerLine: {
     flex: 1,
@@ -297,7 +419,6 @@ const styles = {
   form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 0,
   },
   label: {
     fontSize: 12,
@@ -320,7 +441,6 @@ const styles = {
     boxSizing: 'border-box',
   },
   submitBtn: {
-    marginTop: 4,
     width: '100%',
     padding: '11px 0',
     background: 'var(--teal)',
@@ -332,6 +452,26 @@ const styles = {
     cursor: 'pointer',
     fontFamily: 'var(--font-sans)',
     letterSpacing: '0.02em',
+  },
+  successBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 12,
+    padding: '8px 0 4px',
+    textAlign: 'center',
+  },
+  successTitle: {
+    fontFamily: 'var(--font-serif)',
+    fontSize: 20,
+    fontWeight: 500,
+    color: 'var(--ink)',
+  },
+  successSub: {
+    fontSize: 13,
+    color: 'var(--ink-3)',
+    lineHeight: 1.6,
+    marginBottom: 8,
   },
   footer: {
     marginTop: 28,
