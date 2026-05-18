@@ -26,6 +26,7 @@ const BUILTIN = [
     id: 'admin',
     name: 'Admin',
     email: 'admin@initialestate.com',
+    phone: '',
     role: 'admin',
     salt: 'ie_admin_salt_2025',
     hash: hash('ie_admin_salt_2025', process.env.ADMIN_PASSWORD || 'Admin1234!'),
@@ -85,6 +86,7 @@ export async function registerUser(name, email, password) {
   const newUser = {
     id: `user_${Date.now()}`,
     name, email, role: 'user',
+    phone: '',
     salt, hash: hash(salt, password),
     createdAt: NOW(),
     lastLogin: null,
@@ -92,6 +94,60 @@ export async function registerUser(name, email, password) {
   };
   registered.push(newUser);
   return { id: newUser.id, email: newUser.email, name: newUser.name };
+}
+
+/* ===== Profile updates by the user themselves ===== */
+
+const DOMAIN = 'initialestate.com';
+
+export async function updateProfile(currentEmail, patch) {
+  const key = currentEmail.toLowerCase();
+  const r = registered.find(u => u.email.toLowerCase() === key);
+  const builtin = BUILTIN.find(b => b.email.toLowerCase() === key);
+  const target = r || builtin;
+  if (!target) throw new Error('ไม่พบบัญชีผู้ใช้');
+
+  let emailChanged = false;
+  if (patch.email != null && patch.email.toLowerCase() !== key) {
+    if (builtin) throw new Error('ไม่สามารถเปลี่ยนอีเมลของบัญชีระบบได้');
+    if (!patch.email.toLowerCase().endsWith(`@${DOMAIN}`)) {
+      throw new Error(`อีเมลใหม่ต้องเป็น @${DOMAIN}`);
+    }
+    if (allUsers().find(u => u.email.toLowerCase() === patch.email.toLowerCase())) {
+      throw new Error('อีเมลนี้มีผู้ใช้งานแล้ว');
+    }
+    emailChanged = true;
+  }
+
+  if (r) {
+    if (patch.name  !== undefined) r.name  = patch.name;
+    if (patch.phone !== undefined) r.phone = patch.phone;
+    if (emailChanged) r.email = patch.email.toLowerCase();
+  } else if (builtin) {
+    builtinMeta[key] = builtinMeta[key] || {};
+    if (patch.name  !== undefined) builtinMeta[key].name  = patch.name;
+    if (patch.phone !== undefined) builtinMeta[key].phone = patch.phone;
+  }
+
+  return { emailChanged };
+}
+
+/* ===== Forced reset (no old-password check) ===== */
+// Used when the logged-in user clicks "forgot current password" — since we
+// already authenticated them via session cookie, we trust them to set a new one.
+
+export async function forceResetPassword(email, newPassword) {
+  const u = registered.find(r => r.email.toLowerCase() === email.toLowerCase());
+  if (u) {
+    u.salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    u.hash = hash(u.salt, newPassword);
+    return true;
+  }
+  const builtin = BUILTIN.find(b => b.email.toLowerCase() === email.toLowerCase());
+  if (builtin) {
+    throw new Error('บัญชีระบบเปลี่ยนรหัสผ่านได้ผ่านตัวแปร ADMIN_PASSWORD ใน Vercel เท่านั้น');
+  }
+  throw new Error('ไม่พบบัญชีผู้ใช้');
 }
 
 export async function updatePassword(email, oldPassword, newPassword) {
@@ -118,12 +174,29 @@ export async function listUsers() {
     id: u.id,
     name: u.name,
     email: u.email,
+    phone: u.phone || '',
     role: u.role,
     createdAt: u.createdAt || null,
     lastLogin: u.lastLogin || null,
     verified: u.verified !== false,
     isBuiltin: !!BUILTIN.find(b => b.email.toLowerCase() === u.email.toLowerCase()),
   }));
+}
+
+/* Get one user's profile for the My-Account page */
+export async function getProfile(email) {
+  const key = email.toLowerCase();
+  const u = allUsers().find(x => x.email.toLowerCase() === key);
+  if (!u) return null;
+  return {
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    phone: u.phone || '',
+    role: u.role,
+    createdAt: u.createdAt || null,
+    isBuiltin: !!BUILTIN.find(b => b.email.toLowerCase() === key),
+  };
 }
 
 export async function updateUserRole(email, newRole) {

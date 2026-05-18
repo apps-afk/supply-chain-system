@@ -1,48 +1,134 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
+
+const ROLE_LABEL = {
+  admin:       'ผู้ดูแลระบบ',
+  hr_manager:  'ผู้จัดการ HR',
+  procurement: 'ฝ่ายจัดซื้อ',
+  accountant:  'ฝ่ายบัญชี',
+  manager:     'ผู้จัดการ',
+  user:        'ผู้ใช้งานทั่วไป',
+};
 
 export function ScreenSettingsAccount() {
   const { data: session } = useSession();
-  const user = session?.user;
 
-  const [oldPwd,  setOldPwd]  = useState('');
-  const [newPwd,  setNewPwd]  = useState('');
-  const [newPwd2, setNewPwd2] = useState('');
-  const [status,  setStatus]  = useState({ msg: '', tone: '' });
-  const [busy,    setBusy]    = useState(false);
+  /* Profile state */
+  const [profile, setProfile] = useState(null);   // server data
+  const [form,    setForm]    = useState({ name: '', email: '', phone: '' });
+  const [loading, setLoading] = useState(true);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileMsg,    setProfileMsg]    = useState({ msg: '', tone: '' });
 
-  async function handleChangePassword(e) {
-    e.preventDefault();
-    setStatus({ msg: '', tone: '' });
-    if (newPwd.length < 8) {
-      return setStatus({ msg: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร', tone: 'err' });
-    }
-    if (newPwd !== newPwd2) {
-      return setStatus({ msg: 'รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน', tone: 'err' });
-    }
-    setBusy(true);
+  /* Password state */
+  const [pwdMode,  setPwdMode]  = useState('change');  // 'change' | 'forgot'
+  const [oldPwd,   setOldPwd]   = useState('');
+  const [newPwd,   setNewPwd]   = useState('');
+  const [newPwd2,  setNewPwd2]  = useState('');
+  const [savingPwd, setSavingPwd] = useState(false);
+  const [pwdMsg,    setPwdMsg]    = useState({ msg: '', tone: '' });
+
+  async function loadProfile() {
+    setLoading(true);
     try {
-      const res = await fetch('/api/auth/change-password', {
-        method: 'POST',
+      const res = await fetch('/api/account/profile');
+      const data = await res.json();
+      if (res.ok && data.profile) {
+        setProfile(data.profile);
+        setForm({
+          name:  data.profile.name  || '',
+          email: data.profile.email || '',
+          phone: data.profile.phone || '',
+        });
+      }
+    } catch {}
+    setLoading(false);
+  }
+  useEffect(() => { loadProfile(); }, []);
+
+  const dirty = profile && (
+    form.name  !== (profile.name  || '') ||
+    form.email !== (profile.email || '') ||
+    form.phone !== (profile.phone || '')
+  );
+
+  async function saveProfile(e) {
+    e.preventDefault();
+    setProfileMsg({ msg: '', tone: '' });
+    if (!form.name.trim()) return setProfileMsg({ msg: 'ชื่อไม่ควรว่าง', tone: 'err' });
+    setSavingProfile(true);
+    try {
+      const res = await fetch('/api/account/profile', {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }),
+        body: JSON.stringify(form),
       });
       const data = await res.json();
       if (!res.ok) {
-        setStatus({ msg: data.error || 'เกิดข้อผิดพลาด', tone: 'err' });
+        setProfileMsg({ msg: data.error || 'บันทึกไม่สำเร็จ', tone: 'err' });
+      } else if (data.emailChanged) {
+        setProfileMsg({ msg: 'เปลี่ยนอีเมลแล้ว — กำลังพาออกจากระบบเพื่อเข้าใหม่...', tone: 'ok' });
+        setTimeout(() => signOut({ callbackUrl: '/login' }), 1800);
       } else {
-        setStatus({ msg: 'เปลี่ยนรหัสผ่านสำเร็จ', tone: 'ok' });
+        setProfileMsg({ msg: 'บันทึกสำเร็จ', tone: 'ok' });
+        await loadProfile();
+        setTimeout(() => setProfileMsg({ msg: '', tone: '' }), 2500);
+      }
+    } catch {
+      setProfileMsg({ msg: 'เครือข่ายขัดข้อง', tone: 'err' });
+    }
+    setSavingProfile(false);
+  }
+
+  async function savePassword(e) {
+    e.preventDefault();
+    setPwdMsg({ msg: '', tone: '' });
+    if (newPwd.length < 8) return setPwdMsg({ msg: 'รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร', tone: 'err' });
+    if (newPwd !== newPwd2) return setPwdMsg({ msg: 'รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน', tone: 'err' });
+
+    setSavingPwd(true);
+    try {
+      let res;
+      if (pwdMode === 'change') {
+        res = await fetch('/api/auth/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }),
+        });
+      } else {
+        res = await fetch('/api/account/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newPassword: newPwd }),
+        });
+      }
+      const data = await res.json();
+      if (!res.ok) {
+        setPwdMsg({ msg: data.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ', tone: 'err' });
+      } else {
+        setPwdMsg({
+          msg: pwdMode === 'change' ? 'เปลี่ยนรหัสผ่านสำเร็จ' : 'รีเซ็ตรหัสผ่านสำเร็จ',
+          tone: 'ok',
+        });
         setOldPwd(''); setNewPwd(''); setNewPwd2('');
       }
     } catch {
-      setStatus({ msg: 'เครือข่ายขัดข้อง', tone: 'err' });
+      setPwdMsg({ msg: 'เครือข่ายขัดข้อง', tone: 'err' });
     }
-    setBusy(false);
+    setSavingPwd(false);
   }
 
-  const initials = (user?.name || user?.email || 'U').slice(0, 2).toUpperCase();
-  const roleLabel = user?.role === 'admin' ? 'ผู้ดูแลระบบ' : 'ผู้ใช้งานทั่วไป';
+  if (loading || !profile) {
+    return (
+      <div className="page">
+        <div style={{ padding: 60, textAlign: 'center', color: 'var(--ink-3)' }}>กำลังโหลด…</div>
+      </div>
+    );
+  }
+
+  const initials = (profile.name || profile.email || 'U').slice(0, 2).toUpperCase();
+  const roleText = ROLE_LABEL[profile.role] || profile.role || '—';
 
   return (
     <div className="page">
@@ -54,48 +140,154 @@ export function ScreenSettingsAccount() {
       </div>
 
       {/* Profile */}
-      <section style={{ marginTop: 40 }}>
+      <section style={{ marginTop: 36 }}>
         <h2 className="h-section">ข้อมูลส่วนตัว</h2>
-        <div className="card" style={{ marginTop: 16, padding: '24px 28px', display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-          <div style={{
-            width: 64, height: 64, borderRadius: '50%',
-            background: 'var(--teal-soft)', color: 'var(--teal)',
-            display: 'grid', placeItems: 'center',
-            fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600,
-          }}>{initials}</div>
-          <div style={{ flex: 1 }}>
-            <ProfileRow label="ชื่อ-นามสกุล" value={user?.name || '—'} />
-            <ProfileRow label="อีเมล"        value={user?.email || '—'} mono />
-            <ProfileRow label="บทบาท"        value={roleLabel} />
-            <ProfileRow label="รหัสผู้ใช้"   value={user?.id || '—'} mono last />
+        <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4, marginBottom: 16 }}>
+          แก้ไขชื่อ, อีเมล และเบอร์โทรของคุณ การเปลี่ยนอีเมลจะต้องเข้าสู่ระบบใหม่
+        </p>
+
+        <form onSubmit={saveProfile} className="card" style={{ padding: 28 }}>
+          <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: '50%',
+              background: 'var(--teal-soft)', color: 'var(--teal)',
+              display: 'grid', placeItems: 'center',
+              fontFamily: 'var(--font-serif)', fontSize: 24, fontWeight: 600,
+              flexShrink: 0,
+            }}>{initials}</div>
+
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {profileMsg.msg && <StatusBox tone={profileMsg.tone}>{profileMsg.msg}</StatusBox>}
+
+              <Field label="ชื่อ-นามสกุล">
+                <input
+                  type="text" value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  style={inputStyle} required
+                />
+              </Field>
+
+              <Field
+                label="อีเมล"
+                hint={profile.isBuiltin
+                  ? 'บัญชีระบบ — ไม่สามารถเปลี่ยนอีเมลได้'
+                  : 'เปลี่ยนอีเมลแล้วต้องเข้าสู่ระบบใหม่ ต้องเป็น @initialestate.com'}
+              >
+                <input
+                  type="email" value={form.email}
+                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                  style={{ ...inputStyle, ...(profile.isBuiltin ? readOnlyStyle : {}) }}
+                  readOnly={profile.isBuiltin}
+                  required
+                />
+              </Field>
+
+              <Field label="เบอร์โทรศัพท์" hint="ตัวอย่าง 0812345678 หรือ +66812345678">
+                <input
+                  type="tel" value={form.phone}
+                  onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+                  style={inputStyle}
+                  placeholder="0812345678"
+                />
+              </Field>
+
+              <ReadOnlyRow label="บทบาท" value={roleText} hint="ติดต่อผู้ดูแลระบบเพื่อเปลี่ยน" />
+              <ReadOnlyRow label="รหัสผู้ใช้" value={profile.id} mono />
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                {dirty && (
+                  <button
+                    type="button" className="btn"
+                    onClick={() => setForm({
+                      name:  profile.name  || '',
+                      email: profile.email || '',
+                      phone: profile.phone || '',
+                    })}
+                  >ยกเลิก</button>
+                )}
+                <button
+                  type="submit" className="btn primary"
+                  disabled={!dirty || savingProfile}
+                >{savingProfile ? 'กำลังบันทึก…' : 'บันทึก'}</button>
+              </div>
+            </div>
           </div>
-        </div>
+        </form>
       </section>
 
       {/* Password */}
       <section style={{ marginTop: 48 }}>
-        <h2 className="h-section">เปลี่ยนรหัสผ่าน</h2>
+        <h2 className="h-section">
+          {pwdMode === 'change' ? 'เปลี่ยนรหัสผ่าน' : 'รีเซ็ตรหัสผ่าน (ลืมรหัสปัจจุบัน)'}
+        </h2>
         <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4, marginBottom: 16 }}>
-          แนะนำให้ใช้รหัสผ่านที่มีอย่างน้อย 8 ตัวอักษร ผสมตัวอักษร ตัวเลข และสัญลักษณ์
+          {pwdMode === 'change'
+            ? 'แนะนำให้ใช้รหัสผ่านอย่างน้อย 8 ตัวอักษร ผสมตัวอักษร ตัวเลข และสัญลักษณ์'
+            : 'เพราะคุณเข้าสู่ระบบอยู่แล้ว ไม่ต้องใช้รหัสผ่านเดิมเพื่อรีเซ็ต'}
         </p>
 
-        <form onSubmit={handleChangePassword} className="card" style={{ padding: 24, maxWidth: 480 }}>
-          {status.msg && (
-            <div style={{
-              padding: '10px 14px', borderRadius: 6, marginBottom: 14, fontSize: 13,
-              background:  status.tone === 'ok' ? '#DEE7E3' : '#FDE8E4',
-              color:       status.tone === 'ok' ? '#1F4D40' : '#8B2A1A',
-              border:      `1px solid ${status.tone === 'ok' ? '#B3CCC4' : '#F5C0B4'}`,
-            }}>{status.msg}</div>
+        <form onSubmit={savePassword} className="card" style={{ padding: 28, maxWidth: 520 }}>
+          {pwdMsg.msg && <StatusBox tone={pwdMsg.tone}>{pwdMsg.msg}</StatusBox>}
+
+          {pwdMode === 'change' && (
+            <Field label="รหัสผ่านปัจจุบัน">
+              <input
+                type="password" value={oldPwd}
+                onChange={e => setOldPwd(e.target.value)}
+                style={inputStyle}
+                required
+                autoComplete="current-password"
+              />
+            </Field>
           )}
 
-          <Field label="รหัสผ่านปัจจุบัน"   value={oldPwd}  onChange={setOldPwd}  type="password" autoComplete="current-password" />
-          <Field label="รหัสผ่านใหม่"         value={newPwd}  onChange={setNewPwd}  type="password" autoComplete="new-password" />
-          <Field label="ยืนยันรหัสผ่านใหม่"  value={newPwd2} onChange={setNewPwd2} type="password" autoComplete="new-password" last />
+          <Field label="รหัสผ่านใหม่" hint="อย่างน้อย 8 ตัวอักษร">
+            <input
+              type="password" value={newPwd}
+              onChange={e => setNewPwd(e.target.value)}
+              style={inputStyle} required minLength={8}
+              autoComplete="new-password"
+            />
+          </Field>
 
-          <button type="submit" className="btn primary" disabled={busy} style={{ marginTop: 6 }}>
-            {busy ? 'กำลังบันทึก…' : 'บันทึกรหัสผ่านใหม่'}
-          </button>
+          <Field label="ยืนยันรหัสผ่านใหม่">
+            <input
+              type="password" value={newPwd2}
+              onChange={e => setNewPwd2(e.target.value)}
+              style={inputStyle} required
+              autoComplete="new-password"
+            />
+          </Field>
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, gap: 12, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setPwdMode(pwdMode === 'change' ? 'forgot' : 'change');
+                setOldPwd(''); setNewPwd(''); setNewPwd2('');
+                setPwdMsg({ msg: '', tone: '' });
+              }}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--teal)', fontSize: 13, fontWeight: 500,
+                fontFamily: 'var(--font-sans)', padding: 4,
+                textDecoration: 'underline',
+              }}
+            >
+              {pwdMode === 'change'
+                ? 'ลืมรหัสผ่านปัจจุบัน?'
+                : '← กลับไปใช้รหัสเดิม'}
+            </button>
+
+            <button
+              type="submit" className="btn primary"
+              disabled={savingPwd}
+            >
+              {savingPwd
+                ? 'กำลังบันทึก…'
+                : pwdMode === 'change' ? 'บันทึกรหัสผ่านใหม่' : 'รีเซ็ตรหัสผ่าน'}
+            </button>
+          </div>
         </form>
       </section>
 
@@ -113,41 +305,69 @@ export function ScreenSettingsAccount() {
   );
 }
 
-function ProfileRow({ label, value, mono, last }) {
-  return (
-    <div style={{
-      display: 'flex', padding: '10px 0',
-      borderBottom: last ? 'none' : '1px solid var(--rule)',
-    }}>
-      <div style={{ width: 140, fontSize: 13, color: 'var(--ink-3)' }}>{label}</div>
-      <div style={{
-        fontSize: 14, color: 'var(--ink)',
-        fontFamily: mono ? 'var(--font-mono)' : undefined,
-      }}>{value}</div>
-    </div>
-  );
-}
+/* ===== UI primitives ===== */
 
-function Field({ label, value, onChange, type='text', autoComplete, last }) {
+function Field({ label, hint, children }) {
   return (
-    <div style={{ marginBottom: last ? 18 : 14 }}>
+    <div style={{ marginBottom: 14 }}>
       <label style={{
         display: 'block', fontSize: 12, fontWeight: 500,
         color: 'var(--ink-2)', marginBottom: 6, letterSpacing: '0.02em',
       }}>{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        autoComplete={autoComplete}
-        required
-        style={{
-          width: '100%', padding: '10px 12px',
-          border: '1px solid var(--rule-2)', borderRadius: 6,
-          fontSize: 14, fontFamily: 'var(--font-sans)',
-          outline: 'none', boxSizing: 'border-box',
-        }}
-      />
+      {children}
+      {hint && (
+        <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 5 }}>{hint}</div>
+      )}
     </div>
   );
 }
+
+function ReadOnlyRow({ label, value, mono, hint }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{
+        fontSize: 12, fontWeight: 500, color: 'var(--ink-2)',
+        marginBottom: 6, letterSpacing: '0.02em',
+      }}>{label}</div>
+      <div style={{
+        padding: '10px 12px',
+        border: '1px solid var(--rule)',
+        background: 'var(--surface-2)',
+        borderRadius: 6, fontSize: 14,
+        fontFamily: mono ? 'var(--font-mono)' : 'var(--font-sans)',
+        color: 'var(--ink-2)',
+      }}>{value}</div>
+      {hint && (
+        <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 5 }}>{hint}</div>
+      )}
+    </div>
+  );
+}
+
+function StatusBox({ tone, children }) {
+  const ok = tone === 'ok';
+  return (
+    <div style={{
+      padding: '10px 14px', borderRadius: 6,
+      marginBottom: 14, fontSize: 13,
+      background: ok ? '#DEE7E3' : '#FDE8E4',
+      color:      ok ? '#1F4D40' : '#8B2A1A',
+      border:     `1px solid ${ok ? '#B3CCC4' : '#F5C0B4'}`,
+    }}>{children}</div>
+  );
+}
+
+const inputStyle = {
+  width: '100%', padding: '10px 12px',
+  border: '1px solid var(--rule-2)', borderRadius: 6,
+  fontSize: 14, fontFamily: 'var(--font-sans)',
+  outline: 'none', boxSizing: 'border-box',
+  background: 'var(--surface)',
+  color: 'var(--ink)',
+};
+
+const readOnlyStyle = {
+  background: 'var(--surface-2)',
+  color: 'var(--ink-2)',
+  cursor: 'not-allowed',
+};

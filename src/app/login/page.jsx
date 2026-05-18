@@ -122,9 +122,29 @@ export default function LoginPage() {
     setLoading(false);
   }
 
-  function handleForgot(e) {
+  async function handleForgot(e) {
     e.preventDefault();
-    setFSent(true);
+    setError('');
+    if (!fEmail.toLowerCase().endsWith('@initialestate.com')) {
+      setError('อนุญาตเฉพาะบัญชี @initialestate.com');
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/forgot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: fEmail }),
+      });
+      // Always show success to avoid email enumeration (server already
+      // returns 200 for any valid-format email)
+      if (res.ok) setFSent(true);
+      else {
+        const d = await res.json();
+        setError(d.error || ERRORS.default);
+      }
+    } catch {
+      setError(ERRORS.default);
+    }
   }
 
   // Only show full-page spinner when we're already authenticated and waiting
