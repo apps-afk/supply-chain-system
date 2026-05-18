@@ -87,37 +87,6 @@ export function InitialEstateLogo({ width = 148, style }) {
   );
 }
 
-/* ----------------------- Sidebar footer with live session ---- */
-function SideFooter({ onNav }) {
-  const { data: session } = useSession();
-  const name  = session?.user?.name  || session?.user?.email?.split('@')[0] || 'ผู้ใช้งาน';
-  const email = session?.user?.email || '';
-  const initials = name.slice(0, 2).toUpperCase();
-  return (
-    <div className="side-foot">
-      <div
-        onClick={() => onNav('account')}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, cursor: 'pointer' }}
-        title="บัญชีของฉัน"
-      >
-        <div className="side-avatar">{initials}</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="side-foot-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-          <div className="side-foot-role" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
-        </div>
-      </div>
-      <button
-        title="ออกจากระบบ"
-        onClick={(e) => { e.stopPropagation(); signOut({ callbackUrl: '/login' }); }}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', padding: 4, flexShrink: 0 }}
-      >
-        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-          <path d="M5.5 2H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3M10 10.5l3-3-3-3M13 7.5H6" />
-        </svg>
-      </button>
-    </div>
-  );
-}
 
 /* ----------------------- Sidebar ----------------------- */
 // Defined outside Sidebar so React keeps a stable component identity and
@@ -169,16 +138,13 @@ export function Sidebar({ current, onNav }) {
         <Item id="approval-roles" icon="fileCheck" label="ตำแหน่งผู้อนุมัติ" count="5" />
       </div>
 
-      {/* Bottom group: account + admin functions — pushed to bottom via marginTop:auto.
-          Once one item in a flex column has marginTop:auto, everything after it
-          stays glued below, so SideFooter sits flush against this group. */}
+      {/* Bottom group: admin functions — pushed to bottom via marginTop:auto.
+          User identity + logout moved to Topbar avatar dropdown (UserMenu). */}
       <div className="side-group" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
         <div className="side-group-label">ระบบ</div>
         <Item id="workspace" icon="settings"  label="ตั้งค่าพื้นที่ทำงาน" />
         <Item id="team"      icon="fileCheck" label="ทีมงานและสิทธิ์" />
       </div>
-
-      <SideFooter onNav={onNav} />
     </aside>
   );
 }

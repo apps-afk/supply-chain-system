@@ -1,30 +1,45 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { Sidebar, Topbar } from './lib/shell';
 
+// Dashboard is eagerly imported — it's the landing screen, no point delaying it
 import { ScreenDashboard } from './screens/screen-dashboard';
-import { ScreenRFQ, ScreenRFQConfirm } from './screens/screen-rfq';
-import { ScreenRFQCreate } from './screens/screen-rfq-create';
-import { ScreenCompareList } from './screens/screen-compare-list';
-import { ScreenCompare } from './screens/screen-compare';
-import { ScreenCompareCreatePriceDB } from './screens/screen-compare-create-pricedb';
-import { ScreenCompareCreateRFQ } from './screens/screen-compare-create-rfq';
-import { ScreenCompareUploadRef } from './screens/screen-compare-upload-ref';
-import { ScreenPriceDB, ScreenPriceDBDetail } from './screens/screen-pricedb';
-import { ScreenContractList, ScreenContract } from './screens/screen-contract';
-import { ScreenSupplierDB, ScreenSupplierDBDetail } from './screens/screen-supplierdb';
-import { ScreenSettingsProjects } from './screens/screen-settings-projects';
-import { ScreenSettingsProjectTypes } from './screens/screen-settings-project-types';
-import { ScreenSettingsSuppliers } from './screens/screen-settings-suppliers';
-import { ScreenSettingsMaterials } from './screens/screen-settings-materials';
-import { ScreenSettingsSubcontracts } from './screens/screen-settings-subcontracts';
-import { ScreenSettingsContractTypes } from './screens/screen-settings-contract-types';
-import { ScreenSettingsUnits } from './screens/screen-settings-units';
-import { ScreenSettingsUsers } from './screens/screen-settings-users';
-import { ScreenSettingsApprovalRoles } from './screens/screen-settings-approval-roles';
-import { ScreenSettingsAccount } from './screens/screen-settings-account';
-import { ScreenSettingsTeam } from './screens/screen-settings-team';
-import { ScreenSettingsWorkspace } from './screens/screen-settings-workspace';
+
+// Everything else is code-split: each chunk loads only when the user navigates
+// to that screen. Webpack needs literal paths in import() to emit one chunk
+// per file — see https://webpack.js.org/api/module-methods/#dynamic-expressions
+const LoadingPage = () => (
+  <div className="page" style={{ padding: 60, textAlign: 'center', color: 'var(--ink-3)' }}>
+    กำลังโหลด…
+  </div>
+);
+const ScreenRFQ                    = dynamic(() => import('./screens/screen-rfq').then(m => ({ default: m.ScreenRFQ })), { loading: LoadingPage });
+const ScreenRFQConfirm             = dynamic(() => import('./screens/screen-rfq').then(m => ({ default: m.ScreenRFQConfirm })), { loading: LoadingPage });
+const ScreenRFQCreate              = dynamic(() => import('./screens/screen-rfq-create').then(m => ({ default: m.ScreenRFQCreate })), { loading: LoadingPage });
+const ScreenCompareList            = dynamic(() => import('./screens/screen-compare-list').then(m => ({ default: m.ScreenCompareList })), { loading: LoadingPage });
+const ScreenCompare                = dynamic(() => import('./screens/screen-compare').then(m => ({ default: m.ScreenCompare })), { loading: LoadingPage });
+const ScreenCompareCreatePriceDB   = dynamic(() => import('./screens/screen-compare-create-pricedb').then(m => ({ default: m.ScreenCompareCreatePriceDB })), { loading: LoadingPage });
+const ScreenCompareCreateRFQ       = dynamic(() => import('./screens/screen-compare-create-rfq').then(m => ({ default: m.ScreenCompareCreateRFQ })), { loading: LoadingPage });
+const ScreenCompareUploadRef       = dynamic(() => import('./screens/screen-compare-upload-ref').then(m => ({ default: m.ScreenCompareUploadRef })), { loading: LoadingPage });
+const ScreenPriceDB                = dynamic(() => import('./screens/screen-pricedb').then(m => ({ default: m.ScreenPriceDB })), { loading: LoadingPage });
+const ScreenPriceDBDetail          = dynamic(() => import('./screens/screen-pricedb').then(m => ({ default: m.ScreenPriceDBDetail })), { loading: LoadingPage });
+const ScreenContractList           = dynamic(() => import('./screens/screen-contract').then(m => ({ default: m.ScreenContractList })), { loading: LoadingPage });
+const ScreenContract               = dynamic(() => import('./screens/screen-contract').then(m => ({ default: m.ScreenContract })), { loading: LoadingPage });
+const ScreenSupplierDB             = dynamic(() => import('./screens/screen-supplierdb').then(m => ({ default: m.ScreenSupplierDB })), { loading: LoadingPage });
+const ScreenSupplierDBDetail       = dynamic(() => import('./screens/screen-supplierdb').then(m => ({ default: m.ScreenSupplierDBDetail })), { loading: LoadingPage });
+const ScreenSettingsProjects       = dynamic(() => import('./screens/screen-settings-projects').then(m => ({ default: m.ScreenSettingsProjects })), { loading: LoadingPage });
+const ScreenSettingsProjectTypes   = dynamic(() => import('./screens/screen-settings-project-types').then(m => ({ default: m.ScreenSettingsProjectTypes })), { loading: LoadingPage });
+const ScreenSettingsSuppliers      = dynamic(() => import('./screens/screen-settings-suppliers').then(m => ({ default: m.ScreenSettingsSuppliers })), { loading: LoadingPage });
+const ScreenSettingsMaterials      = dynamic(() => import('./screens/screen-settings-materials').then(m => ({ default: m.ScreenSettingsMaterials })), { loading: LoadingPage });
+const ScreenSettingsSubcontracts   = dynamic(() => import('./screens/screen-settings-subcontracts').then(m => ({ default: m.ScreenSettingsSubcontracts })), { loading: LoadingPage });
+const ScreenSettingsContractTypes  = dynamic(() => import('./screens/screen-settings-contract-types').then(m => ({ default: m.ScreenSettingsContractTypes })), { loading: LoadingPage });
+const ScreenSettingsUnits          = dynamic(() => import('./screens/screen-settings-units').then(m => ({ default: m.ScreenSettingsUnits })), { loading: LoadingPage });
+const ScreenSettingsUsers          = dynamic(() => import('./screens/screen-settings-users').then(m => ({ default: m.ScreenSettingsUsers })), { loading: LoadingPage });
+const ScreenSettingsApprovalRoles  = dynamic(() => import('./screens/screen-settings-approval-roles').then(m => ({ default: m.ScreenSettingsApprovalRoles })), { loading: LoadingPage });
+const ScreenSettingsAccount        = dynamic(() => import('./screens/screen-settings-account').then(m => ({ default: m.ScreenSettingsAccount })), { loading: LoadingPage });
+const ScreenSettingsTeam           = dynamic(() => import('./screens/screen-settings-team').then(m => ({ default: m.ScreenSettingsTeam })), { loading: LoadingPage });
+const ScreenSettingsWorkspace      = dynamic(() => import('./screens/screen-settings-workspace').then(m => ({ default: m.ScreenSettingsWorkspace })), { loading: LoadingPage });
 
 const CRUMBS = {
   'dashboard':              ['ภาพรวม'],

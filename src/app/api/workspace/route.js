@@ -24,6 +24,33 @@ export async function PATCH(request) {
   }
   try {
     const patch = await request.json();
+
+    // Validate numeric fields so admins can't accidentally (or maliciously)
+    // poison the config with negative / null / absurd values.
+    const checkInt = (val, min, max, name) => {
+      const n = Number(val);
+      if (!Number.isFinite(n) || !Number.isInteger(n) || n < min || n > max) {
+        throw new Error(`${name} ต้องเป็นจำนวนเต็มระหว่าง ${min} ถึง ${max}`);
+      }
+      return n;
+    };
+    if (patch.security) {
+      if (patch.security.maxBulkExport !== undefined)
+        patch.security.maxBulkExport = checkInt(patch.security.maxBulkExport, 1, 100000, 'จำนวนสูงสุดของ bulk export');
+      if (patch.security.auditLogRetentionDays !== undefined)
+        patch.security.auditLogRetentionDays = checkInt(patch.security.auditLogRetentionDays, 1, 3650, 'ระยะเวลาเก็บ audit log (วัน)');
+      if (patch.security.sessionTimeoutHours !== undefined) {
+        const n = Number(patch.security.sessionTimeoutHours);
+        if (!Number.isFinite(n) || n <= 0 || n > 720)
+          throw new Error('Session timeout ต้องอยู่ระหว่าง 0–720 ชม.');
+        patch.security.sessionTimeoutHours = n;
+      }
+    }
+    if (patch.aiUsage) {
+      if (patch.aiUsage.monthlyTokenBudget !== undefined)
+        patch.aiUsage.monthlyTokenBudget = checkInt(patch.aiUsage.monthlyTokenBudget, 0, 10000000000, 'งบ token รายเดือน');
+    }
+
     const updated = updateSettings(patch);
     appendAudit({
       actor: session.user.email,

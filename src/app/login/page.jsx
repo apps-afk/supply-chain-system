@@ -42,6 +42,7 @@ export default function LoginPage() {
   const { status } = useSession();
 
   const [mode, setMode]       = useState('login');
+  const [showDemo, setShowDemo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState(false);
@@ -202,11 +203,28 @@ export default function LoginPage() {
           <InitialEstateLogo width={188} />
         </div>
 
-        {/* Demo hint */}
-        <div style={S.demoBox}>
-          <span style={{ opacity: 0.6 }}>🔑</span>
-          <span>ทดลองใช้: <strong>admin@initialestate.com</strong> / <strong>Admin1234!</strong></span>
-        </div>
+        {/* Demo hint — collapsed by default to avoid showing default creds prominently */}
+        {showDemo ? (
+          <div style={S.demoBox}>
+            <span style={{ opacity: 0.6 }}>🔑</span>
+            <span>ทดลองใช้: <strong>admin@initialestate.com</strong> / <strong>Admin1234!</strong></span>
+            <button
+              onClick={() => setShowDemo(false)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', fontSize: 11, padding: 0, marginLeft: 4 }}
+              title="ซ่อน"
+            >×</button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowDemo(true)}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--ink-4)', fontSize: 11, textAlign: 'center',
+              width: '100%', padding: '4px 0', marginBottom: 12,
+              fontFamily: 'var(--font-sans)',
+            }}
+          >ดูบัญชีทดลอง</button>
+        )}
 
         {/* Tabs */}
         <div style={S.tabs}>
