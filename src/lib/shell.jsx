@@ -167,6 +167,7 @@ export function Sidebar({ current, onNav }) {
         <Item id="contract-types" icon="fileCheck" label="ประเภทสัญญา" count="8" />
         <Item id="units"          icon="ruler"     label="หน่วยนับ" count="24" />
         <Item id="approval-roles" icon="fileCheck" label="ตำแหน่งผู้อนุมัติ" count="5" />
+        <Item id="workspace"      icon="settings"  label="ตั้งค่าพื้นที่ทำงาน" />
       </div>
 
       {/* Bottom group: account + admin functions — pushed to bottom via marginTop:auto.
