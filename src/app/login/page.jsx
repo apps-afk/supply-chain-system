@@ -177,7 +177,7 @@ export default function LoginPage() {
         {/* Demo hint */}
         <div style={S.demoBox}>
           <span style={{ opacity: 0.6 }}>🔑</span>
-          <span>Demo: <strong>admin@initialestate.com</strong> / <strong>Admin1234!</strong></span>
+          <span>ทดลองใช้: <strong>admin@initialestate.com</strong> / <strong>Admin1234!</strong></span>
         </div>
 
         {/* Tabs */}
@@ -196,7 +196,7 @@ export default function LoginPage() {
             {googleEnabled && (
               <>
                 <button style={{ ...S.googleBtn, opacity: loading ? 0.7 : 1 }} onClick={handleGoogle} disabled={loading}>
-                  <GoogleIcon /><span>Continue with Google</span>
+                  <GoogleIcon /><span>เข้าสู่ระบบด้วย Google</span>
                 </button>
                 <div style={S.divider}>
                   <span style={S.divLine} /><span style={S.divText}>หรือเข้าด้วยอีเมล</span><span style={S.divLine} />
@@ -231,7 +231,7 @@ export default function LoginPage() {
             {googleEnabled && (
               <>
                 <button style={{ ...S.googleBtn, opacity: loading ? 0.7 : 1 }} onClick={handleGoogle} disabled={loading}>
-                  <GoogleIcon /><span>Sign up with Google</span>
+                  <GoogleIcon /><span>สมัครสมาชิกด้วย Google</span>
                 </button>
                 <div style={S.divider}>
                   <span style={S.divLine} /><span style={S.divText}>หรือตั้งรหัสผ่าน</span><span style={S.divLine} />
@@ -274,10 +274,10 @@ export default function LoginPage() {
           </div>
         )}
 
-        <div style={S.footer}>Initial Estate Supply Chain System · เวอร์ชัน 1.0</div>
+        <div style={S.footer}>ระบบจัดซื้อ ซัพพลายเชน · เวอร์ชัน 1.0</div>
       </div>
 
-      <div style={S.copyright}>© 2025 Initial Estate Co.,Ltd. · ระบบสำหรับพนักงานภายในเท่านั้น</div>
+      <div style={S.copyright}>© 2568 บริษัท อินิเชียล เอสเตท จำกัด · ระบบสำหรับพนักงานภายในเท่านั้น</div>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { Providers } from '../providers';
 import { authOptions } from '../lib/auth';
 
-export const metadata = { title: 'Initial Estate — Supply Chain System' };
+export const metadata = { title: 'Initial Estate — ระบบจัดซื้อ ซัพพลายเชน' };
 
 export default async function RootLayout({ children }) {
   // Pre-fetch the session on the server so SessionProvider doesn't need

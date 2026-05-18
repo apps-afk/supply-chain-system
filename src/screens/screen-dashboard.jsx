@@ -13,17 +13,17 @@ export function ScreenDashboard({ go }) {
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
           <InitialEstateLogo width={120} style={{ opacity: 0.82 }} />
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn">{Icons.download} Export</button>
-            <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้าง RFQ</button>
+            <button className="btn">{Icons.download} ส่งออกข้อมูล</button>
+            <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้างใบขอราคา</button>
           </div>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0, borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)', padding: '28px 0' }}>
         {[
-          { label: 'Price points ทั้งหมด', value: '1,284', unit: 'รายการ', sub: '+38 สัปดาห์นี้' },
-          { label: 'RFQ ที่กำลังดำเนินการ', value: '12', unit: '/ 24 ใบ', sub: '6 ใบรอ Supplier ตอบกลับ' },
-          { label: 'สัญญา Active', value: '47', unit: 'ฉบับ', sub: 'มูลค่ารวม ฿284.6M' },
+          { label: 'ราคาในระบบทั้งหมด', value: '1,284', unit: 'รายการ', sub: '+38 รายการ ในสัปดาห์นี้' },
+          { label: 'ใบขอราคาที่กำลังดำเนินการ', value: '12', unit: '/ 24 ใบ', sub: '6 ใบรอผู้ขายตอบกลับ' },
+          { label: 'สัญญาที่ใช้งานอยู่', value: '47', unit: 'ฉบับ', sub: 'มูลค่ารวม ฿284.6 ล้าน' },
           { label: 'เงินประกันคงเหลือ', value: '14.2', unit: 'ล้านบาท', sub: 'จะคืน 8 ฉบับใน 90 วัน' },
         ].map((s, i) => (
           <div key={i} style={{ paddingLeft: i === 0 ? 0 : 32, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
@@ -40,8 +40,8 @@ export function ScreenDashboard({ go }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <AttentionItem tag="สัญญาใกล้หมดอายุ" tone="warn" title="CT-2024-018 · งานติดตั้งระบบไฟฟ้า บางนา เฟส 2" meta="หจก. รุ่งเรืองไฟฟ้า · หมดอายุ 14 มิ.ย. 2568" right="28 วัน" onClick={() => go('contract-detail')} />
           <AttentionItem tag="ราคาผิดปกติ" tone="err" title="เหล็กเส้น DB12 สูงขึ้น +18.4% จากเดือนก่อน" meta="ดึงจาก RFQ-2025-019 · บริษัท เอเชียสตีล จำกัด" right="ตรวจสอบ" onClick={() => go('pricedb-detail')} />
-          <AttentionItem tag="RFQ รอ Upload" tone="info" title="RFQ-2025-021 · งานก่อสร้างฐานราก ลาดพร้าว" meta="Supplier ส่งใบเสนอราคาแล้ว 2 วัน — รอบันทึก Price DB" right="Upload" onClick={() => go('rfq-confirm')} />
-          <AttentionItem tag="ราคาไม่ได้อัพเดท" tone="info" title="กระเบื้องหลังคา CPAC โมเนียร์" meta="อัพเดทล่าสุด 9 ธ.ค. 2567 — เกิน 6 เดือน" right="ขอ Quote" onClick={() => go('rfq-create')} />
+          <AttentionItem tag="ใบขอราคารออัปโหลด" tone="info" title="RFQ-2025-021 · งานก่อสร้างฐานราก ลาดพร้าว" meta="ผู้ขายส่งใบเสนอราคาแล้ว 2 วัน — รอบันทึกเข้าระบบ" right="อัปโหลด" onClick={() => go('rfq-confirm')} />
+          <AttentionItem tag="ราคาไม่ได้อัปเดต" tone="info" title="กระเบื้องหลังคา CPAC โมเนียร์" meta="อัปเดตล่าสุด 9 ธ.ค. 2567 — เกิน 6 เดือน" right="ขอใบเสนอราคา" onClick={() => go('rfq-create')} />
         </div>
       </section>
 
@@ -51,7 +51,7 @@ export function ScreenDashboard({ go }) {
             <h2 className="h-section">การเคลื่อนไหวของราคา</h2>
             <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>วัสดุที่ราคาเปลี่ยนแปลงมากที่สุดในรอบ 30 วัน</p>
           </div>
-          <button className="btn ghost" onClick={() => go('pricedb')}>ดู Price Database ทั้งหมด {Icons.chevronR}</button>
+          <button className="btn ghost" onClick={() => go('pricedb')}>ดูฐานข้อมูลราคาทั้งหมด {Icons.chevronR}</button>
         </div>
         <div className="card" style={{ padding: 0 }}>
           <table className="tbl">
@@ -59,10 +59,10 @@ export function ScreenDashboard({ go }) {
               <tr>
                 <th style={{ width: '32%' }}>วัสดุ</th>
                 <th>หมวด</th>
-                <th>Supplier ราคาต่ำสุด</th>
+                <th>ผู้ขายราคาต่ำสุด</th>
                 <th className="num-col">ราคาปัจจุบัน</th>
-                <th className="num-col">Δ MoM</th>
-                <th className="num-col">Δ YoY</th>
+                <th className="num-col">เทียบเดือน</th>
+                <th className="num-col">เทียบปี</th>
                 <th>แนวโน้ม 6 เดือน</th>
               </tr>
             </thead>
@@ -80,16 +80,16 @@ export function ScreenDashboard({ go }) {
       <section style={{ marginTop: 64, display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 24 }}>
         <div className="card" style={{ padding: 0 }}>
           <div style={{ padding: '20px 24px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderBottom: '1px solid var(--rule)' }}>
-            <h3 className="h-card">RFQ ล่าสุด</h3>
+            <h3 className="h-card">ใบขอราคาล่าสุด</h3>
             <button className="btn ghost sm" onClick={() => go('rfq')}>ดูทั้งหมด {Icons.chevronR}</button>
           </div>
           <table className="tbl">
             <tbody>
               {[
                 { no: 'RFQ-2025-024', title: 'งานปูกระเบื้องชั้น 2', sup: 'หจก. กระเบื้องช่าง', kind: 'default', state: 'sent', stateLabel: 'ส่งแล้ว', date: '17 พ.ค.' },
-                { no: 'RFQ-2025-023', title: 'เหล็กรูปพรรณ H-Beam', sup: 'เอเชียสตีล', kind: 'aw', state: 'recv', stateLabel: 'รับ Quote', date: '16 พ.ค.' },
+                { no: 'RFQ-2025-023', title: 'เหล็กรูปพรรณ H-Beam', sup: 'เอเชียสตีล', kind: 'aw', state: 'recv', stateLabel: 'รับใบเสนอราคา', date: '16 พ.ค.' },
                 { no: 'RFQ-2025-022', title: 'สุขภัณฑ์ COTTO', sup: 'COTTO Wholesale', kind: 'default', state: 'closed', stateLabel: 'ปิดงาน', date: '15 พ.ค.' },
-                { no: 'RFQ-2025-021', title: 'งานฐานราก ลาดพร้าว', sup: 'พี.ที. คอนสตรัคชั่น', kind: 'default', state: 'recv', stateLabel: 'รับ Quote', date: '14 พ.ค.' },
+                { no: 'RFQ-2025-021', title: 'งานฐานราก ลาดพร้าว', sup: 'พี.ที. คอนสตรัคชั่น', kind: 'default', state: 'recv', stateLabel: 'รับใบเสนอราคา', date: '14 พ.ค.' },
               ].map((r, i) => (
                 <tr key={i}>
                   <td style={{ width: '24%' }}><div className="font-mono" style={{ fontSize: 12, color: 'var(--ink-2)' }}>{r.no}</div></td>
@@ -106,16 +106,16 @@ export function ScreenDashboard({ go }) {
         <div className="card">
           <h3 className="h-card" style={{ marginBottom: 16 }}>ความเร็วในการจัดซื้อ</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <VelocityRow label="เวลาเฉลี่ย Supplier ตอบ RFQ" value="3.2 วัน" bar={0.42} hint="เป้า: 5 วัน" />
-            <VelocityRow label="RFQ ที่ปิดภายใน 14 วัน" value="78%" bar={0.78} hint="ดีขึ้น +6% MoM" />
-            <VelocityRow label="ราคาเข้า Price DB อัตโนมัติ" value="92%" bar={0.92} hint="จาก RFQ ที่ปิดงาน" />
-            <VelocityRow label="สัญญาส่งให้ AI ก่อนกฎหมาย" value="64%" bar={0.64} hint="เป้า: 90%" />
+            <VelocityRow label="เวลาเฉลี่ยที่ผู้ขายตอบใบขอราคา" value="3.2 วัน" bar={0.42} hint="เป้าหมาย: 5 วัน" />
+            <VelocityRow label="ใบขอราคาที่ปิดภายใน 14 วัน" value="78%" bar={0.78} hint="ดีขึ้น +6% เทียบเดือนก่อน" />
+            <VelocityRow label="ราคาเข้าฐานข้อมูลอัตโนมัติ" value="92%" bar={0.92} hint="จากใบขอราคาที่ปิดงาน" />
+            <VelocityRow label="สัญญาส่งให้ AI ก่อนฝ่ายกฎหมาย" value="64%" bar={0.64} hint="เป้าหมาย: 90%" />
           </div>
           <hr className="hr" style={{ margin: '20px 0' }} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <div className="eyebrow" style={{ marginBottom: 4 }}>AI Forecast — ไตรมาสหน้า</div>
-              <div style={{ fontSize: 13, color: 'var(--ink-2)' }}>คาดราคาเหล็กยังขาขึ้น 8–12% — พิจารณาล็อกราคา</div>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>AI พยากรณ์ — ไตรมาสหน้า</div>
+              <div style={{ fontSize: 13, color: 'var(--ink-2)' }}>คาดราคาเหล็กยังขาขึ้น 8–12% — แนะนำล็อกราคาไว้ก่อน</div>
             </div>
             <Chip kind="ai">AI</Chip>
           </div>

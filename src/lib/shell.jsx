@@ -135,7 +135,7 @@ export function Sidebar({ current, onNav }) {
     <aside className="side">
       <div className="side-brand">
         <InitialEstateLogo width={148} />
-        <div className="side-brand-sub" style={{ paddingTop: 2 }}>Supply Chain System</div>
+        <div className="side-brand-sub" style={{ paddingTop: 2 }}>ระบบจัดซื้อ ซัพพลายเชน</div>
       </div>
 
       <div className="side-group">
@@ -143,21 +143,21 @@ export function Sidebar({ current, onNav }) {
       </div>
 
       <div className="side-group">
-        <div className="side-group-label">Operation</div>
-        <Item id="rfq"      icon="rfq"      label="ใบขอเสนอราคา" count="24" />
+        <div className="side-group-label">งานหลัก</div>
+        <Item id="rfq"      icon="rfq"      label="ใบขอเสนอราคา (RFQ)" count="24" />
         <Item id="compare"  icon="compare"  label="เปรียบเทียบราคา" />
-        <Item id="pricedb"  icon="pricedb"  label="Price Database" count="1,284" />
-        <Item id="supplierdb" icon="truck"  label="Supplier Database" count="12" />
+        <Item id="pricedb"  icon="pricedb"  label="ฐานข้อมูลราคา" count="1,284" />
+        <Item id="supplierdb" icon="truck"  label="ฐานข้อมูลผู้ขาย" count="12" />
         <Item id="contract" icon="contract" label="สัญญา" count="47" />
       </div>
 
       <div className="side-group">
-        <div className="side-group-label">Settings · Master Data</div>
+        <div className="side-group-label">ตั้งค่า · ข้อมูลหลัก</div>
         <Item id="projects"       icon="folder"    label="โครงการ" count="8" />
         <Item id="project-types"  icon="folder"    label="ประเภทโครงการ" count="6" />
-        <Item id="suppliers"      icon="truck"     label="Supplier" count="13" />
-        <Item id="materials"      icon="box"       label="วัสดุ (Material)" count="7" />
-        <Item id="subcontracts"   icon="hammer"    label="งานจ้าง (SubContract)" count="7" />
+        <Item id="suppliers"      icon="truck"     label="ผู้ขาย/ผู้รับเหมา" count="13" />
+        <Item id="materials"      icon="box"       label="วัสดุก่อสร้าง" count="7" />
+        <Item id="subcontracts"   icon="hammer"    label="งานจ้างเหมา" count="7" />
         <Item id="contract-types" icon="fileCheck" label="ประเภทสัญญา" count="8" />
         <Item id="units"          icon="ruler"     label="หน่วยนับ" count="24" />
         <Item id="approval-roles" icon="fileCheck" label="ตำแหน่งผู้อนุมัติ" count="5" />
@@ -184,7 +184,7 @@ export function Topbar({ crumbs }) {
       <div className="topbar-right">
         <div className="search">
           {Icons.search}
-          <input placeholder="ค้นหา RFQ, วัสดุ, Supplier…" />
+          <input placeholder="ค้นหา RFQ, วัสดุ, ผู้ขาย…" />
           <span className="kbd">⌘K</span>
         </div>
         <button className="btn ghost" title="แจ้งเตือน" style={{ padding: 8 }}>
