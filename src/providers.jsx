@@ -5,7 +5,8 @@ export function Providers({ children, session }) {
   return (
     <SessionProvider
       session={session}
-      refetchOnWindowFocus={false}
+      // Default behaviour: refetch on window focus so sessions sync across tabs
+      // and recover from any client/server mismatch after sign-in.
       refetchInterval={0}
     >
       {children}

@@ -7,8 +7,14 @@ export const metadata = { title: 'Initial Estate — ระบบจัดซื
 
 export default async function RootLayout({ children }) {
   // Pre-fetch the session on the server so SessionProvider doesn't need
-  // to hit /api/auth/session on initial mount — saves ~500ms on cold starts
-  const session = await getServerSession(authOptions);
+  // to hit /api/auth/session on initial mount. Guard against any auth-config
+  // failure so a misconfigured environment never blocks the entire app.
+  let session = null;
+  try {
+    session = await getServerSession(authOptions);
+  } catch {
+    session = null;
+  }
 
   return (
     <html lang="th">

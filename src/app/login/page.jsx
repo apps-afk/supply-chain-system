@@ -31,10 +31,12 @@ const GoogleIcon = () => (
 );
 
 const ERRORS = {
-  AccessDenied:  'อนุญาตเฉพาะบัญชี @initialestate.com เท่านั้น',
-  OAuthSignin:   'ไม่สามารถเชื่อมต่อ Google ได้ กรุณาลองใหม่',
-  OAuthCallback: 'เกิดข้อผิดพลาดจาก Google กรุณาลองใหม่',
-  default:       'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง',
+  AccessDenied:     'อนุญาตเฉพาะบัญชี @initialestate.com เท่านั้น',
+  OAuthSignin:      'ไม่สามารถเชื่อมต่อ Google ได้ กรุณาลองใหม่',
+  OAuthCallback:    'เกิดข้อผิดพลาดจาก Google กรุณาลองใหม่',
+  CredentialsSignin:'อีเมลหรือรหัสผ่านไม่ถูกต้อง',
+  Configuration:    'ระบบยังไม่ได้ตั้งค่า — ติดต่อผู้ดูแลระบบ',
+  default:          'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง',
 };
 
 export default function LoginPage() {
@@ -92,7 +94,10 @@ export default function LoginPage() {
       setError(res.error.startsWith('อีเมล') ? res.error : (ERRORS[res.error] || ERRORS.default));
       setLoading(false);
     } else {
-      router.replace('/');
+      // Full page reload so SessionProvider re-initializes with the new cookie.
+      // router.replace would soft-navigate, leaving the old null session in memory
+      // and the user stuck on a spinner forever.
+      window.location.href = '/';
     }
   }
 
@@ -122,7 +127,10 @@ export default function LoginPage() {
     setFSent(true);
   }
 
-  if (status === 'loading' || status === 'authenticated') {
+  // Only show full-page spinner when we're already authenticated and waiting
+  // for the redirect to fire. Showing it during 'loading' state can trap users
+  // forever if the session check is slow.
+  if (status === 'authenticated') {
     return <div style={S.page}><div style={S.spinner} /></div>;
   }
 
