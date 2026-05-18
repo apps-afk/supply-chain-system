@@ -1,6 +1,7 @@
 import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { validateUser } from './users';
+import { NEXTAUTH_SECRET } from './auth-config';
 
 const DOMAIN = 'initialestate.com';
 
@@ -45,7 +46,6 @@ export const authOptions = {
     },
   },
   pages: { signIn: '/login', error: '/login' },
-  // Fallback so the app works before NEXTAUTH_SECRET is set in Vercel.
-  // In production, set NEXTAUTH_SECRET to a random 32+ char string.
-  secret: process.env.NEXTAUTH_SECRET || 'ie-sc-fallback-secret-set-NEXTAUTH_SECRET-in-vercel',
+  // Use the SAME secret as the middleware — see lib/auth-config.js
+  secret: NEXTAUTH_SECRET,
 };
