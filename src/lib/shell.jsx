@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useId } from 'react';
+import { useSession, signOut } from 'next-auth/react';
 
 /* ----------------------- Icons (inline SVG) ----------------------- */
 const Icon = ({ d, size = 16, fill }) => (
@@ -86,6 +87,32 @@ export function InitialEstateLogo({ width = 148, style }) {
   );
 }
 
+/* ----------------------- Sidebar footer with live session ---- */
+function SideFooter() {
+  const { data: session } = useSession();
+  const name  = session?.user?.name  || session?.user?.email?.split('@')[0] || 'ผู้ใช้งาน';
+  const email = session?.user?.email || '';
+  const initials = name.slice(0, 2).toUpperCase();
+  return (
+    <div className="side-foot">
+      <div className="side-avatar">{initials}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="side-foot-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+        <div className="side-foot-role" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
+      </div>
+      <button
+        title="ออกจากระบบ"
+        onClick={() => signOut({ callbackUrl: '/login' })}
+        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', padding: 4, flexShrink: 0 }}
+      >
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+          <path d="M5.5 2H2.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3M10 10.5l3-3-3-3M13 7.5H6" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 /* ----------------------- Sidebar ----------------------- */
 export function Sidebar({ current, onNav }) {
   const Item = ({ id, icon, label, count }) => (
@@ -131,13 +158,7 @@ export function Sidebar({ current, onNav }) {
         <Item id="users"          icon="users"     label="ผู้ใช้งาน" count="10" />
       </div>
 
-      <div className="side-foot">
-        <div className="side-avatar">นว</div>
-        <div>
-          <div className="side-foot-name">นวพร ศรีวัฒน์</div>
-          <div className="side-foot-role">Procurement Officer</div>
-        </div>
-      </div>
+      <SideFooter />
     </aside>
   );
 }
