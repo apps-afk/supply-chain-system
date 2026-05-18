@@ -15,20 +15,28 @@ jobs:
       - name: Pull Vercel project config
         run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Add domain via Vercel CLI
+      - name: Add domain and save output
         run: |
-          echo "=== Linking domain to project ==="
-          vercel domains add supplychain.initialestate.com --token=${{ secrets.VERCEL_TOKEN }} 2>&1 || true
+          OUT=".vercel/domain-result.txt"
+          mkdir -p .vercel
 
-          echo ""
-          echo "=== Assigning domain to this project ==="
-          vercel alias set --domain supplychain.initialestate.com --token=${{ secrets.VERCEL_TOKEN }} 2>&1 || true
+          echo "=== vercel domains add ===" | tee $OUT
+          vercel domains add supplychain.initialestate.com \
+            --token=${{ secrets.VERCEL_TOKEN }} 2>&1 | tee -a $OUT || true
 
-          echo ""
-          echo "=== Current project domains ==="
+          echo "" | tee -a $OUT
+          echo "=== project domains via API ===" | tee -a $OUT
           PROJECT_ID=$(python3 -c "import json; d=json.load(open('.vercel/project.json')); print(d['projectId'])")
-          ORG_ID=$(python3 -c "import json; d=json.load(open('.vercel/project.json')); print(d['orgId'])")
-          echo "Project: $PROJECT_ID  Org: $ORG_ID"
-
+          echo "Project ID: $PROJECT_ID" | tee -a $OUT
           curl -sS "https://api.vercel.com/v10/projects/$PROJECT_ID/domains" \
-            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" | python3 -m json.tool 2>/dev/null || true
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" 2>&1 | tee -a $OUT
+
+      - name: Commit result back to repo
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add .vercel/domain-result.txt
+          git commit -m "chore: save domain registration result [skip ci]" || echo "Nothing to commit"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
