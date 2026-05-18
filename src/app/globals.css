@@ -197,13 +197,14 @@ input, textarea, select { font-family: inherit; }
 }
 
 .side-foot {
-  margin-top: auto;
-  padding: 12px 12px 4px;
+  /* No margin-top: auto here — the personal/admin group above already
+     pushes itself to the bottom via marginTop:auto. If both had auto,
+     flexbox would split the gap between them. */
+  padding: 14px 12px 4px;
   display: flex;
   align-items: center;
   gap: 10px;
   border-top: 1px solid var(--rule);
-  padding-top: 14px;
 }
 .side-avatar {
   width: 30px; height: 30px;

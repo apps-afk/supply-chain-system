@@ -146,7 +146,6 @@ export function Sidebar({ current, onNav }) {
 
       <div className="side-group">
         <Item id="dashboard" icon="dashboard" label="ภาพรวม" />
-        <Item id="account"   icon="users"     label="บัญชีของฉัน" />
       </div>
 
       <div className="side-group">
@@ -168,7 +167,15 @@ export function Sidebar({ current, onNav }) {
         <Item id="contract-types" icon="fileCheck" label="ประเภทสัญญา" count="8" />
         <Item id="units"          icon="ruler"     label="หน่วยนับ" count="24" />
         <Item id="approval-roles" icon="fileCheck" label="ตำแหน่งผู้อนุมัติ" count="5" />
-        <Item id="team"           icon="users"     label="ทีมงานและสิทธิ์" />
+      </div>
+
+      {/* Bottom group: account + admin functions — pushed to bottom via marginTop:auto.
+          Once one item in a flex column has marginTop:auto, everything after it
+          stays glued below, so SideFooter sits flush against this group. */}
+      <div className="side-group" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
+        <div className="side-group-label">ส่วนตัว · ระบบ</div>
+        <Item id="account" icon="users"     label="บัญชีของฉัน" />
+        <Item id="team"    icon="fileCheck" label="ทีมงานและสิทธิ์" />
       </div>
 
       <SideFooter onNav={onNav} />
