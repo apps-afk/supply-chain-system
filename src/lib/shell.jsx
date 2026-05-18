@@ -88,21 +88,27 @@ export function InitialEstateLogo({ width = 148, style }) {
 }
 
 /* ----------------------- Sidebar footer with live session ---- */
-function SideFooter() {
+function SideFooter({ onNav }) {
   const { data: session } = useSession();
   const name  = session?.user?.name  || session?.user?.email?.split('@')[0] || 'ผู้ใช้งาน';
   const email = session?.user?.email || '';
   const initials = name.slice(0, 2).toUpperCase();
   return (
     <div className="side-foot">
-      <div className="side-avatar">{initials}</div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="side-foot-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
-        <div className="side-foot-role" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
+      <div
+        onClick={() => onNav('account')}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, cursor: 'pointer' }}
+        title="บัญชีของฉัน"
+      >
+        <div className="side-avatar">{initials}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="side-foot-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+          <div className="side-foot-role" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</div>
+        </div>
       </div>
       <button
         title="ออกจากระบบ"
-        onClick={() => signOut({ callbackUrl: '/login' })}
+        onClick={(e) => { e.stopPropagation(); signOut({ callbackUrl: '/login' }); }}
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', padding: 4, flexShrink: 0 }}
       >
         <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
@@ -140,6 +146,7 @@ export function Sidebar({ current, onNav }) {
 
       <div className="side-group">
         <Item id="dashboard" icon="dashboard" label="ภาพรวม" />
+        <Item id="account"   icon="users"     label="บัญชีของฉัน" />
       </div>
 
       <div className="side-group">
@@ -164,7 +171,7 @@ export function Sidebar({ current, onNav }) {
         <Item id="users"          icon="users"     label="ผู้ใช้งาน" count="10" />
       </div>
 
-      <SideFooter />
+      <SideFooter onNav={onNav} />
     </aside>
   );
 }

@@ -17,8 +17,17 @@ const BUILTIN = [
   },
 ];
 
-// In-memory registered users (survives the Node process lifetime on Vercel)
-const registered = [];
+// In-memory registered users — attached to globalThis so all API routes share
+// the same array. Without this, Next.js dev mode (and production with multiple
+// route bundles) gives each route its own users.js instance and registered
+// users disappear when you call a different endpoint.
+//
+// PRODUCTION NOTE: this still resets when the Vercel serverless function goes
+// cold (~5 min idle). For real persistence, wire this up to Vercel KV / Postgres.
+if (!globalThis.__ieRegisteredUsers) {
+  globalThis.__ieRegisteredUsers = [];
+}
+const registered = globalThis.__ieRegisteredUsers;
 
 export async function validateUser(email, password) {
   const all = [...BUILTIN, ...registered];
@@ -41,4 +50,24 @@ export async function registerUser(name, email, password) {
   };
   registered.push(newUser);
   return { id: newUser.id, email: newUser.email, name: newUser.name };
+}
+
+export async function updatePassword(email, oldPassword, newPassword) {
+  // Registered users: update salt + hash in place
+  const u = registered.find(r => r.email.toLowerCase() === email.toLowerCase());
+  if (u) {
+    if (hash(u.salt, oldPassword) !== u.hash) {
+      throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+    }
+    u.salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    u.hash = hash(u.salt, newPassword);
+    return true;
+  }
+  // BUILTIN admin password is derived from ADMIN_PASSWORD env var, so we
+  // can't persist a change here at runtime.
+  const builtin = BUILTIN.find(b => b.email.toLowerCase() === email.toLowerCase());
+  if (builtin) {
+    throw new Error('บัญชีระบบเปลี่ยนรหัสผ่านได้ผ่านตัวแปร ADMIN_PASSWORD ใน Vercel เท่านั้น');
+  }
+  throw new Error('ไม่พบบัญชีผู้ใช้');
 }

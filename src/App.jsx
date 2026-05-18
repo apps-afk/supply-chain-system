@@ -22,6 +22,7 @@ import { ScreenSettingsContractTypes } from './screens/screen-settings-contract-
 import { ScreenSettingsUnits } from './screens/screen-settings-units';
 import { ScreenSettingsUsers } from './screens/screen-settings-users';
 import { ScreenSettingsApprovalRoles } from './screens/screen-settings-approval-roles';
+import { ScreenSettingsAccount } from './screens/screen-settings-account';
 
 const CRUMBS = {
   'dashboard':              ['ภาพรวม'],
@@ -48,6 +49,7 @@ const CRUMBS = {
   'settings-units':          ['ตั้งค่า', 'ข้อมูลหลัก', 'หน่วยนับ'],
   'settings-users':          ['ตั้งค่า', 'ข้อมูลหลัก', 'ผู้ใช้งาน'],
   'settings-approval-roles': ['ตั้งค่า', 'ข้อมูลหลัก', 'ตำแหน่งผู้อนุมัติ'],
+  'settings-account':        ['ตั้งค่า', 'บัญชีของฉัน'],
 };
 
 const ACTIVE_NAV = {
@@ -75,6 +77,7 @@ const ACTIVE_NAV = {
   'settings-units':          'units',
   'settings-users':          'users',
   'settings-approval-roles': 'approval-roles',
+  'settings-account':        'account',
 };
 
 export default function App() {
@@ -135,6 +138,7 @@ export default function App() {
       case 'settings-units':          return <ScreenSettingsUnits go={go} />;
       case 'settings-users':          return <ScreenSettingsUsers go={go} />;
       case 'settings-approval-roles': return <ScreenSettingsApprovalRoles go={go} />;
+      case 'settings-account':        return <ScreenSettingsAccount />;
       default:                        return <ScreenDashboard go={go} />;
     }
   };
@@ -158,6 +162,7 @@ export default function App() {
       'units':          'settings-units',
       'users':          'settings-users',
       'approval-roles': 'settings-approval-roles',
+      'account':        'settings-account',
     };
     if (map[id]) go(map[id]);
   };

@@ -14,6 +14,12 @@ const providers = [
     },
     async authorize(credentials) {
       if (!credentials?.email || !credentials?.password) return null;
+      // Defense in depth: explicit domain check, even though validateUser
+      // only returns users from BUILTIN/registered (both go through the
+      // domain check at write-time) — guards against future provider changes.
+      if (!credentials.email.toLowerCase().endsWith(`@${DOMAIN}`)) {
+        throw new Error(`อนุญาตเฉพาะบัญชี @${DOMAIN} เท่านั้น`);
+      }
       const user = await validateUser(credentials.email, credentials.password);
       if (!user) throw new Error('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
       return user;
@@ -40,8 +46,16 @@ export const authOptions = {
       }
       return true;
     },
+    async jwt({ token, user }) {
+      // Persist role from the authorize() return value into the JWT
+      if (user) token.role = user.role;
+      return token;
+    },
     async session({ session, token }) {
-      if (session.user) session.user.id = token.sub;
+      if (session.user) {
+        session.user.id = token.sub;
+        session.user.role = token.role;
+      }
       return session;
     },
   },
