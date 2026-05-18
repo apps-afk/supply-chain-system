@@ -1,46 +1,43 @@
 import NextAuth from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
+import { validateUser } from '../../../../lib/users';
 
-const ALLOWED_DOMAIN = 'initialestate.com';
+const DOMAIN = 'initialestate.com';
 
-export const authOptions = {
-  providers: [
+const providers = [
+  CredentialsProvider({
+    name: 'Email',
+    credentials: {
+      email:    { label: 'อีเมล',    type: 'email'    },
+      password: { label: 'รหัสผ่าน', type: 'password' },
+    },
+    async authorize(credentials) {
+      if (!credentials?.email || !credentials?.password) return null;
+      const user = await validateUser(credentials.email, credentials.password);
+      if (!user) throw new Error('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      return user;
+    },
+  }),
+];
+
+// Google provider only loads when credentials are configured
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  providers.unshift(
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      authorization: {
-        params: {
-          hd: ALLOWED_DOMAIN,
-          prompt: 'select_account',
-        },
-      },
-    }),
-    CredentialsProvider({
-      name: 'Email',
-      credentials: {
-        email: { label: 'อีเมล', type: 'email' },
-        password: { label: 'รหัสผ่าน', type: 'password' },
-      },
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null;
-        if (!credentials.email.toLowerCase().endsWith(`@${ALLOWED_DOMAIN}`)) {
-          throw new Error('AccessDenied');
-        }
-        // TODO: replace with real user/password validation against your database
-        // For now: any @initialestate.com email passes domain check
-        return {
-          id: credentials.email,
-          email: credentials.email,
-          name: credentials.email.split('@')[0].replace(/[._]/g, ' '),
-        };
-      },
-    }),
-  ],
+      authorization: { params: { hd: DOMAIN, prompt: 'select_account' } },
+    })
+  );
+}
+
+export const authOptions = {
+  providers,
   callbacks: {
     async signIn({ user, account }) {
       if (account?.provider === 'google') {
-        return Boolean(user.email?.toLowerCase().endsWith(`@${ALLOWED_DOMAIN}`));
+        return Boolean(user.email?.toLowerCase().endsWith(`@${DOMAIN}`));
       }
       return true;
     },
@@ -49,11 +46,9 @@ export const authOptions = {
       return session;
     },
   },
-  pages: {
-    signIn: '/login',
-    error: '/login',
-  },
-  secret: process.env.NEXTAUTH_SECRET,
+  pages: { signIn: '/login', error: '/login' },
+  // Fallback secret lets the app work before NEXTAUTH_SECRET is configured in Vercel
+  secret: process.env.NEXTAUTH_SECRET || 'ie-sc-fallback-secret-set-NEXTAUTH_SECRET-in-vercel',
 };
 
 const handler = NextAuth(authOptions);
