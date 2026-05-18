@@ -15,30 +15,20 @@ jobs:
       - name: Pull Vercel project config
         run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Add supplychain.initialestate.com to project
+      - name: Add domain via Vercel CLI
         run: |
-          PROJECT_ID=$(python3 -c "import json; d=json.load(open('.vercel/project.json')); print(d['projectId'])")
-          echo "Project ID: $PROJECT_ID"
+          echo "=== Linking domain to project ==="
+          vercel domains add supplychain.initialestate.com --token=${{ secrets.VERCEL_TOKEN }} 2>&1 || true
 
-          RESPONSE=$(curl -sS -X POST "https://api.vercel.com/v10/projects/$PROJECT_ID/domains" \
-            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{"name": "supplychain.initialestate.com"}')
-
-          echo "$RESPONSE" | python3 -m json.tool
-
-          # Extract the required DNS config
           echo ""
-          echo "=== DNS Record to add in Cloudflare ==="
-          echo "$RESPONSE" | python3 -c "
-          import sys, json
-          d = json.load(sys.stdin)
-          cfg = d.get('verification', [{}])
-          if cfg:
-            for v in cfg:
-              print(f\"Type:   {v.get('type')}\")
-              print(f\"Name:   {v.get('domain')}\")
-              print(f\"Value:  {v.get('value')}\")
-          else:
-            print('Domain may already be added or no verification needed.')
-          " 2>/dev/null || echo "$RESPONSE"
+          echo "=== Assigning domain to this project ==="
+          vercel alias set --domain supplychain.initialestate.com --token=${{ secrets.VERCEL_TOKEN }} 2>&1 || true
+
+          echo ""
+          echo "=== Current project domains ==="
+          PROJECT_ID=$(python3 -c "import json; d=json.load(open('.vercel/project.json')); print(d['projectId'])")
+          ORG_ID=$(python3 -c "import json; d=json.load(open('.vercel/project.json')); print(d['orgId'])")
+          echo "Project: $PROJECT_ID  Org: $ORG_ID"
+
+          curl -sS "https://api.vercel.com/v10/projects/$PROJECT_ID/domains" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" | python3 -m json.tool 2>/dev/null || true
