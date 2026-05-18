@@ -1,7 +1,6 @@
 'use client';
 import React, { useState, useEffect, useId } from 'react';
 import { signIn, useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
 
 /* ---- Logo ---- */
 function InitialEstateLogo({ width = 200 }) {
@@ -40,7 +39,6 @@ const ERRORS = {
 };
 
 export default function LoginPage() {
-  const router = useRouter();
   const { status } = useSession();
 
   const [mode, setMode]       = useState('login');
@@ -65,8 +63,10 @@ export default function LoginPage() {
   const [fSent,  setFSent]    = useState(false);
 
   useEffect(() => {
-    if (status === 'authenticated') router.replace('/');
-  }, [status, router]);
+    // Hard redirect (not router.replace) — soft-nav keeps SessionProvider's
+    // null session in memory and the page just sits on a spinner forever.
+    if (status === 'authenticated') window.location.replace('/');
+  }, [status]);
 
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get('error');
@@ -94,10 +94,10 @@ export default function LoginPage() {
       setError(res.error.startsWith('อีเมล') ? res.error : (ERRORS[res.error] || ERRORS.default));
       setLoading(false);
     } else {
-      // Full page reload so SessionProvider re-initializes with the new cookie.
-      // router.replace would soft-navigate, leaving the old null session in memory
-      // and the user stuck on a spinner forever.
-      window.location.href = '/';
+      // Hard navigate — replace() so the /login entry doesn't stay in history.
+      // Soft router.replace leaves SessionProvider's null session in memory
+      // and the user gets stuck on a spinner forever.
+      window.location.replace('/');
     }
   }
 
