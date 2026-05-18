@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useId } from 'react';
+import React, { useState, useId, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 
 /* ----------------------- Icons (inline SVG) ----------------------- */
@@ -174,9 +174,8 @@ export function Sidebar({ current, onNav }) {
           Once one item in a flex column has marginTop:auto, everything after it
           stays glued below, so SideFooter sits flush against this group. */}
       <div className="side-group" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
-        <div className="side-group-label">ส่วนตัว · ระบบ</div>
-        <Item id="account" icon="users"     label="บัญชีของฉัน" />
-        <Item id="team"    icon="fileCheck" label="ทีมงานและสิทธิ์" />
+        <div className="side-group-label">ระบบ</div>
+        <Item id="team" icon="fileCheck" label="ทีมงานและสิทธิ์" />
       </div>
 
       <SideFooter onNav={onNav} />
@@ -185,7 +184,7 @@ export function Sidebar({ current, onNav }) {
 }
 
 /* ----------------------- Topbar ----------------------- */
-export function Topbar({ crumbs }) {
+export function Topbar({ crumbs, onNav }) {
   return (
     <div className="topbar">
       <div className="crumb">
@@ -205,10 +204,179 @@ export function Topbar({ crumbs }) {
         <button className="btn ghost" title="แจ้งเตือน" style={{ padding: 8 }}>
           {Icons.bell}
         </button>
+        <UserMenu onNav={onNav} />
       </div>
     </div>
   );
 }
+
+/* ----------------------- Topbar user menu (avatar + dropdown) ----- */
+const ROLE_LABEL = {
+  admin:       'ผู้ดูแลระบบ',
+  hr_manager:  'ผู้จัดการ HR',
+  procurement: 'ฝ่ายจัดซื้อ',
+  accountant:  'ฝ่ายบัญชี',
+  manager:     'ผู้จัดการ',
+  user:        'ผู้ใช้งานทั่วไป',
+};
+
+function UserMenu({ onNav }) {
+  const { data: session } = useSession();
+  const [open, setOpen]   = useState(false);
+  const ref               = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+
+  const user     = session?.user;
+  const name     = user?.name || user?.email?.split('@')[0] || 'ผู้ใช้งาน';
+  const email    = user?.email || '';
+  const initials = name.slice(0, 2).toUpperCase();
+  const roleText = ROLE_LABEL[user?.role] || user?.role || '';
+
+  function handleAccount() {
+    setOpen(false);
+    if (onNav) onNav('account');
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title="บัญชีของฉัน"
+        aria-label="บัญชีของฉัน"
+        aria-expanded={open}
+        style={{
+          width: 34, height: 34, padding: 0,
+          background: open ? 'var(--teal)' : 'var(--teal-soft)',
+          color:      open ? 'var(--paper)' : 'var(--teal-ink)',
+          border: 'none', borderRadius: '50%', cursor: 'pointer',
+          fontFamily: 'var(--font-serif)', fontSize: 12.5, fontWeight: 600,
+          display: 'grid', placeItems: 'center',
+          transition: 'background 0.15s, color 0.15s',
+        }}
+      >
+        {initials}
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 10px)',
+            right: 0,
+            width: 260,
+            background: 'var(--surface)',
+            border: '1px solid var(--rule)',
+            borderRadius: 10,
+            boxShadow: '0 12px 32px -8px rgba(20,18,14,0.18), 0 2px 6px rgba(20,18,14,0.06)',
+            padding: 6,
+            zIndex: 50,
+            animation: 'fadeIn 0.15s ease',
+          }}
+        >
+          {/* User block */}
+          <div style={{
+            padding: '12px 12px 14px',
+            display: 'flex', gap: 12, alignItems: 'center',
+            borderBottom: '1px solid var(--rule)',
+          }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%',
+              background: 'var(--teal-soft)', color: 'var(--teal-ink)',
+              display: 'grid', placeItems: 'center',
+              fontFamily: 'var(--font-serif)', fontSize: 14, fontWeight: 600,
+              flexShrink: 0,
+            }}>{initials}</div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{
+                fontSize: 13, fontWeight: 500, color: 'var(--ink)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{name}</div>
+              <div style={{
+                fontSize: 11, color: 'var(--ink-3)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{email}</div>
+              {roleText && (
+                <div style={{
+                  fontSize: 10, color: 'var(--teal)',
+                  marginTop: 3, letterSpacing: '0.05em', textTransform: 'uppercase',
+                  fontWeight: 500,
+                }}>{roleText}</div>
+              )}
+            </div>
+          </div>
+
+          {/* Menu items */}
+          <div style={{ padding: '6px 0' }}>
+            <MenuItem onClick={handleAccount}>
+              <UserMenuIcon />
+              <span>บัญชีของฉัน</span>
+            </MenuItem>
+          </div>
+
+          <div style={{ height: 1, background: 'var(--rule)', margin: '2px 0' }} />
+
+          <div style={{ padding: '6px 0' }}>
+            <MenuItem onClick={() => signOut({ callbackUrl: '/login' })} tone="err">
+              <LogoutMenuIcon />
+              <span>ออกจากระบบ</span>
+            </MenuItem>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({ onClick, children, tone }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      role="menuitem"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+        padding: '9px 12px', border: 'none',
+        background: hover ? 'var(--paper-2)' : 'transparent',
+        borderRadius: 6, cursor: 'pointer',
+        fontFamily: 'var(--font-sans)', fontSize: 13,
+        color: tone === 'err' ? 'var(--clay)' : 'var(--ink)',
+        textAlign: 'left',
+        transition: 'background 0.12s',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+const UserMenuIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="7" cy="5" r="2.5" />
+    <path d="M2 12c.5-2.2 2.5-3.5 5-3.5s4.5 1.3 5 3.5" />
+  </svg>
+);
+
+const LogoutMenuIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M5.5 2H2.5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h3M10 9.5l3-2.5-3-2.5M13 7H6" />
+  </svg>
+);
 
 /* ----------------------- Misc helpers ----------------------- */
 export function Chip({ kind, children, style }) {

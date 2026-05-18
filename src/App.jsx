@@ -181,7 +181,7 @@ export default function App() {
     <div className="app" data-screen-label={screen}>
       <Sidebar current={navActive} onNav={handleNav} />
       <div className="main">
-        <Topbar crumbs={CRUMBS[screen] || ['ภาพรวม']} />
+        <Topbar crumbs={CRUMBS[screen] || ['ภาพรวม']} onNav={handleNav} />
         {renderScreen()}
       </div>
     </div>
