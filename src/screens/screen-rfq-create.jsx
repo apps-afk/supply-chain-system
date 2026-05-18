@@ -1,0 +1,955 @@
+'use client';
+import React, { useState, useMemo } from 'react';
+import { Icons, Chip, Av } from '../lib/shell';
+import { MATERIAL_CATEGORIES } from './screen-settings-materials';
+import { SUBCONTRACT_CATEGORIES } from './screen-settings-subcontracts';
+import { getActiveApprovalRoles } from './screen-settings-approval-roles';
+
+/*
+  Create RFQ — full build flow on one page.
+
+  Flow per spec:
+    1. Auto-run RFQ document code
+    2. Select Supplier
+    3. For each item: Source (Material | SubContract) → Category → Item → Qty + Unit
+    4. Fill in Warranty Terms + Payment Terms (used for comparison later)
+    5. Submit → Excel document generated for Supplier
+
+  Items pulled live from Settings → Material and SubContract masters
+  via MATERIAL_CATEGORIES and SUBCONTRACT_CATEGORIES.
+*/
+
+/* =================== Reference data =================== */
+
+const ALL_SUPPLIERS = [
+  { id:'SUP-00001', name:'เอเชียสตีล จำกัด',         kind:'aw',      categories:['งานโครงสร้าง'],                    contact:'คุณวีระ 081-234-5678', email:'sales@asiasteel.co.th',   credit:'45 วัน', warranty:'ตามมาตรฐานผู้ผลิต' },
+  { id:'SUP-00002', name:'รุ่งเรืองสตีล',             kind:'rr',      categories:['งานโครงสร้าง'],                    contact:'คุณสมชาย 089-555-1212', email:'order@rungrueng.com',    credit:'30 วัน', warranty:'รับประกัน 1 ปี · มอก.' },
+  { id:'SUP-00003', name:'SCG Distribution',          kind:'sc',      categories:['งานโครงสร้าง','งานหลังคา'],        contact:'ฝ่ายขาย 02-586-3333',  email:'b2b@scg.co.th',          credit:'60 วัน', warranty:'รับประกัน 5 ปี ตามเงื่อนไข SCG' },
+  { id:'SUP-00004', name:'TOA Distribution',          kind:'default', categories:['งานสี'],                           contact:'คุณนิด 02-294-0999',   email:'order@toagroup.com',    credit:'30 วัน', warranty:'รับประกันสี 5 ปี' },
+  { id:'SUP-00005', name:'COTTO Wholesale',           kind:'default', categories:['งานสุขภัณฑ์'],                     contact:'คุณปูน 02-555-2000',   email:'wholesale@cotto.com',   credit:'45 วัน', warranty:'รับประกัน 5 ปี (Body) / 1 ปี (Parts)' },
+  { id:'SUP-00006', name:'CPAC Roof',                 kind:'sc',      categories:['งานหลังคา'],                       contact:'คุณบอย 02-586-2222',   email:'roof@cpac.co.th',       credit:'45 วัน', warranty:'รับประกัน 10 ปี ตามเงื่อนไข' },
+  { id:'SUP-00007', name:'Q-CON Direct',              kind:'default', categories:['งานก่ออิฐ-ฉาบปูน'],                contact:'คุณตั้ม 02-274-1234',  email:'direct@qcon.co.th',     credit:'30 วัน', warranty:'รับประกันคุณภาพตามมาตรฐาน มอก.' },
+  { id:'SUP-00008', name:'ไทยเซรามิค',                kind:'default', categories:['งานพื้น-ผนัง'],                    contact:'คุณป้อม 02-318-7777', email:'sales@thaicera.com',    credit:'30 วัน', warranty:'รับประกัน 1 ปี' },
+  { id:'SUP-00009', name:'BCC Electric',              kind:'default', categories:['งานระบบไฟฟ้า'],                    contact:'คุณตา 02-291-8888',    email:'b2b@bcc.co.th',         credit:'30 วัน', warranty:'รับประกัน 1 ปี' },
+  { id:'SUP-00010', name:'หจก. กระเบื้องช่าง',         kind:'default', categories:['งานพื้น-ผนัง'],                    contact:'ช่างเอก 081-789-4561', email:'-',                     credit:'งวด',   warranty:'รับประกันงาน 6 เดือน' },
+  { id:'SUP-00011', name:'หจก. ช่างไทย',              kind:'default', categories:['งานก่ออิฐ-ฉาบปูน'],                contact:'ช่างแดง 081-456-7890', email:'-',                     credit:'งวด',   warranty:'รับประกันงาน 6 เดือน' },
+  { id:'SUP-00012', name:'พี.ที. คอนสตรัคชั่น',       kind:'default', categories:['งานโครงสร้าง'],                    contact:'คุณพี 081-222-3333',   email:'pt.con@gmail.com',      credit:'งวด',   warranty:'รับประกันงาน 1 ปี' },
+];
+
+const PROJECTS = [
+  { id:'IE-LV01', name:'Initial Living บางนา' },
+  { id:'IE-LV04', name:'Initial Living รังสิต' },
+  { id:'IE-VL02', name:'Initial Villa' },
+  { id:'IE-TH03', name:'Initial Town' },
+];
+
+const ALL_UNITS = ['ถุง 50 กก.','เส้น','ก้อน','แผ่น','ตร.ม.','ลบ.ม.','ม.','กก.','ตัน','ลิตร','แกลลอน','ม้วน','ชุด','ชิ้น','ตัว','อัน','หลอด','คน·วัน','ชั่วโมง','งวด','ต้น','จุด'];
+
+const NEXT_RFQ_NO = 'RFQ-2025-025';
+
+/* =================== Helpers =================== */
+
+function blankRow() {
+  return { uid: Math.random().toString(36).slice(2,9), source:'', catShort:'', itemCode:'', qty:'', unit:'' };
+}
+
+function getCategoriesBySource(source) {
+  if (source === 'Material')    return MATERIAL_CATEGORIES    || [];
+  if (source === 'SubContract') return SUBCONTRACT_CATEGORIES || [];
+  return [];
+}
+
+function findItem(source, code) {
+  const cats = getCategoriesBySource(source);
+  for (const c of cats) {
+    const it = c.items.find(i => i.code === code);
+    if (it) return it;
+  }
+  return null;
+}
+
+function formatThaiDate(iso) {
+  if (!iso) return '—';
+  const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  return `${d.getDate()} ${months[d.getMonth()]} ${(d.getFullYear()+543).toString().slice(-2)}`;
+}
+
+/* =================== Main screen =================== */
+
+export function ScreenRFQCreate({ go }) {
+  // Header form
+  const [title, setTitle]   = useState('');
+  const [project, setProj]  = useState('IE-LV01');
+  const [due, setDue]       = useState('2025-05-30');
+
+  // Supplier
+  const [supplierId, setSupplierId] = useState(null);
+  const supplier = ALL_SUPPLIERS.find(s => s.id === supplierId);
+
+  // Items
+  const [rows, setRows] = useState([blankRow(), blankRow(), blankRow()]);
+
+  // Conditions — all 5 are SUPPLIER-FILL on the returned quote.
+  // Procurement only owns the optional notes + overhead/VAT policy hint.
+  const [notes, setNotes] = useState('');
+  const [overheadHint, setOverheadHint] = useState('');     // procurement's hint, e.g. "ไม่เกิน 10%"
+  const [vatPolicy,    setVatPolicy]    = useState('include'); // include | exclude | supplier
+
+  // UI state
+  const [generated, setGenerated] = useState(false);
+
+  const pickSupplier = (s) => {
+    setSupplierId(s.id);
+  };
+
+  // Derived
+  const itemsFilled = rows.filter(r => r.itemCode);
+  const itemsValid  = rows.filter(r => r.itemCode && Number(r.qty) > 0 && r.unit);
+  const canGenerate = !!supplier && itemsValid.length > 0 && title.trim().length > 0;
+
+  // Row helpers
+  const updateRow = (uid, patch) => setRows(rows.map(r => r.uid === uid ? { ...r, ...patch } : r));
+  const onPickSource = (uid, source) => updateRow(uid, { source, catShort:'', itemCode:'', unit:'' });
+  const onPickCat    = (uid, catShort) => updateRow(uid, { catShort, itemCode:'', unit:'' });
+  const onPickItem   = (uid, code) => {
+    const row = rows.find(r => r.uid === uid);
+    const it = findItem(row.source, code);
+    updateRow(uid, { itemCode: code, unit: it?.unit || '' });
+  };
+  const addRow    = () => setRows([...rows, blankRow()]);
+  const removeRow = (uid) => setRows(rows.length === 1 ? [blankRow()] : rows.filter(r => r.uid !== uid));
+
+  if (generated) {
+    return <GeneratedView go={go} title={title} supplier={supplier} project={project} items={itemsValid} due={due} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />;
+  }
+
+  return (
+    <div className="page" style={{ paddingBottom: 200 }}>
+      <button className="btn ghost sm" onClick={() => go('rfq')} style={{ marginBottom: 20, marginLeft: -8 }}>
+        {Icons.back} กลับไป RFQ
+      </button>
+
+      <div className="page-head" style={{ alignItems:'flex-start' }}>
+        <div className="page-title">
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6 }}>
+            <span style={{
+              display:'inline-flex', alignItems:'center', gap:8,
+              padding:'4px 12px', borderRadius:4,
+              background:'var(--teal-soft)', color:'var(--teal-ink)',
+              fontFamily:'var(--font-mono)', fontSize:12, fontWeight:600,
+            }}>
+              {NEXT_RFQ_NO}
+              <span style={{ fontSize:9, color:'var(--ink-3)', fontWeight:400, letterSpacing:0.06, textTransform:'uppercase' }}>auto</span>
+            </span>
+            <Chip kind="draft">ร่าง</Chip>
+          </div>
+          <h1 className="h-display">สร้าง RFQ ใหม่</h1>
+          <p style={{ fontSize:14, color:'var(--ink-3)', margin:'8px 0 0', maxWidth:620 }}>
+            กรอกข้อมูลให้ครบ — ระบบจะสร้างเอกสาร Excel มาตรฐานเพื่อส่งให้ Supplier กรอกราคากลับมา
+          </p>
+        </div>
+      </div>
+
+      {/* Two-column: form left, summary right */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:32, alignItems:'flex-start' }}>
+
+        {/* ========== LEFT: form ========== */}
+        <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+
+          {/* Section 1: header info */}
+          <SectionCard step="1" label="ข้อมูลทั่วไป" desc="ตั้งชื่อ RFQ ระบุโครงการและวันครบกำหนดที่ต้องการให้ Supplier ตอบกลับ">
+            <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:16 }}>
+              <Field label="ชื่อ RFQ" required>
+                <input type="text" value={title} placeholder="เช่น เหล็กเส้น DB12/16 ล็อต Q2"
+                  onChange={e => setTitle(e.target.value)} style={inputStyle} />
+              </Field>
+              <Field label="โครงการ" required>
+                <select value={project} onChange={e => setProj(e.target.value)} style={inputStyle}>
+                  {PROJECTS.map(p => <option key={p.id} value={p.id}>{p.id} · {p.name}</option>)}
+                </select>
+              </Field>
+              <Field label="ครบกำหนดเสนอราคา" required>
+                <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
+              </Field>
+            </div>
+          </SectionCard>
+
+          {/* Section 2: supplier */}
+          <SectionCard step="2" label="เลือก Supplier" desc="หนึ่งใบ ต่อ Supplier หนึ่งราย">
+            {!supplier
+              ? <SupplierPicker onPick={pickSupplier} />
+              : <SelectedSupplierCard supplier={supplier} onChange={() => setSupplierId(null)} />}
+          </SectionCard>
+
+          {/* Section 3: items */}
+          <SectionCard step="3" label="รายการสินค้า / งาน" desc="เลือก Source: Material หรือ SubContract → หมวด → Item → จำนวน + หน่วย · ช่อง Description จะให้ Supplier กรอกรายละเอียดในใบเสนอราคา">
+            <div style={{ overflowX:'auto', margin:'0 -20px' }}>
+              <table className="tbl" style={{ minWidth:'100%' }}>
+                <thead>
+                  <tr>
+                    <th style={{ width:32, paddingLeft:20 }}>#</th>
+                    <th style={{ width:'12%' }}>ประเภท</th>
+                    <th style={{ width:'14%' }}>หมวด</th>
+                    <th>Item</th>
+                    <th style={{ width:'18%' }}>
+                      Description
+                      <span style={{ display:'inline-block', marginLeft:6, padding:'1px 5px', borderRadius:3, background:'#FFF4CC', color:'#6B5121', fontSize:9, fontWeight:600, letterSpacing:0.04, verticalAlign:'middle' }}>SUPPLIER</span>
+                    </th>
+                    <th style={{ width:80 }} className="num-col">จำนวน</th>
+                    <th style={{ width:100 }}>หน่วย</th>
+                    <th style={{ width:36, paddingRight:20 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const cats = getCategoriesBySource(r.source);
+                    const cat  = cats.find(c => c.short === r.catShort);
+                    const it   = r.itemCode ? findItem(r.source, r.itemCode) : null;
+                    return (
+                      <tr key={r.uid}>
+                        <td style={{ paddingLeft:20, color:'var(--ink-4)', fontFamily:'var(--font-mono)', fontSize:11 }}>{String(i+1).padStart(2,'0')}</td>
+                        <td>
+                          <select value={r.source} onChange={e => onPickSource(r.uid, e.target.value)} style={tableSelectStyle}>
+                            <option value="">— เลือก —</option>
+                            <option value="Material">Material</option>
+                            <option value="SubContract">SubContract</option>
+                          </select>
+                        </td>
+                        <td>
+                          <select value={r.catShort} onChange={e => onPickCat(r.uid, e.target.value)} style={tableSelectStyle} disabled={!r.source}>
+                            <option value="">{r.source ? '— เลือกหมวด —' : 'เลือก Source ก่อน'}</option>
+                            {cats.map(c => <option key={c.short} value={c.short}>{c.short} · {c.name}</option>)}
+                          </select>
+                        </td>
+                        <td>
+                          <select value={r.itemCode}
+                            onChange={e => onPickItem(r.uid, e.target.value)}
+                            style={{ ...tableSelectStyle, color: r.itemCode ? 'var(--ink)' : 'var(--ink-4)' }}
+                            disabled={!r.catShort}>
+                            <option value="">{r.catShort ? '— เลือก Item —' : 'เลือกหมวดก่อน'}</option>
+                            {cat?.items.map(i2 => (
+                              <option key={i2.code} value={i2.code}>{i2.name}</option>
+                            ))}
+                          </select>
+                          {it && (
+                            <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:4 }}>
+                              <span className="font-mono" style={{ color:'var(--ink-4)' }}>{it.code}</span>
+                              {it.spec && <span style={{ marginLeft:6 }}>· {it.spec}</span>}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          {/* Description — Supplier will fill this in their returned quote.
+                              Render as disabled-looking placeholder on procurement side. */}
+                          <div style={{
+                            padding:'8px 10px',
+                            border:'1px dashed var(--rule-2)', borderRadius:4,
+                            background:'#FFFBEB',
+                            fontSize:11.5, color:'var(--ink-4)', fontStyle:'italic',
+                            minHeight:30, display:'flex', alignItems:'center',
+                          }}>
+                            ให้ Supplier กรอกในใบเสนอราคา
+                          </div>
+                        </td>
+                        <td className="num-col">
+                          <input type="number" value={r.qty} onChange={e => updateRow(r.uid, { qty:e.target.value })}
+                            placeholder="0" className="num"
+                            style={{ ...tableInputStyle, textAlign:'right' }} disabled={!r.itemCode} />
+                        </td>
+                        <td>
+                          <select value={r.unit} onChange={e => updateRow(r.uid, { unit:e.target.value })}
+                            style={tableSelectStyle} disabled={!r.itemCode}>
+                            <option value="">—</option>
+                            {ALL_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                          </select>
+                        </td>
+                        <td style={{ paddingRight:20 }}>
+                          <button onClick={() => removeRow(r.uid)} className="btn ghost sm"
+                            style={{ padding:'4px 6px', color:'var(--ink-4)' }} title="ลบ">×</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display:'flex', gap:8, marginTop:14, alignItems:'center' }}>
+              <button className="btn sm" onClick={addRow}>{Icons.plus} เพิ่มรายการ</button>
+              <span style={{ fontSize:11, color:'var(--ink-3)', display:'inline-flex', alignItems:'center', gap:6 }}>
+                <span style={{ width:10, height:10, border:'1px dashed var(--rule-2)', background:'#FFFBEB', borderRadius:2 }} />
+                = ช่องให้ Supplier เติมในใบเสนอราคา
+              </span>
+              <div style={{ marginLeft:'auto', fontSize:12, color:'var(--ink-3)' }}>
+                {itemsFilled.length} จาก {rows.length} แถวกรอกแล้ว
+              </div>
+            </div>
+
+            {/* Pricing policy (procurement-defined) — sits at the end of the items section */}
+            <div style={{
+              marginTop:20, padding:'16px 16px',
+              background:'var(--surface-2)',
+              border:'1px solid var(--rule)', borderRadius:6,
+            }}>
+              <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:12 }}>
+                <div className="eyebrow">นโยบายราคา · ปลายรายการ</div>
+                <span style={{ fontSize:10.5, color:'var(--ink-3)', fontStyle:'italic' }}>
+                  จะแสดงต่อท้ายตารางรายการในใบ RFQ
+                </span>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+                <Field label="Overhead สูงสุดที่ยอมรับ (%)">
+                  <input
+                    type="text"
+                    value={overheadHint}
+                    onChange={e => setOverheadHint(e.target.value)}
+                    placeholder="เช่น ไม่เกิน 10% — หากเกินกรุณาระบุเหตุผล"
+                    style={inputStyle}
+                  />
+                </Field>
+                <Field label="นโยบาย VAT">
+                  <div style={{ display:'flex', gap:0, border:'1px solid var(--rule-2)', borderRadius:6, overflow:'hidden' }}>
+                    {[
+                      { v:'include',  label:'รวม VAT แล้ว' },
+                      { v:'exclude',  label:'ไม่รวม VAT' },
+                      { v:'supplier', label:'ให้ Supplier ระบุ' },
+                    ].map((opt, i, arr) => (
+                      <button key={opt.v} type="button" onClick={() => setVatPolicy(opt.v)} style={{
+                        flex:1, padding:'9px 8px', fontSize:12, fontFamily:'inherit',
+                        background: vatPolicy === opt.v ? 'var(--ink)' : 'var(--surface)',
+                        color: vatPolicy === opt.v ? 'var(--paper)' : 'var(--ink-2)',
+                        border:'none', cursor:'pointer',
+                        borderRight: i < arr.length - 1 ? '1px solid var(--rule-2)' : 'none',
+                      }}>{opt.label}</button>
+                    ))}
+                  </div>
+                </Field>
+              </div>
+            </div>
+          </SectionCard>
+
+          {/* Section 4: Supplier-fill conditions */}
+          <SectionCard step="4" label="เงื่อนไขที่ให้ Supplier กรอก"
+            desc="ทั้ง 5 เงื่อนไขจะเป็นช่องว่างให้ Supplier เขียนเองในใบเสนอราคา">
+            <div className="eyebrow" style={{ marginBottom:10, display:'inline-flex', alignItems:'center', gap:8 }}>
+              เงื่อนไข 5 ข้อ
+              <span style={{ padding:'1px 8px', borderRadius:3, background:'#FFF4CC', color:'#6B5121', fontSize:9, fontWeight:600, letterSpacing:0.04 }}>SUPPLIER กรอก</span>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              {[
+                { icon:'💳', label:'เงื่อนไขการชำระเงิน',  hint:'เครดิตเทอม · ช่องทาง · งวด' },
+                { icon:'🚚', label:'เงื่อนไขการจัดส่ง',     hint:'ค่าขนส่ง · จุดส่งมอบ' },
+                { icon:'⏱',  label:'เงื่อนไขการยืนราคา',    hint:'จำนวนวันที่ราคามีผล' },
+                { icon:'🛡️', label:'เงื่อนไขการรับประกัน',  hint:'ระยะเวลา · ขอบเขต' },
+                { icon:'📦', label:'Lead Time ในการสั่ง',  hint:'จำนวนวันหลังออก PO ถึงส่งมอบ' },
+              ].map(c => (
+                <div key={c.label} style={{
+                  padding:'12px 14px',
+                  border:'1px dashed var(--rule-2)', borderRadius:6,
+                  background:'#FFFBEB',
+                  display:'flex', gap:10, alignItems:'flex-start',
+                }}>
+                  <span style={{ fontSize:16, flexShrink:0 }}>{c.icon}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:12.5, fontWeight:500, color:'var(--ink-2)' }}>{c.label}</div>
+                    <div style={{ fontSize:11, color:'var(--ink-4)', marginTop:4, fontStyle:'italic' }}>{c.hint}</div>
+                    <div style={{
+                      marginTop:8, height:8, background:'transparent',
+                      borderBottom:'1px solid var(--rule-2)',
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <Field label="หมายเหตุเพิ่มเติม (ถ้ามี)">
+              <textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="ข้อกำหนดเฉพาะ การส่งมอบ การรับรองมาตรฐาน ฯลฯ"
+                style={{ ...inputStyle, minHeight:64, resize:'vertical', fontFamily:'inherit', marginTop:16 }}
+              />
+            </Field>
+          </SectionCard>
+        </div>
+
+        {/* ========== RIGHT: summary + preview ========== */}
+        <div style={{ display:'flex', flexDirection:'column', gap:16, position:'sticky', top:80 }}>
+          <SummaryCard
+            rfqNo={NEXT_RFQ_NO}
+            title={title}
+            project={PROJECTS.find(p => p.id === project)}
+            supplier={supplier}
+            items={itemsValid}
+            due={due}
+            overheadHint={overheadHint}
+            vatPolicy={vatPolicy}
+          />
+          <ExcelPreviewCard items={itemsValid} />
+        </div>
+      </div>
+
+      {/* Sticky footer */}
+      <div style={{
+        position:'fixed', left:240, right:0, bottom:0,
+        background:'var(--surface)', borderTop:'1px solid var(--rule)',
+        padding:'16px 48px', display:'flex', alignItems:'center', gap:24,
+        boxShadow:'0 -8px 24px -12px rgba(20,18,14,0.10)', zIndex:10,
+      }}>
+        <div style={{ display:'flex', gap:32 }}>
+          <div>
+            <div className="eyebrow" style={{ marginBottom:2 }}>เอกสาร</div>
+            <div className="font-mono" style={{ fontSize:16, lineHeight:1, marginTop:2 }}>{NEXT_RFQ_NO}</div>
+          </div>
+          <div>
+            <div className="eyebrow" style={{ marginBottom:2 }}>รายการ</div>
+            <div style={{ fontFamily:'var(--font-serif)', fontSize:24, lineHeight:1 }}>
+              {itemsValid.length} <span style={{ fontSize:13, color:'var(--ink-3)' }}>/ {rows.length} แถว</span>
+            </div>
+          </div>
+          <div>
+            <div className="eyebrow" style={{ marginBottom:2 }}>Supplier</div>
+            <div style={{ fontFamily:'var(--font-serif)', fontSize:18, lineHeight:1.1, maxWidth:240, textOverflow:'ellipsis', overflow:'hidden', whiteSpace:'nowrap' }}>
+              {supplier ? supplier.name : <span style={{ color:'var(--ink-4)', fontStyle:'italic' }}>ยังไม่เลือก</span>}
+            </div>
+          </div>
+        </div>
+        <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+          <button className="btn ghost" onClick={() => go('rfq')}>ยกเลิก</button>
+          <button className="btn" disabled={!canGenerate}>บันทึกร่าง</button>
+          <button className="btn primary" disabled={!canGenerate} onClick={() => setGenerated(true)}
+            style={{ padding:'10px 20px', opacity: canGenerate ? 1 : 0.5, cursor: canGenerate ? 'pointer' : 'not-allowed' }}>
+            {Icons.download} Submit & ดาวน์โหลด Excel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =================== Generated success view =================== */
+
+function GeneratedView({ go, title, supplier, project, items, due, overheadHint, vatPolicy, notes }) {
+  const projectObj = PROJECTS.find(p => p.id === project);
+  return (
+    <div className="page">
+      <button className="btn ghost sm" onClick={() => go('rfq')} style={{ marginBottom:20, marginLeft:-8 }}>
+        {Icons.back} กลับไป RFQ
+      </button>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:32, marginBottom:32, alignItems:'flex-start' }}>
+        <div>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
+            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{NEXT_RFQ_NO}</span>
+            <span style={{
+              display:'inline-flex', alignItems:'center', gap:6,
+              fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
+              background:'var(--ochre-soft)', color:'#6B5121',
+            }}>
+              <span style={{ width:6, height:6, borderRadius:999, background:'var(--ochre)' }} />
+              Wait
+            </span>
+            <span style={{ fontSize:12, color:'var(--ink-3)' }}>· สร้างสำเร็จเมื่อสักครู่</span>
+          </div>
+          <h1 className="h-display" style={{ marginBottom:8 }}>{title || 'RFQ ใหม่'}</h1>
+          <p style={{ fontSize:14, color:'var(--ink-3)', maxWidth:560, lineHeight:1.6 }}>
+            สร้างเอกสาร Excel เรียบร้อย — ดาวน์โหลดและส่งให้ <strong style={{ color:'var(--ink)' }}>{supplier?.name}</strong> เพื่อกรอกราคากลับมา
+          </p>
+
+          <div style={{ display:'flex', gap:8, marginTop:24, flexWrap:'wrap' }}>
+            <button className="btn primary">{Icons.download} ดาวน์โหลด Excel</button>
+            <button className="btn">{Icons.external} ส่งอีเมลให้ Supplier</button>
+            <button className="btn ghost" onClick={() => go('rfq')}>ดู RFQ ทั้งหมด</button>
+          </div>
+
+          <div className="card" style={{ marginTop:32, background:'var(--surface-2)' }}>
+            <div className="eyebrow" style={{ marginBottom:10 }}>ขั้นตอนถัดไป</div>
+            <ol style={{ margin:0, paddingLeft:20, fontSize:13, lineHeight:1.9, color:'var(--ink-2)' }}>
+              <li>ส่งไฟล์ Excel ที่ดาวน์โหลด ให้กับ <strong>{supplier?.name}</strong></li>
+              <li>รอ Supplier กรอกราคา ส่งคืน Quotation (ก่อน {formatThaiDate(due)})</li>
+              <li>Upload ไฟล์ Quote กลับมาที่ระบบ — เปรียบเทียบกับเงื่อนไขที่บันทึกไว้</li>
+              <li>ยืนยันราคา → สถานะเปลี่ยนเป็น <strong>Received</strong></li>
+            </ol>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding:0, overflow:'hidden' }}>
+          <div style={{ padding:'14px 20px', borderBottom:'1px solid var(--rule)' }}>
+            <span className="eyebrow">เอกสารที่สร้าง</span>
+          </div>
+          <div style={{ padding:'20px', display:'flex', gap:14, alignItems:'flex-start' }}>
+            <div style={{
+              width:48, height:60, background:'#1F6F47', color:'#fff',
+              borderRadius:4, display:'grid', placeItems:'center',
+              fontSize:11, fontWeight:600, letterSpacing:0.5, flexShrink:0,
+            }}>XLSX</div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                {NEXT_RFQ_NO}_{(supplier?.name || '').replace(/\s+/g,'_')}.xlsx
+              </div>
+              <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:4 }}>24 KB · สร้างเมื่อสักครู่</div>
+              <div style={{ marginTop:14, fontSize:11.5, color:'var(--ink-3)', lineHeight:1.7 }}>
+                <div>📄 หัวเอกสาร · ข้อมูล Supplier และโครงการ</div>
+                <div>📋 รายการ ({items.length} รายการ) · มีช่องให้ Supplier กรอกราคา</div>
+                <div>🛡 เงื่อนไขการรับประกัน</div>
+                <div>💳 เงื่อนไขการชำระเงิน</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h3 className="h-section" style={{ marginBottom:16 }}>ตัวอย่างเอกสาร Excel</h3>
+      <ExcelDocPreview rfqNo={NEXT_RFQ_NO} supplier={supplier} project={projectObj} items={items}
+        due={due} title={title} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />
+    </div>
+  );
+}
+
+/* =================== Sub-components =================== */
+
+function SectionCard({ step, label, desc, children }) {
+  return (
+    <div className="card" style={{ padding:'20px 24px 24px' }}>
+      <div style={{ display:'flex', alignItems:'baseline', gap:12, marginBottom:16 }}>
+        <span style={{
+          width:22, height:22, borderRadius:999, background:'var(--paper-2)',
+          color:'var(--ink-2)', display:'inline-grid', placeItems:'center',
+          fontSize:11, fontWeight:600, fontFamily:'var(--font-mono)',
+          alignSelf:'center', flexShrink:0,
+        }}>{step}</span>
+        <div style={{ flex:1 }}>
+          <h3 className="h-card" style={{ marginBottom:2 }}>{label}</h3>
+          {desc && <p style={{ fontSize:12, color:'var(--ink-3)', margin:0 }}>{desc}</p>}
+        </div>
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function Field({ label, required, children }) {
+  return (
+    <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
+      <span style={{ fontSize:11.5, color:'var(--ink-3)', fontWeight:500 }}>
+        {label} {required && <span style={{ color:'var(--clay)' }}>*</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+const inputStyle = {
+  padding:'9px 12px', fontSize:13,
+  border:'1px solid var(--rule-2)', borderRadius:6,
+  background:'var(--paper)', color:'var(--ink)',
+  outline:'none', fontFamily:'inherit', width:'100%',
+};
+const tableInputStyle = {
+  padding:'6px 8px', fontSize:12.5,
+  border:'1px solid transparent', background:'transparent',
+  outline:'none', fontFamily:'inherit', width:'100%', borderRadius:4,
+};
+const tableSelectStyle = {
+  padding:'6px 8px', fontSize:12.5,
+  border:'1px solid var(--rule)', background:'var(--paper)',
+  outline:'none', fontFamily:'inherit', width:'100%', borderRadius:4, cursor:'pointer',
+};
+
+/* ----- Supplier picker (table layout) ----- */
+function SupplierPicker({ onPick }) {
+  const [q, setQ] = useState('');
+  const filtered = ALL_SUPPLIERS.filter(s => !q || s.name.toLowerCase().includes(q.toLowerCase()));
+
+  return (
+    <div>
+      <div style={{ display:'flex', gap:8, marginBottom:12, alignItems:'center', flexWrap:'wrap' }}>
+        <div style={{
+          display:'flex', alignItems:'center', gap:8, padding:'7px 10px',
+          border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--paper)', flex:'1 1 240px',
+        }}>
+          {Icons.search}
+          <input value={q} onChange={e=>setQ(e.target.value)} placeholder="ค้นหา Supplier…"
+            style={{ flex:1, border:0, outline:0, background:'transparent', fontSize:13 }} />
+        </div>
+        <span style={{ fontSize:12, color:'var(--ink-3)', marginLeft:'auto' }}>
+          {filtered.length} จาก {ALL_SUPPLIERS.length} ราย
+        </span>
+      </div>
+
+      <div style={{ maxHeight:340, overflowY:'auto', border:'1px solid var(--rule)', borderRadius:6, background:'var(--paper)' }}>
+        <table className="tbl" style={{ background:'var(--paper)' }}>
+          <tbody>
+            {filtered.map(s => (
+              <tr key={s.id} onClick={() => onPick(s)} style={{ cursor:'pointer' }}>
+                <td style={{ padding:'12px 16px', width:36 }}>
+                  <Av initials={s.name.slice(0,2)} kind={s.kind} />
+                </td>
+                <td style={{ padding:'12px 8px' }}>
+                  <div style={{ fontSize:13, fontWeight:500 }}>{s.name}</div>
+                  <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:3 }}>
+                    {s.categories.join(' · ')} · {s.contact}
+                  </div>
+                </td>
+                <td style={{ padding:'12px 8px', fontSize:11.5, color:'var(--ink-3)', whiteSpace:'nowrap' }}>
+                  <div>เครดิต {s.credit}</div>
+                </td>
+                <td style={{ padding:'12px 16px', textAlign:'right' }}>
+                  <button className="btn sm" style={{ background:'var(--teal)', color:'var(--paper)', borderColor:'var(--teal)' }}>
+                    เลือก
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr><td colSpan={4} style={{ padding:28, textAlign:'center', fontSize:13, color:'var(--ink-3)' }}>ไม่พบ Supplier</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SelectedSupplierCard({ supplier, onChange }) {
+  return (
+    <div style={{
+      display:'flex', alignItems:'center', gap:16, padding:'14px 16px',
+      background:'var(--teal-soft)', borderRadius:6, border:'1px solid var(--teal)',
+    }}>
+      <Av initials={supplier.name.slice(0,2)} kind={supplier.kind} />
+      <div style={{ flex:1 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:2 }}>
+          <span style={{ fontSize:14, fontWeight:500 }}>{supplier.name}</span>
+          <span className="font-mono" style={{ fontSize:11, color:'var(--ink-3)' }}>{supplier.id}</span>
+        </div>
+        <div style={{ fontSize:12, color:'var(--ink-3)' }}>
+          {supplier.contact} · {supplier.email} · เครดิต {supplier.credit}
+        </div>
+      </div>
+      <button className="btn sm" onClick={onChange} style={{ background:'var(--paper)' }}>เปลี่ยน Supplier</button>
+    </div>
+  );
+}
+
+/* ----- Right rail summary ----- */
+function SummaryCard({ rfqNo, title, project, supplier, items, due, overheadHint, vatPolicy }) {
+  const vatLabel = { include:'รวม VAT แล้ว', exclude:'ไม่รวม VAT', supplier:'Supplier ระบุ' }[vatPolicy] || '—';
+  return (
+    <div className="card" style={{ padding:20 }}>
+      <div className="eyebrow" style={{ marginBottom:12 }}>สรุปก่อน Submit</div>
+      <Row label="เลขที่"   value={<span className="font-mono">{rfqNo}</span>} />
+      <Row label="หัวข้อ"   value={title || <em style={{ color:'var(--ink-4)' }}>—</em>} />
+      <Row label="โครงการ" value={project ? `${project.id}` : '—'} />
+      <Row label="Supplier" value={supplier ? supplier.name : <em style={{ color:'var(--ink-4)' }}>ยังไม่เลือก</em>} />
+      <Row label="รายการ"   value={`${items.length} รายการ`} />
+      <Row label="ครบกำหนด" value={formatThaiDate(due)} />
+      <Row label="Overhead"  value={overheadHint || <em style={{ color:'var(--ink-4)' }}>ยังไม่ระบุ</em>} />
+      <Row label="VAT"       value={vatLabel} />
+      <Row label="เงื่อนไข 5 ข้อ" value={<span style={{ display:'inline-flex', alignItems:'center', gap:6, fontSize:11, padding:'2px 8px', borderRadius:3, background:'#FFF4CC', color:'#6B5121', fontWeight:500 }}>Supplier กรอก</span>} last />
+    </div>
+  );
+}
+
+function Row({ label, value, last }) {
+  return (
+    <div style={{
+      display:'flex', justifyContent:'space-between', gap:12, alignItems:'flex-start',
+      padding:'8px 0', borderBottom: last ? 'none' : '1px solid var(--rule)',
+    }}>
+      <span style={{ fontSize:11.5, color:'var(--ink-3)', flexShrink:0 }}>{label}</span>
+      <span style={{ fontSize:12.5, color:'var(--ink)', textAlign:'right', fontWeight:450 }}>{value}</span>
+    </div>
+  );
+}
+
+/* ----- Mini Excel preview (right rail) ----- */
+function ExcelPreviewCard({ items }) {
+  return (
+    <div className="card" style={{ padding:0, overflow:'hidden' }}>
+      <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--rule)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <span className="eyebrow">Excel · ตัวอย่าง</span>
+        <span style={{ fontSize:10, fontFamily:'var(--font-mono)', color:'var(--ink-4)' }}>.xlsx</span>
+      </div>
+      <div style={{ background:'#FCFAF5', padding:'4px 0' }}>
+        <MiniSheet items={items} />
+      </div>
+      <div style={{ padding:'10px 16px', borderTop:'1px solid var(--rule)', fontSize:11, color:'var(--ink-3)' }}>
+        {items.length > 0
+          ? <span>{items.length} รายการ · ช่อง <strong style={{ color:'var(--ink-2)' }}>สีเหลือง</strong> ให้ Supplier กรอก</span>
+          : <span>ยังไม่มีรายการ — เพิ่มรายการเพื่อดูตัวอย่าง</span>}
+      </div>
+    </div>
+  );
+}
+
+function MiniSheet({ items }) {
+  const cols = ['ลำดับ','รหัส','รายการ','Description','จำนวน','หน่วย','ราคา/หน่วย','รวม'];
+  const widths = ['7%','14%','22%','14%','10%','10%','12%','11%'];
+  const supplierCols = new Set(['Description','ราคา/หน่วย','รวม']);
+  const display = items.slice(0,4);
+  const fillerRows = Math.max(0, 4 - display.length);
+  return (
+    <div style={{ fontSize:9, fontFamily:'var(--font-mono)', color:'var(--ink-2)' }}>
+      <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
+        <thead>
+          <tr style={{ background:'#E8E3D6' }}>
+            {cols.map((c,i) => (
+              <th key={c} style={{
+                width:widths[i], padding:'5px 6px', fontSize:8.5, fontWeight:500, color:'var(--ink-2)',
+                textAlign: ['จำนวน','ราคา/หน่วย','รวม'].includes(c) ? 'right' : 'left',
+                borderRight:'1px solid #D6CFBC',
+                whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+              }}>{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {display.map((it, i) => {
+            const it2 = findItem(it.source, it.itemCode) || {};
+            return (
+              <tr key={it.uid} style={{ background: i%2 ? '#FAF7F0' : '#FCFAF5' }}>
+                <td style={cellStyle(false)}>{i+1}</td>
+                <td style={cellStyle(false)}>{it.itemCode}</td>
+                <td style={{ ...cellStyle(false), overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{it2.name}</td>
+                <td style={cellStyle(true)}>—</td>
+                <td style={{ ...cellStyle(false), textAlign:'right' }}>{Number(it.qty).toLocaleString()}</td>
+                <td style={{ ...cellStyle(false), textAlign:'right' }}>{it.unit}</td>
+                <td style={{ ...cellStyle(true), textAlign:'right' }}>—</td>
+                <td style={{ ...cellStyle(true), borderRight:0, textAlign:'right' }}>—</td>
+              </tr>
+            );
+          })}
+          {[...Array(fillerRows)].map((_,i) => (
+            <tr key={'f'+i} style={{ background: (display.length+i)%2 ? '#FAF7F0' : '#FCFAF5', height:22 }}>
+              {cols.map((c,j) => <td key={j} style={cellStyle(supplierCols.has(c), j === cols.length-1)}></td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function cellStyle(supplierFill, last) {
+  return {
+    padding:'4px 6px',
+    borderRight: last ? 0 : '1px solid #E5DFD0',
+    borderBottom:'1px solid #E5DFD0',
+    background: supplierFill ? '#FFF4CC' : 'transparent',
+    color: supplierFill ? 'var(--ink-4)' : 'var(--ink-2)',
+  };
+}
+
+/* ----- Big Excel doc preview (success page) ----- */
+function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overheadHint, vatPolicy, notes }) {
+  return (
+    <div className="card" style={{ padding:0, overflow:'hidden', boxShadow:'0 8px 32px -16px rgba(20,18,14,0.18)' }}>
+      <div style={{
+        padding:'8px 14px', background:'#F3F1EA', borderBottom:'1px solid #D6CFBC',
+        fontSize:11, color:'var(--ink-3)', display:'flex', alignItems:'center', gap:12, fontFamily:'var(--font-mono)',
+      }}>
+        <span style={{ background:'#1F6F47', color:'#fff', padding:'2px 6px', borderRadius:2, fontSize:9.5, fontWeight:600 }}>XLSX</span>
+        <span>{rfqNo}_{(supplier?.name || '').replace(/\s+/g,'_')}.xlsx</span>
+      </div>
+
+      <div style={{ padding:'36px 48px', background:'#FFFFFF', minHeight:600 }}>
+        {/* Doc header */}
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:24, paddingBottom:16, borderBottom:'2px solid #15130E' }}>
+          <div>
+            <div style={{ fontSize:11, letterSpacing:0.16, textTransform:'uppercase', color:'var(--ink-3)' }}>Initial Estate Co., Ltd.</div>
+            <div style={{ fontFamily:'var(--font-serif)', fontSize:28, lineHeight:1.1, marginTop:6 }}>ใบขอให้เสนอราคา</div>
+            <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:4 }}>Request for Quotation (RFQ)</div>
+          </div>
+          <div style={{ textAlign:'right', fontSize:11.5, lineHeight:1.7 }}>
+            <div><span style={{ color:'var(--ink-3)' }}>เลขที่:</span> <span className="font-mono" style={{ fontWeight:500 }}>{rfqNo}</span></div>
+            <div><span style={{ color:'var(--ink-3)' }}>วันที่ออก:</span> {formatThaiDate(new Date().toISOString().slice(0,10))}</div>
+            <div><span style={{ color:'var(--ink-3)' }}>ครบกำหนดตอบกลับ:</span> <strong>{formatThaiDate(due)}</strong></div>
+          </div>
+        </div>
+
+        {/* Parties */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:24, marginBottom:24 }}>
+          <div>
+            <div style={{ fontSize:10, letterSpacing:0.12, textTransform:'uppercase', color:'var(--ink-3)', marginBottom:6 }}>เรียน — Supplier</div>
+            <div style={{ fontSize:14, fontWeight:500 }}>{supplier?.name}</div>
+            <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:4, lineHeight:1.6 }}>
+              {supplier?.contact}<br/>
+              {supplier?.email}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize:10, letterSpacing:0.12, textTransform:'uppercase', color:'var(--ink-3)', marginBottom:6 }}>โครงการ</div>
+            <div style={{ fontSize:14, fontWeight:500 }}>{project?.name}</div>
+            <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:4 }}>รหัส: {project?.id}</div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:10, letterSpacing:0.12, textTransform:'uppercase', color:'var(--ink-3)', marginBottom:4 }}>หัวข้อ</div>
+          <div style={{ fontSize:14, fontWeight:500 }}>{title}</div>
+        </div>
+
+        {/* Items table */}
+        <table style={{ width:'100%', borderCollapse:'collapse', marginTop:20, fontSize:11 }}>
+          <thead>
+            <tr style={{ background:'#15130E', color:'#FFFFFF' }}>
+              <th style={{ padding:'8px 8px', textAlign:'center', fontWeight:500, width:32 }}>#</th>
+              <th style={{ padding:'8px 8px', textAlign:'left', fontWeight:500, width:'12%' }}>รหัส</th>
+              <th style={{ padding:'8px 8px', textAlign:'left', fontWeight:500 }}>รายการ / Spec</th>
+              <th style={{ padding:'8px 8px', textAlign:'left', fontWeight:500, width:'18%', background:'#FFF4CC', color:'#15130E' }}>
+                Description<br/>
+                <span style={{ fontSize:9, fontWeight:400, color:'var(--ink-3)' }}>(กรอกโดย Supplier)</span>
+              </th>
+              <th style={{ padding:'8px 8px', textAlign:'right', fontWeight:500, width:'7%' }}>จำนวน</th>
+              <th style={{ padding:'8px 8px', textAlign:'left', fontWeight:500, width:'9%' }}>หน่วย</th>
+              <th style={{ padding:'8px 8px', textAlign:'right', fontWeight:500, width:'12%', background:'#FFF4CC', color:'#15130E' }}>ราคา/หน่วย (฿)</th>
+              <th style={{ padding:'8px 8px', textAlign:'right', fontWeight:500, width:'12%', background:'#FFF4CC', color:'#15130E' }}>รวม (฿)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, i) => {
+              const it2 = findItem(it.source, it.itemCode) || {};
+              return (
+                <tr key={it.uid} style={{ borderBottom:'1px solid #E5DFD0' }}>
+                  <td style={{ padding:'10px 8px', textAlign:'center', color:'var(--ink-3)', fontFamily:'var(--font-mono)' }}>{i+1}</td>
+                  <td style={{ padding:'10px 8px', fontFamily:'var(--font-mono)', fontSize:10, color:'var(--ink-2)' }}>{it.itemCode}</td>
+                  <td style={{ padding:'10px 8px' }}>
+                    <div style={{ fontWeight:500 }}>{it2.name}</div>
+                    {it2.spec && <div style={{ fontSize:10, color:'var(--ink-3)', marginTop:2 }}>{it2.spec}</div>}
+                  </td>
+                  <td style={{ padding:'10px 8px', background:'#FFFBEB', color:'var(--ink-4)', fontStyle:'italic', fontSize:10, verticalAlign:'top' }}>กรอกรายละเอียด</td>
+                  <td style={{ padding:'10px 8px', textAlign:'right', fontFamily:'var(--font-mono)' }}>{Number(it.qty).toLocaleString()}</td>
+                  <td style={{ padding:'10px 8px' }}>{it.unit}</td>
+                  <td style={{ padding:'10px 8px', background:'#FFFBEB', textAlign:'right', color:'var(--ink-4)', fontStyle:'italic', fontSize:10 }}>กรอกราคา</td>
+                  <td style={{ padding:'10px 8px', background:'#FFFBEB', textAlign:'right', color:'var(--ink-4)', fontStyle:'italic', fontSize:10 }}>auto</td>
+                </tr>
+              );
+            })}
+            {[...Array(Math.max(0, 3 - items.length))].map((_,i) => (
+              <tr key={'pad'+i} style={{ borderBottom:'1px solid #E5DFD0', height:38 }}>
+                <td colSpan={8}></td>
+              </tr>
+            ))}
+            <tr style={{ background:'#F6F2E9' }}>
+              <td colSpan={6} style={{ padding:'10px', textAlign:'right', fontSize:11.5, color:'var(--ink-2)' }}>
+                มูลค่ารวมรายการ (Subtotal)
+              </td>
+              <td colSpan={2} style={{ padding:'10px', textAlign:'right', color:'var(--ink-4)', fontStyle:'italic', fontSize:10.5 }}>—</td>
+            </tr>
+            <tr style={{ background:'#FFFBEB' }}>
+              <td colSpan={6} style={{ padding:'8px 10px', textAlign:'right', fontSize:11.5, color:'var(--ink-2)' }}>
+                Overhead <span style={{ color:'var(--ink-3)' }}>…………… % (Supplier ใส่)</span>
+                {overheadHint && <span style={{ marginLeft:8, fontSize:10, color:'var(--ink-3)', fontStyle:'italic' }}>หมายเหตุ: {overheadHint}</span>}
+              </td>
+              <td colSpan={2} style={{ padding:'8px 10px', textAlign:'right', color:'var(--ink-4)', fontStyle:'italic', fontSize:10.5 }}>—</td>
+            </tr>
+            <tr style={{ background:'#FFFBEB' }}>
+              <td colSpan={6} style={{ padding:'8px 10px', textAlign:'right', fontSize:11.5, color:'var(--ink-2)' }}>
+                VAT &nbsp;
+                <span style={{ display:'inline-flex', alignItems:'center', gap:14, fontSize:11, color:'var(--ink-2)' }}>
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:5 }}>
+                    <span style={{
+                      display:'inline-block', width:12, height:12,
+                      border:'1.4px solid var(--ink-2)', borderRadius:2, background:'#FFFFFF',
+                    }} /> มี
+                  </span>
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:5 }}>
+                    <span style={{
+                      display:'inline-block', width:12, height:12,
+                      border:'1.4px solid var(--ink-2)', borderRadius:2, background:'#FFFFFF',
+                    }} /> ไม่มี
+                  </span>
+                </span>
+                <span style={{ color:'var(--ink-3)', marginLeft:8 }}>(Supplier ติ๊ก)</span>
+                {vatPolicy === 'include'  && <span style={{ marginLeft:8, fontSize:10, color:'var(--ink-3)', fontStyle:'italic' }}>นโยบาย: ราคารวม VAT แล้ว</span>}
+                {vatPolicy === 'exclude'  && <span style={{ marginLeft:8, fontSize:10, color:'var(--ink-3)', fontStyle:'italic' }}>นโยบาย: ราคายังไม่รวม VAT</span>}
+                {vatPolicy === 'supplier' && <span style={{ marginLeft:8, fontSize:10, color:'var(--ink-3)', fontStyle:'italic' }}>นโยบาย: Supplier ระบุ</span>}
+              </td>
+              <td colSpan={2} style={{ padding:'8px 10px', textAlign:'right', color:'var(--ink-4)', fontStyle:'italic', fontSize:10.5 }}>—</td>
+            </tr>
+            <tr style={{ background:'#15130E', color:'#FFFFFF' }}>
+              <td colSpan={6} style={{ padding:'12px 10px', textAlign:'right', fontWeight:500, fontSize:13 }}>รวมราคา</td>
+              <td colSpan={2} style={{ padding:'12px 10px', textAlign:'right', fontFamily:'var(--font-mono)', fontSize:13 }}>
+                ………… บาท
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* 5 Supplier-fill conditions — blank lines for each */}
+        <div style={{ marginTop:32 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
+            <div style={{ fontSize:11, letterSpacing:0.12, textTransform:'uppercase', color:'var(--ink-3)', fontWeight:600 }}>
+              เงื่อนไขในใบเสนอราคา · 5 ข้อ
+            </div>
+            <span style={{ padding:'2px 8px', background:'#FFF4CC', color:'#6B5121', fontSize:9, fontWeight:600, letterSpacing:0.04, borderRadius:3 }}>
+              SUPPLIER กรอก
+            </span>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+            {[
+              { icon:'💳', label:'เงื่อนไขการชำระเงิน',  hint:'ระบุเครดิตเทอม · ช่องทาง · งวด' },
+              { icon:'🚚', label:'เงื่อนไขการจัดส่ง',     hint:'ค่าขนส่ง · จุดส่งมอบ' },
+              { icon:'⏱',  label:'เงื่อนไขการยืนราคา',    hint:'ระบุจำนวนวันที่ราคามีผล' },
+              { icon:'🛡️', label:'เงื่อนไขการรับประกัน',  hint:'ระยะเวลา · ขอบเขต · ข้อยกเว้น' },
+              { icon:'📦', label:'Lead Time ในการสั่ง',  hint:'จำนวนวันหลังออก PO ถึงส่งมอบ' },
+            ].map((c) => (
+              <div key={c.label} style={{ padding:'12px 14px', background:'#FFFBEB', border:'1px dashed #D6CFBC', borderRadius:4 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                  <span style={{ fontSize:13 }}>{c.icon}</span>
+                  <div style={{ fontSize:11, fontWeight:600, color:'var(--ink-2)' }}>{c.label}</div>
+                </div>
+                <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                  {[1,2,3].map(i => (
+                    <div key={i} style={{ borderBottom:'1px solid #D6CFBC', height:0 }} />
+                  ))}
+                </div>
+                <div style={{ marginTop:6, fontSize:10, color:'var(--ink-4)', fontStyle:'italic' }}>{c.hint}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {notes && (
+          <div style={{ marginTop:16 }}>
+            <div style={{ fontSize:10, letterSpacing:0.12, textTransform:'uppercase', color:'var(--ink-3)', marginBottom:6 }}>หมายเหตุเพิ่มเติม</div>
+            <p style={{ margin:0, color:'var(--ink-2)', fontSize:12, lineHeight:1.7, whiteSpace:'pre-wrap' }}>{notes}</p>
+          </div>
+        )}
+
+        <div style={{ marginTop:12, fontSize:11, color:'var(--ink-3)', fontStyle:'italic' }}>
+          * Supplier กรุณากรอกเงื่อนไขทั้ง 5 ข้อ · Description ของแต่ละรายการ · Overhead (%) และระบุสถานะ VAT — ฝ่ายจัดซื้อจะใช้ข้อมูลเปรียบเทียบกับ Supplier รายอื่น
+        </div>
+
+        {/* Sign-off — driven by Approval Roles master data */}
+        {(() => {
+          const roles = getActiveApprovalRoles() || [];
+          const all = [...roles, { name: `ผู้เสนอราคา (${supplier?.name || '—'})`, _supplier:true }];
+          const cols = Math.max(all.length, 4);
+          return (
+            <div style={{ marginTop:48, display:'grid', gridTemplateColumns:`repeat(${cols}, 1fr)`, gap:24 }}>
+              {[...Array(cols)].map((_,i) => {
+                const r = all[i];
+                return (
+                  <div key={i} style={{
+                    borderTop: r ? '1px solid var(--ink-3)' : '1px dashed var(--rule-2)',
+                    paddingTop:8, fontSize:11,
+                    color: r ? 'var(--ink-3)' : 'var(--ink-4)', textAlign:'center',
+                    fontStyle: r ? 'normal' : 'italic',
+                  }}>
+                    {r ? r.name : '(ยังไม่ระบุ)'}<br/>
+                    <span style={{ color:'var(--ink-4)' }}>
+                      {r?._supplier ? 'ลงนาม / ประทับตรา' : 'ลงนาม / วันที่'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
