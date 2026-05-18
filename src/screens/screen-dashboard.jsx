@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { Icons, Chip, Stat, Delta, Spark, Av, money } from '../lib/shell';
+import { Icons, Chip, Stat, Delta, Spark, Av, money, InitialEstateLogo } from '../lib/shell';
 
 export function ScreenDashboard({ go }) {
   return (
@@ -10,9 +10,12 @@ export function ScreenDashboard({ go }) {
           <div className="eyebrow">ภาพรวม · พฤษภาคม 2568</div>
           <h1 className="h-display">สวัสดี นวพร —<br/>มีงานที่ต้องดูวันนี้ <span style={{color:'var(--ink-3)'}}>4 รายการ</span></h1>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn">{Icons.download} Export</button>
-          <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้าง RFQ</button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
+          <InitialEstateLogo width={120} style={{ opacity: 0.82 }} />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn">{Icons.download} Export</button>
+            <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้าง RFQ</button>
+          </div>
         </div>
       </div>
 

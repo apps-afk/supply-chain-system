@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useId } from 'react';
 
 /* ----------------------- Icons (inline SVG) ----------------------- */
 const Icon = ({ d, size = 16, fill }) => (
@@ -48,6 +48,44 @@ export const Icons = {
   book:      <Icon d="M3 3.5h4.5a2 2 0 0 1 1 .5L9 4.5l.5-.5a2 2 0 0 1 1-.5H15M3 3.5v9h4.5a2 2 0 0 1 1 .5L9 13.5l.5-.5a2 2 0 0 1 1-.5H15v-9" />,
 };
 
+/* ----------------------- Company Logo ----------------------- */
+export function InitialEstateLogo({ width = 148, style }) {
+  const uid = useId().replace(/:/g, '-');
+  const clipId = `ie-n${uid}`;
+  const h = Math.round(width * 46 / 148);
+  return (
+    <svg width={width} height={h} viewBox="0 0 148 46" fill="none" aria-label="Initial Estate" style={style}>
+      <defs>
+        <clipPath id={clipId}>
+          <path d="M6 -4 L23 -4 L29 37 L12 37 Z" />
+        </clipPath>
+      </defs>
+      {/* Gold INITIAL wordmark */}
+      <text x="0" y="28"
+        fontFamily="'IBM Plex Serif', Georgia, 'Times New Roman', serif"
+        fontSize="26" fontWeight="600" fill="#C09535">
+        INITIAL
+      </text>
+      {/* Navy swoosh ribbon through N */}
+      <path d="M6 -4 L23 -4 L29 37 L12 37 Z" fill="#2B3060" />
+      {/* INITIAL in paper, clipped to swoosh area */}
+      <g clipPath={`url(#${clipId})`}>
+        <text x="0" y="28"
+          fontFamily="'IBM Plex Serif', Georgia, 'Times New Roman', serif"
+          fontSize="26" fontWeight="600" fill="#F5EFE2">
+          INITIAL
+        </text>
+      </g>
+      {/* ESTATE CO.,LTD. subtitle */}
+      <text x="0.5" y="42"
+        fontFamily="'IBM Plex Serif', Georgia, serif"
+        fontSize="7.5" fontWeight="500" fill="#2B3060" letterSpacing="2.6">
+        ESTATE CO.,LTD.
+      </text>
+    </svg>
+  );
+}
+
 /* ----------------------- Sidebar ----------------------- */
 export function Sidebar({ current, onNav }) {
   const Item = ({ id, icon, label, count }) => (
@@ -63,11 +101,8 @@ export function Sidebar({ current, onNav }) {
   return (
     <aside className="side">
       <div className="side-brand">
-        <div className="side-brand-mark">IE</div>
-        <div>
-          <div className="side-brand-name">Initial Estate</div>
-          <div className="side-brand-sub">Supply Chain</div>
-        </div>
+        <InitialEstateLogo width={148} />
+        <div className="side-brand-sub" style={{ paddingTop: 2 }}>Supply Chain System</div>
       </div>
 
       <div className="side-group">
