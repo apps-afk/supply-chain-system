@@ -11,5 +11,7 @@ export default withAuth({
 });
 
 export const config = {
-  matcher: ['/((?!api/auth|_next/static|_next/image|favicon\\.ico|login).*)'],
+  // Exclude /api entirely: API routes do their own session checks and need to
+  // return JSON 401/403 rather than HTML redirects.
+  matcher: ['/((?!api|_next/static|_next/image|favicon\\.ico|login).*)'],
 };

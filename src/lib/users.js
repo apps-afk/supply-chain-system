@@ -4,6 +4,21 @@ function hash(salt, password) {
   return createHash('sha256').update(salt + password).digest('hex');
 }
 
+export const ROLES = [
+  { value: 'admin',       label: 'ผู้ดูแลระบบ' },
+  { value: 'hr_manager',  label: 'ผู้จัดการ HR' },
+  { value: 'procurement', label: 'ฝ่ายจัดซื้อ' },
+  { value: 'accountant',  label: 'ฝ่ายบัญชี' },
+  { value: 'manager',     label: 'ผู้จัดการ' },
+  { value: 'user',        label: 'ผู้ใช้งานทั่วไป' },
+];
+
+export function roleLabel(value) {
+  return ROLES.find(r => r.value === value)?.label || value || '—';
+}
+
+const NOW = () => new Date().toISOString();
+
 // Built-in accounts — always available, no database needed
 // Change these passwords via ADMIN_PASSWORD env var in production
 const BUILTIN = [
@@ -14,6 +29,9 @@ const BUILTIN = [
     role: 'admin',
     salt: 'ie_admin_salt_2025',
     hash: hash('ie_admin_salt_2025', process.env.ADMIN_PASSWORD || 'Admin1234!'),
+    createdAt: '2025-01-01T00:00:00.000Z',
+    verified: true,
+    lastLogin: null,
   },
 ];
 
@@ -27,19 +45,40 @@ const BUILTIN = [
 if (!globalThis.__ieRegisteredUsers) {
   globalThis.__ieRegisteredUsers = [];
 }
-const registered = globalThis.__ieRegisteredUsers;
+if (!globalThis.__ieBuiltinMeta) {
+  // Mutable overlay on BUILTIN users: lastLogin, role overrides, etc.
+  globalThis.__ieBuiltinMeta = {};
+}
+const registered  = globalThis.__ieRegisteredUsers;
+const builtinMeta = globalThis.__ieBuiltinMeta;
+
+function allUsers() {
+  return [
+    ...BUILTIN.map(u => {
+      const meta = builtinMeta[u.email.toLowerCase()] || {};
+      return { ...u, ...meta };
+    }),
+    ...registered,
+  ];
+}
+
+function recordLogin(email) {
+  const key = email.toLowerCase();
+  const r = registered.find(u => u.email.toLowerCase() === key);
+  if (r) { r.lastLogin = NOW(); return; }
+  builtinMeta[key] = { ...(builtinMeta[key] || {}), lastLogin: NOW() };
+}
 
 export async function validateUser(email, password) {
-  const all = [...BUILTIN, ...registered];
-  const user = all.find(u => u.email.toLowerCase() === email.toLowerCase());
+  const user = allUsers().find(u => u.email.toLowerCase() === email.toLowerCase());
   if (!user) return null;
   if (hash(user.salt, password) !== user.hash) return null;
+  recordLogin(user.email);
   return { id: user.id, email: user.email, name: user.name, role: user.role };
 }
 
 export async function registerUser(name, email, password) {
-  const all = [...BUILTIN, ...registered];
-  if (all.find(u => u.email.toLowerCase() === email.toLowerCase())) {
+  if (allUsers().find(u => u.email.toLowerCase() === email.toLowerCase())) {
     throw new Error('อีเมลนี้มีผู้ใช้งานแล้ว');
   }
   const salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -47,13 +86,15 @@ export async function registerUser(name, email, password) {
     id: `user_${Date.now()}`,
     name, email, role: 'user',
     salt, hash: hash(salt, password),
+    createdAt: NOW(),
+    lastLogin: null,
+    verified: true,
   };
   registered.push(newUser);
   return { id: newUser.id, email: newUser.email, name: newUser.name };
 }
 
 export async function updatePassword(email, oldPassword, newPassword) {
-  // Registered users: update salt + hash in place
   const u = registered.find(r => r.email.toLowerCase() === email.toLowerCase());
   if (u) {
     if (hash(u.salt, oldPassword) !== u.hash) {
@@ -63,11 +104,80 @@ export async function updatePassword(email, oldPassword, newPassword) {
     u.hash = hash(u.salt, newPassword);
     return true;
   }
-  // BUILTIN admin password is derived from ADMIN_PASSWORD env var, so we
-  // can't persist a change here at runtime.
   const builtin = BUILTIN.find(b => b.email.toLowerCase() === email.toLowerCase());
   if (builtin) {
     throw new Error('บัญชีระบบเปลี่ยนรหัสผ่านได้ผ่านตัวแปร ADMIN_PASSWORD ใน Vercel เท่านั้น');
   }
   throw new Error('ไม่พบบัญชีผู้ใช้');
+}
+
+/* ===== Admin functions ===== */
+
+export async function listUsers() {
+  return allUsers().map(u => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    role: u.role,
+    createdAt: u.createdAt || null,
+    lastLogin: u.lastLogin || null,
+    verified: u.verified !== false,
+    isBuiltin: !!BUILTIN.find(b => b.email.toLowerCase() === u.email.toLowerCase()),
+  }));
+}
+
+export async function updateUserRole(email, newRole) {
+  if (!ROLES.find(r => r.value === newRole)) {
+    throw new Error('บทบาทไม่ถูกต้อง');
+  }
+  const r = registered.find(u => u.email.toLowerCase() === email.toLowerCase());
+  if (r) { r.role = newRole; return true; }
+  const builtin = BUILTIN.find(b => b.email.toLowerCase() === email.toLowerCase());
+  if (builtin) {
+    const key = email.toLowerCase();
+    builtinMeta[key] = { ...(builtinMeta[key] || {}), role: newRole };
+    return true;
+  }
+  throw new Error('ไม่พบบัญชีผู้ใช้');
+}
+
+export async function deleteUser(email) {
+  const builtin = BUILTIN.find(b => b.email.toLowerCase() === email.toLowerCase());
+  if (builtin) {
+    throw new Error('ไม่สามารถลบบัญชีระบบได้');
+  }
+  const idx = registered.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+  if (idx === -1) throw new Error('ไม่พบบัญชีผู้ใช้');
+  registered.splice(idx, 1);
+  return true;
+}
+
+export async function adminCreateUser(name, email, password, role = 'user') {
+  if (allUsers().find(u => u.email.toLowerCase() === email.toLowerCase())) {
+    throw new Error('อีเมลนี้มีผู้ใช้งานแล้ว');
+  }
+  if (!ROLES.find(r => r.value === role)) {
+    throw new Error('บทบาทไม่ถูกต้อง');
+  }
+  const salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const newUser = {
+    id: `user_${Date.now()}`,
+    name, email, role,
+    salt, hash: hash(salt, password),
+    createdAt: NOW(),
+    lastLogin: null,
+    verified: true,
+  };
+  registered.push(newUser);
+  return { id: newUser.id, email: newUser.email, name: newUser.name, role: newUser.role };
+}
+
+export async function adminResetPassword(email, newPassword) {
+  const r = registered.find(u => u.email.toLowerCase() === email.toLowerCase());
+  if (r) {
+    r.salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    r.hash = hash(r.salt, newPassword);
+    return true;
+  }
+  throw new Error('ไม่สามารถรีเซ็ตรหัสผ่านของบัญชีระบบได้ — ตั้งผ่าน ADMIN_PASSWORD');
 }

@@ -168,7 +168,7 @@ export function Sidebar({ current, onNav }) {
         <Item id="contract-types" icon="fileCheck" label="ประเภทสัญญา" count="8" />
         <Item id="units"          icon="ruler"     label="หน่วยนับ" count="24" />
         <Item id="approval-roles" icon="fileCheck" label="ตำแหน่งผู้อนุมัติ" count="5" />
-        <Item id="users"          icon="users"     label="ผู้ใช้งาน" count="10" />
+        <Item id="team"           icon="users"     label="ทีมงานและสิทธิ์" />
       </div>
 
       <SideFooter onNav={onNav} />
