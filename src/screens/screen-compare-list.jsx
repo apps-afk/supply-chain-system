@@ -1,24 +1,18 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icons } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 
 /*
   Compare List — index of all เปรียบเทียบราคา documents.
-  - Auto-run code CMP-NNNNN
-  - 2 modes: Price DB (A) and RFQ (B)
-  - 3 statuses:
-      Pending   = รอเลือก  (Compare แล้ว แต่ยังไม่ Upload เอกสารที่เลือก)
-      Decided   = เลือกแล้ว (Upload เอกสารแล้ว)
-      Reference = เพื่อเป็นข้อมูล (เปรียบเทียบเฉยๆ)
+  - Backed by /api/comparisons (status: draft|finalized|archived)
+  - 2 modes: Price DB (A) and RFQ (B) — derived from suppliers_json.mode
 */
 
-const COMPARE_DOCS = [];
-
 const STATUS_PILL = {
-  'Pending':   { bg:'var(--chip-recv-bg)', fg:'var(--chip-recv-fg)', dot:'var(--ochre)', label:'รอเลือก' },
-  'Decided':   { bg:'var(--moss-soft)',    fg:'#2F4A1A',             dot:'var(--moss)',  label:'เลือกแล้ว' },
-  'Reference': { bg:'var(--paper-2)',      fg:'var(--ink-3)',        dot:'var(--ink-4)', label:'เพื่อเป็นข้อมูล' },
+  'draft':     { bg:'var(--chip-recv-bg)', fg:'var(--chip-recv-fg)', dot:'var(--ochre)', label:'ร่าง' },
+  'finalized': { bg:'var(--moss-soft)',    fg:'#2F4A1A',             dot:'var(--moss)',  label:'เลือกแล้ว' },
+  'archived':  { bg:'var(--paper-2)',      fg:'var(--ink-3)',        dot:'var(--ink-4)', label:'จัดเก็บ' },
 };
 
 const MODE_PILL = {
@@ -27,24 +21,44 @@ const MODE_PILL = {
 };
 
 export function ScreenCompareList({ go }) {
-  const [q, setQ] = useState('');
+  const [docs, setDocs]                 = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [err, setErr]                   = useState('');
+  const [q, setQ]                       = useState('');
   const [statusFilter, setStatusFilter] = useState('ทั้งหมด');
-  const [modeFilter, setModeFilter] = useState('ทั้งหมด');
-  const [createOpen, setCreateOpen] = useState(false);
+  const [modeFilter, setModeFilter]     = useState('ทั้งหมด');
+  const [createOpen, setCreateOpen]     = useState(false);
 
-  const filtered = COMPARE_DOCS.filter(d => {
+  useEffect(() => {
+    (async () => {
+      setLoading(true); setErr('');
+      try {
+        const res = await fetch('/api/comparisons');
+        const data = await res.json();
+        if (!res.ok) setErr(data.error || 'โหลดข้อมูลไม่สำเร็จ');
+        else setDocs(data.items || []);
+      } catch {
+        setErr('เครือข่ายขัดข้อง');
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const filtered = docs.filter(d => {
     if (statusFilter !== 'ทั้งหมด' && d.status !== statusFilter) return false;
-    if (modeFilter   !== 'ทั้งหมด' && d.mode   !== modeFilter)   return false;
+    const mode = d.suppliers_json?.mode || 'PriceDB';
+    if (modeFilter !== 'ทั้งหมด' && mode !== modeFilter) return false;
     if (q) {
       const v = q.toLowerCase();
-      if (!(d.code.toLowerCase().includes(v) || d.category.includes(q) || d.project.includes(q) || (d.selectedSupplier||'').includes(q))) return false;
+      const hay = `${d.no || ''} ${d.title || ''} ${d.suppliers_json?.selectedSupplier || ''}`.toLowerCase();
+      if (!hay.includes(v)) return false;
     }
     return true;
   });
 
-  const pending   = COMPARE_DOCS.filter(d => d.status === 'Pending').length;
-  const decided   = COMPARE_DOCS.filter(d => d.status === 'Decided').length;
-  const reference = COMPARE_DOCS.filter(d => d.status === 'Reference').length;
+  const draft     = docs.filter(d => d.status === 'draft').length;
+  const finalized = docs.filter(d => d.status === 'finalized').length;
+  const archived  = docs.filter(d => d.status === 'archived').length;
 
   return (
     <div className="page">
@@ -68,23 +82,27 @@ export function ScreenCompareList({ go }) {
         borderTop:'1px solid var(--rule)', borderBottom:'1px solid var(--rule)',
         padding:'24px 0', marginBottom:32,
       }}>
-        <StatusStat label="รอเลือก" count={pending}
+        <StatusStat label="ร่าง" count={draft}
           dot="var(--ochre)" valueColor="var(--ink)"
-          sub="Compare แล้ว แต่ยังไม่ Upload เอกสารที่เลือก" />
-        <StatusStat label="เลือกแล้ว" count={decided}
+          sub="Compare แล้ว ยังไม่ปิด" />
+        <StatusStat label="เลือกแล้ว" count={finalized}
           dot="var(--moss)" valueColor="var(--moss)"
           sub="Upload เอกสารแล้ว · ปิดเอกสาร"
           divider />
-        <StatusStat label="เพื่อเป็นข้อมูล" count={reference}
+        <StatusStat label="จัดเก็บ" count={archived}
           dot="var(--ink-4)" valueColor="var(--ink-3)"
-          sub="เปรียบเทียบเฉยๆ ไม่ได้นำไปตัดสินใจ"
+          sub="ปิดเก็บไว้เป็นข้อมูลอ้างอิง"
           divider />
       </div>
+
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
 
       {/* Filters */}
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16, flexWrap:'wrap' }}>
         <div style={{ display:'flex', gap:4 }}>
-          {['ทั้งหมด','Pending','Decided','Reference'].map(f => (
+          {['ทั้งหมด','draft','finalized','archived'].map(f => (
             <button key={f} onClick={() => setStatusFilter(f)} className="btn sm" style={{
               background: statusFilter === f ? 'var(--ink)' : 'transparent',
               color: statusFilter === f ? 'var(--paper)' : 'var(--ink-2)',
