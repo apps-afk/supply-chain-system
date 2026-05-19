@@ -1,0 +1,42 @@
+name: Verify Supabase State
+
+on:
+  workflow_dispatch:
+    inputs:
+      pat:
+        description: 'PAT (sbp_...)'
+        required: true
+        type: string
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tables and admin user via Management API
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          URL: ${{ secrets.SUPABASE_URL }}
+          PAT: ${{ inputs.pat }}
+        run: |
+          REF=$(echo "$URL" | sed -E 's|https://([^.]+)\..*|\1|')
+
+          echo "=== List tables via Management API ==="
+          curl -sS "https://api.supabase.com/v1/projects/$REF/database/query" \
+            -X POST -H "Authorization: Bearer $PAT" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"select tablename from pg_tables where schemaname=$$public$$ order by tablename"}' | python3 -m json.tool
+
+          echo ""
+          echo "=== Check seeded user pasit@initialestate.com ==="
+          curl -sS "$URL/rest/v1/users?email=eq.pasit@initialestate.com&select=id,email,name,role,created_at" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | python3 -m json.tool
+
+          echo ""
+          echo "=== Counts in key tables ==="
+          for t in users workspace_settings dsar_requests units suppliers materials projects; do
+            CODE=$(curl -sS -o /tmp/cnt -w "%{http_code}" \
+              "$URL/rest/v1/$t?select=count" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+              -H "Prefer: count=exact")
+            echo "  $t → HTTP $CODE — content: $(cat /tmp/cnt)"
+          done
