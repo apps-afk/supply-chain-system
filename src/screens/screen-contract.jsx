@@ -74,6 +74,7 @@ export function ScreenContractList({ go }) {
   const [contracts, setContracts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [projects,  setProjects]  = useState([]);
+  const [attachmentsByContract, setAttachmentsByContract] = useState({});  // id → [attachment, ...]
   const [loading,   setLoading]   = useState(true);
   const [err,       setErr]       = useState('');
   const [q, setQ] = useState('');
@@ -83,14 +84,24 @@ export function ScreenContractList({ go }) {
   async function load() {
     setLoading(true); setErr('');
     try {
-      const [rContracts, rSuppliers, rProjects] = await Promise.all([
+      const [rContracts, rSuppliers, rProjects, rAtt] = await Promise.all([
         fetch('/api/contracts'),
         fetch('/api/suppliers'),
         fetch('/api/projects'),
+        fetch('/api/attachments?entity_type=contract&limit=500'),
       ]);
       const dContracts = await rContracts.json();
       const dSuppliers = await rSuppliers.json();
       const dProjects  = await rProjects.json();
+      const dAtt       = await rAtt.ok ? await rAtt.json() : { items: [] };
+
+      // Group attachments by contract id, keep most recent first
+      const grouped = {};
+      for (const a of (dAtt.items || [])) {
+        if (!a.entity_id) continue;
+        (grouped[a.entity_id] = grouped[a.entity_id] || []).push(a);
+      }
+      setAttachmentsByContract(grouped);
       if (!rContracts.ok) { setErr(dContracts.error || 'โหลดข้อมูลไม่สำเร็จ'); }
       setContracts(dContracts.items || []);
       setSuppliers(dSuppliers.items || []);
@@ -218,15 +229,16 @@ export function ScreenContractList({ go }) {
               <th>หัวข้อ / โครงการ</th>
               <th>คู่สัญญา</th>
               <th className="num-col">มูลค่า</th>
-              <th>กิจกรรมล่าสุด</th>
+              <th>เซ็นเมื่อ</th>
               <th>สถานะ</th>
+              <th style={{ width:120 }}>ไฟล์</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล
               </td></tr>
             ) : filtered.map(c => {
@@ -234,6 +246,8 @@ export function ScreenContractList({ go }) {
               const sp = bucket ? CT_STATUS[bucket] : { bg:'var(--paper-2)', fg:'var(--ink-3)', dot:'var(--ink-4)', label: DB_STATUS_LABEL[c.status] || c.status };
               const supplierName = supName(c.supplier_id);
               const projectName  = projName(c.project_id);
+              const atts = attachmentsByContract[c.id] || [];
+              const latest = atts[0];
               return (
                 <tr key={c.id} onClick={() => { window.localStorage.setItem('contract.currentId', c.id); go('contract-detail'); }} style={{ cursor:'pointer' }}>
                   <td>
@@ -250,7 +264,9 @@ export function ScreenContractList({ go }) {
                     </span>
                   </td>
                   <td className="num-col num" style={{ fontWeight:500 }}>{c.amount != null ? money(c.amount) : '—'}</td>
-                  <td style={{ fontSize:12, color:'var(--ink-3)' }}>{fmtDate(c.updated_at || c.created_at)}</td>
+                  <td style={{ fontSize:12, color:'var(--ink-3)' }}>
+                    {c.signed_at ? fmtDate(c.signed_at) : <span style={{ color:'var(--ink-4)' }}>ยังไม่เซ็น</span>}
+                  </td>
                   <td>
                     <span style={{
                       display:'inline-flex', alignItems:'center', gap:6,
@@ -260,6 +276,17 @@ export function ScreenContractList({ go }) {
                       <span style={{ width:6, height:6, borderRadius:999, background: sp.dot }} />
                       {sp.label}
                     </span>
+                  </td>
+                  <td onClick={e => e.stopPropagation()}>
+                    {latest && latest.drive_view_link ? (
+                      <a href={latest.drive_view_link} target="_blank" rel="noopener noreferrer"
+                         style={{ fontSize:11.5, color:'var(--teal)', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:4 }}>
+                        📄 เปิดใน Drive
+                        {atts.length > 1 && <span style={{ fontSize:10, color:'var(--ink-4)' }}>({atts.length})</span>}
+                      </a>
+                    ) : (
+                      <span style={{ fontSize:11, color:'var(--ink-4)' }}>ยังไม่มีไฟล์</span>
+                    )}
                   </td>
                 </tr>
               );
@@ -548,6 +575,8 @@ export function ScreenContract({ go }) {
   // The list-screen row click stashes the id in localStorage. We try that
   // first, then fall back to the most-recently-created contract.
   const [contract,  setContract]  = useState(null);
+  const [allContracts, setAllContracts] = useState([]);
+  const [allAttachments, setAllAttachments] = useState({});  // id → [att, ...]
   const [suppliers, setSuppliers] = useState([]);
   const [projects,  setProjects]  = useState([]);
   const [attachments, setAttachments] = useState([]);
@@ -574,16 +603,26 @@ export function ScreenContract({ go }) {
       setLoading(true); setErr('');
       try {
         const stashed = (typeof window !== 'undefined') ? window.localStorage.getItem('contract.currentId') : null;
-        const [rC, rS, rP] = await Promise.all([
+        const [rC, rS, rP, rA] = await Promise.all([
           fetch('/api/contracts'),
           fetch('/api/suppliers'),
           fetch('/api/projects'),
+          fetch('/api/attachments?entity_type=contract&limit=500'),
         ]);
         const dC = await rC.json();
         const dS = await rS.json();
         const dP = await rP.json();
+        const dA = rA.ok ? await rA.json() : { items: [] };
         if (!rC.ok) { setErr(dC.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
         const items = dC.items || [];
+        // Group attachments by contract id
+        const grouped = {};
+        for (const a of (dA.items || [])) {
+          if (!a.entity_id) continue;
+          (grouped[a.entity_id] = grouped[a.entity_id] || []).push(a);
+        }
+        setAllAttachments(grouped);
+        setAllContracts(items);
         const picked = (stashed && items.find(c => c.id === stashed)) || items[0] || null;
         setContract(picked);
         setSuppliers(dS.items || []);
@@ -879,7 +918,117 @@ export function ScreenContract({ go }) {
           onDone={() => { setFinalOpen(false); setPhase('Final'); }}
           onClose={() => setFinalOpen(false)} />
       )}
+
+      {/* คลังสัญญาทั้งหมด — at bottom so user can navigate */}
+      {allContracts.length > 0 && (
+        <ContractArchive
+          contracts={allContracts}
+          currentId={contract?.id}
+          attachmentsByContract={allAttachments}
+          suppliers={suppliers}
+          projects={projects}
+          go={go}
+        />
+      )}
     </div>
+  );
+}
+
+/* =================== Contract Archive (mini list) =================== */
+function ContractArchive({ contracts, currentId, attachmentsByContract, suppliers, projects, go }) {
+  const supName = (id) => suppliers.find(s => s.id === id)?.name || '—';
+  const projName = (id) => projects.find(p => p.id === id)?.name || '—';
+
+  const signedContracts = contracts.filter(c => c.status === 'active');
+  const totalSignedValue = signedContracts.reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+
+  return (
+    <section style={{ marginTop:56 }}>
+      <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:14 }}>
+        <h2 className="h-section">คลังสัญญาทั้งหมด</h2>
+        <div style={{ display:'flex', gap:18, fontSize:12.5, color:'var(--ink-3)' }}>
+          <span>ทั้งหมด <strong style={{ color:'var(--ink)' }}>{contracts.length}</strong> ฉบับ</span>
+          <span>เซ็นแล้ว <strong style={{ color:'var(--moss)' }}>{signedContracts.length}</strong> ฉบับ</span>
+          <span>มูลค่ารวม <strong style={{ color:'var(--ink-2)' }}>{money(totalSignedValue)}</strong></span>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding:0 }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th style={{ width:'12%' }}>เลขที่</th>
+              <th>หัวข้อ / โครงการ</th>
+              <th>คู่สัญญา</th>
+              <th className="num-col">มูลค่า</th>
+              <th>เซ็นเมื่อ</th>
+              <th>สถานะ</th>
+              <th style={{ width:110 }}>ไฟล์</th>
+            </tr>
+          </thead>
+          <tbody>
+            {contracts.map(c => {
+              const bucket = DB_TO_BUCKET[c.status];
+              const sp = bucket ? CT_STATUS[bucket] : { bg:'var(--paper-2)', fg:'var(--ink-3)', dot:'var(--ink-4)', label: DB_STATUS_LABEL[c.status] || c.status };
+              const atts = attachmentsByContract[c.id] || [];
+              const latest = atts[0];
+              const isCurrent = c.id === currentId;
+              return (
+                <tr key={c.id}
+                  onClick={() => {
+                    if (isCurrent) return;
+                    try { window.localStorage.setItem('contract.currentId', c.id); } catch {}
+                    go('contract-detail');
+                    // Force reload of detail by re-navigating
+                    if (typeof window !== 'undefined') window.location.reload();
+                  }}
+                  style={{
+                    cursor: isCurrent ? 'default' : 'pointer',
+                    background: isCurrent ? 'var(--paper-2)' : undefined,
+                  }}>
+                  <td>
+                    <div className="font-mono" style={{ fontSize:12, color: isCurrent ? 'var(--teal)' : 'var(--ink-2)', fontWeight:500 }}>
+                      {c.no} {isCurrent && <span style={{ fontSize:10 }}>← กำลังดู</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ fontWeight:500, fontSize:13 }}>{c.title || '—'}</div>
+                    <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:2 }}>{projName(c.project_id)}</div>
+                  </td>
+                  <td style={{ fontSize:12.5 }}>{supName(c.supplier_id)}</td>
+                  <td className="num-col num" style={{ fontWeight:500, fontSize:13 }}>
+                    {c.amount != null ? money(c.amount) : '—'}
+                  </td>
+                  <td style={{ fontSize:12, color:'var(--ink-3)' }}>
+                    {c.signed_at ? fmtDate(c.signed_at) : <span style={{ color:'var(--ink-4)' }}>—</span>}
+                  </td>
+                  <td>
+                    <span style={{
+                      display:'inline-flex', alignItems:'center', gap:6,
+                      fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
+                      background: sp.bg, color: sp.fg,
+                    }}>
+                      <span style={{ width:6, height:6, borderRadius:999, background: sp.dot }} />
+                      {sp.label}
+                    </span>
+                  </td>
+                  <td onClick={e => e.stopPropagation()}>
+                    {latest && latest.drive_view_link ? (
+                      <a href={latest.drive_view_link} target="_blank" rel="noopener noreferrer"
+                         style={{ fontSize:11.5, color:'var(--teal)', textDecoration:'none' }}>
+                        📄 Drive {atts.length > 1 && `(${atts.length})`}
+                      </a>
+                    ) : (
+                      <span style={{ fontSize:11, color:'var(--ink-4)' }}>—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
