@@ -95,7 +95,11 @@ export function ScreenRFQCreate({ go }) {
 
   // Supplier
   const [supplierId, setSupplierId] = useState(null);
-  const supplier = suppliers.find(s => s.id === supplierId);
+  // Memoised — was .find() every render, even though supplier list is stable
+  const supplier = useMemo(
+    () => suppliers.find(s => s.id === supplierId),
+    [suppliers, supplierId]
+  );
 
   // Items
   const [rows, setRows] = useState([blankRow(), blankRow(), blankRow()]);
@@ -115,10 +119,24 @@ export function ScreenRFQCreate({ go }) {
     setSupplierId(s.id);
   };
 
-  // Derived
-  const itemsFilled = rows.filter(r => r.itemCode);
-  const itemsValid  = rows.filter(r => r.itemCode && Number(r.qty) > 0 && r.unit);
+  // Derived — memoised so typing in unrelated fields doesn't re-scan rows
+  const { itemsFilled, itemsValid } = useMemo(() => {
+    const filled = [];
+    const valid = [];
+    for (const r of rows) {
+      if (r.itemCode) {
+        filled.push(r);
+        if (Number(r.qty) > 0 && r.unit) valid.push(r);
+      }
+    }
+    return { itemsFilled: filled, itemsValid: valid };
+  }, [rows]);
   const canGenerate = !!supplier && itemsValid.length > 0 && title.trim().length > 0 && !saving;
+  // Memoised project lookup — was .find() in the SummaryCard prop every render
+  const projectObj = useMemo(
+    () => projects.find(p => p.id === project),
+    [projects, project]
+  );
 
   async function submit() {
     setSaveErr('');
@@ -164,17 +182,21 @@ export function ScreenRFQCreate({ go }) {
     }
   }
 
-  // Row helpers
-  const updateRow = (uid, patch) => setRows(rows.map(r => r.uid === uid ? { ...r, ...patch } : r));
+  // Row helpers — use functional setState so back-to-back updates (e.g. two
+  // selects fired before React re-renders) don't clobber each other.
+  const updateRow = (uid, patch) => setRows(rs => rs.map(r => r.uid === uid ? { ...r, ...patch } : r));
   const onPickSource = (uid, source) => updateRow(uid, { source, catShort:'', itemCode:'', unit:'' });
   const onPickCat    = (uid, catShort) => updateRow(uid, { catShort, itemCode:'', unit:'' });
   const onPickItem   = (uid, code) => {
-    const row = rows.find(r => r.uid === uid);
-    const it = findItem(row.source, code);
-    updateRow(uid, { itemCode: code, unit: it?.unit || '' });
+    setRows(rs => {
+      const row = rs.find(r => r.uid === uid);
+      if (!row) return rs;
+      const it = findItem(row.source, code);
+      return rs.map(r => r.uid === uid ? { ...r, itemCode: code, unit: it?.unit || '' } : r);
+    });
   };
-  const addRow    = () => setRows([...rows, blankRow()]);
-  const removeRow = (uid) => setRows(rows.length === 1 ? [blankRow()] : rows.filter(r => r.uid !== uid));
+  const addRow    = () => setRows(rs => [...rs, blankRow()]);
+  const removeRow = (uid) => setRows(rs => rs.length === 1 ? [blankRow()] : rs.filter(r => r.uid !== uid));
 
   if (generated) {
     return <GeneratedView go={go} rfqNo={rfqNo} title={title} supplier={supplier} project={project} projects={projects} items={itemsValid} due={due} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />;
@@ -435,7 +457,7 @@ export function ScreenRFQCreate({ go }) {
           <SummaryCard
             rfqNo={rfqNo}
             title={title}
-            project={projects.find(p => p.id === project)}
+            project={projectObj}
             supplier={supplier}
             items={itemsValid}
             due={due}

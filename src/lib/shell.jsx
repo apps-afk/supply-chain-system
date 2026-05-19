@@ -104,7 +104,7 @@ function SideItem({ id, icon, label, count, current, onNav }) {
   );
 }
 
-export function Sidebar({ current, onNav }) {
+function SidebarImpl({ current, onNav }) {
   const Item = (props) => <SideItem {...props} current={current} onNav={onNav} />;
   return (
     <aside className="side">
@@ -148,9 +148,12 @@ export function Sidebar({ current, onNav }) {
     </aside>
   );
 }
+// React.memo so the sidebar doesn't re-render when only the current screen's
+// inner state changes (App passes stable `current` + memoised `onNav`).
+export const Sidebar = React.memo(SidebarImpl);
 
 /* ----------------------- Topbar ----------------------- */
-export function Topbar({ crumbs, onNav }) {
+function TopbarImpl({ crumbs, onNav }) {
   return (
     <div className="topbar">
       <div className="crumb">
@@ -175,6 +178,9 @@ export function Topbar({ crumbs, onNav }) {
     </div>
   );
 }
+// Memoised so it doesn't re-render when the inner screen state changes
+// (App passes stable crumbs from a module-scope object and a memoised onNav).
+export const Topbar = React.memo(TopbarImpl);
 
 /* ----------------------- Topbar user menu (avatar + dropdown) ----- */
 const ROLE_LABEL = {
@@ -186,7 +192,7 @@ const ROLE_LABEL = {
   user:        'ผู้ใช้งานทั่วไป',
 };
 
-function UserMenu({ onNav }) {
+const UserMenu = React.memo(function UserMenu({ onNav }) {
   const { data: session } = useSession();
   const [open, setOpen]   = useState(false);
   const ref               = useRef(null);
@@ -305,7 +311,7 @@ function UserMenu({ onNav }) {
       )}
     </div>
   );
-}
+});
 
 function MenuItem({ onClick, children, tone }) {
   const [hover, setHover] = useState(false);

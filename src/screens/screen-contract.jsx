@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, Av, money } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 /*
@@ -143,35 +143,52 @@ export function ScreenContractList({ go }) {
   }
   useEffect(() => { load(); }, []);
 
-  const supName = (id) => suppliers.find(s => s.id === id)?.name || '—';
-  const projName = (id) => projects.find(p => p.id === id)?.name || '—';
+  // O(1) name lookups (replaces .find() in every render)
+  const supById = useMemo(() => {
+    const m = new Map();
+    for (const s of suppliers) m.set(s.id, s);
+    return m;
+  }, [suppliers]);
+  const projById = useMemo(() => {
+    const m = new Map();
+    for (const p of projects) m.set(p.id, p);
+    return m;
+  }, [projects]);
+  const supName = (id) => supById.get(id)?.name || '—';
+  const projName = (id) => projById.get(id)?.name || '—';
 
-  const filtered = contracts.filter(c => {
-    if (filter !== 'ทั้งหมด') {
-      // filter can be either a UI bucket (Uploaded/Reviewing/...) or a DB status
-      if (CT_STATUS[filter]) {
-        if (DB_TO_BUCKET[c.status] !== filter) return false;
-      } else if (c.status !== filter) {
-        return false;
+  const filtered = useMemo(() => {
+    const v = q.toLowerCase();
+    return contracts.filter(c => {
+      if (filter !== 'ทั้งหมด') {
+        // filter can be either a UI bucket (Uploaded/Reviewing/...) or a DB status
+        if (CT_STATUS[filter]) {
+          if (DB_TO_BUCKET[c.status] !== filter) return false;
+        } else if (c.status !== filter) {
+          return false;
+        }
       }
-    }
-    if (q) {
-      const v = q.toLowerCase();
-      const hit =
-        (c.no || '').toLowerCase().includes(v) ||
-        (c.title || '').toLowerCase().includes(v) ||
-        supName(c.supplier_id).toLowerCase().includes(v) ||
-        projName(c.project_id).toLowerCase().includes(v);
-      if (!hit) return false;
-    }
-    return true;
-  });
+      if (q) {
+        const hit =
+          (c.no || '').toLowerCase().includes(v) ||
+          (c.title || '').toLowerCase().includes(v) ||
+          (supById.get(c.supplier_id)?.name || '').toLowerCase().includes(v) ||
+          (projById.get(c.project_id)?.name || '').toLowerCase().includes(v);
+        if (!hit) return false;
+      }
+      return true;
+    });
+  }, [contracts, filter, q, supById, projById]);
 
-  // Pipeline counts — derived from DB statuses via DB_TO_BUCKET
-  const stats = ['Uploaded','Reviewing','Reviewed','Legal','Final'].map(b => ({
-    s: b,
-    count: contracts.filter(c => DB_TO_BUCKET[c.status] === b).length,
-  }));
+  // Pipeline counts — single pass instead of 5 filters
+  const stats = useMemo(() => {
+    const counts = { Uploaded:0, Reviewing:0, Reviewed:0, Legal:0, Final:0 };
+    for (const c of contracts) {
+      const b = DB_TO_BUCKET[c.status];
+      if (b && counts[b] !== undefined) counts[b]++;
+    }
+    return ['Uploaded','Reviewing','Reviewed','Legal','Final'].map(b => ({ s: b, count: counts[b] }));
+  }, [contracts]);
 
   return (
     <div className="page">
@@ -706,7 +723,9 @@ export function ScreenContract({ go }) {
         if (picked) {
           // map DB status to a starting phase
           setPhase(DB_TO_BUCKET[picked.status] || 'Uploaded');
-          await loadAttachments(picked.id);
+          // Reuse the grouped attachments — saves a redundant round-trip
+          // (we already fetched all contract attachments with limit=500 above).
+          setAttachments(grouped[picked.id] || []);
         }
       } catch {
         setErr('เครือข่ายขัดข้อง');
@@ -715,8 +734,15 @@ export function ScreenContract({ go }) {
     })();
   }, []);
 
-  const supplier = suppliers.find(s => s.id === contract?.supplier_id);
-  const project  = projects.find(p  => p.id === contract?.project_id);
+  // O(1) lookups (replaces .find() that ran on every render)
+  const supplier = useMemo(
+    () => suppliers.find(s => s.id === contract?.supplier_id),
+    [suppliers, contract?.supplier_id]
+  );
+  const project = useMemo(
+    () => projects.find(p => p.id === contract?.project_id),
+    [projects, contract?.project_id]
+  );
   const sp = CT_STATUS[phase] || CT_STATUS.Uploaded;
 
   async function uploadFinalFile(file) {
@@ -1093,11 +1119,30 @@ export function ScreenContract({ go }) {
 
 /* =================== Contract Archive (mini list) =================== */
 function ContractArchive({ contracts, currentId, attachmentsByContract, suppliers, projects, go }) {
-  const supName = (id) => suppliers.find(s => s.id === id)?.name || '—';
-  const projName = (id) => projects.find(p => p.id === id)?.name || '—';
+  // O(1) name lookups (was .find() per row × per render)
+  const supById = useMemo(() => {
+    const m = new Map();
+    for (const s of suppliers) m.set(s.id, s);
+    return m;
+  }, [suppliers]);
+  const projById = useMemo(() => {
+    const m = new Map();
+    for (const p of projects) m.set(p.id, p);
+    return m;
+  }, [projects]);
+  const supName = (id) => supById.get(id)?.name || '—';
+  const projName = (id) => projById.get(id)?.name || '—';
 
-  const signedContracts = contracts.filter(c => c.status === 'active');
-  const totalSignedValue = signedContracts.reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
+  const { signedCount, totalSignedValue } = useMemo(() => {
+    let count = 0, total = 0;
+    for (const c of contracts) {
+      if (c.status === 'active') {
+        count++;
+        total += Number(c.amount) || 0;
+      }
+    }
+    return { signedCount: count, totalSignedValue: total };
+  }, [contracts]);
 
   return (
     <section style={{ marginTop:56 }}>
@@ -1105,7 +1150,7 @@ function ContractArchive({ contracts, currentId, attachmentsByContract, supplier
         <h2 className="h-section">คลังสัญญาทั้งหมด</h2>
         <div style={{ display:'flex', gap:18, fontSize:12.5, color:'var(--ink-3)' }}>
           <span>ทั้งหมด <strong style={{ color:'var(--ink)' }}>{contracts.length}</strong> ฉบับ</span>
-          <span>เซ็นแล้ว <strong style={{ color:'var(--moss)' }}>{signedContracts.length}</strong> ฉบับ</span>
+          <span>เซ็นแล้ว <strong style={{ color:'var(--moss)' }}>{signedCount}</strong> ฉบับ</span>
           <span>มูลค่ารวม <strong style={{ color:'var(--ink-2)' }}>{money(totalSignedValue)}</strong></span>
         </div>
       </div>

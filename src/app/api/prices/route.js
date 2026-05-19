@@ -5,6 +5,9 @@ const h = createCrudRoutes('price_points', {
   orderBy: 'captured_at',
   orderDir: 'desc',
   idPrefix: 'price',
+  // Price points are written by the RFQ-confirm flow — any procurement user
+  // must be able to add price observations, not just admins.
+  writeRole: 'session',
 });
 
 export const GET    = h.list;

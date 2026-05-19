@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { Sidebar, Topbar } from './lib/shell';
 
@@ -131,7 +131,9 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [screen]);
 
-  const go = (id) => setScreen(id);
+  // Stable identity so memoized Sidebar/Topbar don't re-render when only
+  // unrelated state in App changes
+  const go = useCallback((id) => setScreen(id), []);
 
   const renderScreen = () => {
     switch (screen) {
@@ -168,7 +170,9 @@ export default function App() {
 
   const navActive = ACTIVE_NAV[screen] || 'dashboard';
 
-  const handleNav = (id) => {
+  // Stable identity so the memoized Sidebar/Topbar (and their UserMenu)
+  // don't re-render on every screen change
+  const handleNav = useCallback((id) => {
     const map = {
       'dashboard':      'dashboard',
       'rfq':            'rfq',
@@ -190,7 +194,7 @@ export default function App() {
       'workspace':      'settings-workspace',
     };
     if (map[id]) go(map[id]);
-  };
+  }, [go]);
 
   return (
     <div className="app" data-screen-label={screen}>

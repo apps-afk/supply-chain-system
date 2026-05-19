@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Icons } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 
@@ -44,17 +44,19 @@ export function ScreenCompareList({ go }) {
     })();
   }, []);
 
-  const filtered = docs.filter(d => {
-    if (statusFilter !== 'ทั้งหมด' && d.status !== statusFilter) return false;
-    const mode = d.suppliers_json?.mode || 'PriceDB';
-    if (modeFilter !== 'ทั้งหมด' && mode !== modeFilter) return false;
-    if (q) {
-      const v = q.toLowerCase();
-      const hay = `${d.no || ''} ${d.title || ''} ${d.suppliers_json?.selectedSupplier || ''}`.toLowerCase();
-      if (!hay.includes(v)) return false;
-    }
-    return true;
-  });
+  const filtered = useMemo(() => {
+    const v = q.toLowerCase();
+    return docs.filter(d => {
+      if (statusFilter !== 'ทั้งหมด' && d.status !== statusFilter) return false;
+      const mode = d.suppliers_json?.mode || 'PriceDB';
+      if (modeFilter !== 'ทั้งหมด' && mode !== modeFilter) return false;
+      if (q) {
+        const hay = `${d.no || ''} ${d.title || ''} ${d.suppliers_json?.selectedSupplier || ''}`.toLowerCase();
+        if (!hay.includes(v)) return false;
+      }
+      return true;
+    });
+  }, [docs, statusFilter, modeFilter, q]);
 
   function fmtDate(s) {
     if (!s) return '—';
@@ -65,9 +67,16 @@ export function ScreenCompareList({ go }) {
     } catch { return s; }
   }
 
-  const draft     = docs.filter(d => d.status === 'draft').length;
-  const finalized = docs.filter(d => d.status === 'finalized').length;
-  const archived  = docs.filter(d => d.status === 'archived').length;
+  // Status counts — single pass (was 3 separate .filter calls per render)
+  const { draft, finalized, archived } = useMemo(() => {
+    let d = 0, f = 0, a = 0;
+    for (const x of docs) {
+      if (x.status === 'draft') d++;
+      else if (x.status === 'finalized') f++;
+      else if (x.status === 'archived') a++;
+    }
+    return { draft: d, finalized: f, archived: a };
+  }, [docs]);
 
   return (
     <div className="page">

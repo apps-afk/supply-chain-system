@@ -91,21 +91,29 @@ export function ScreenPriceDB({ go }) {
     };
   }), [prices, matById, supById, unitById]);
 
-  const filtered = rows.filter(r => {
-    if (cat !== 'ทั้งหมด' && r.cat !== cat) return false;
-    if (sourceFilter !== 'ทั้งหมด' && r.source !== sourceFilter) return false;
-    if (q) {
-      const v = q.toLowerCase();
-      if (!(r.name.includes(q) || (r.code||'').toLowerCase().includes(v) || (r.sup||'').includes(q))) return false;
-    }
-    return true;
-  });
+  const filtered = useMemo(() => {
+    const v = q.toLowerCase();
+    return rows.filter(r => {
+      if (cat !== 'ทั้งหมด' && r.cat !== cat) return false;
+      if (sourceFilter !== 'ทั้งหมด' && r.source !== sourceFilter) return false;
+      if (q) {
+        if (!(r.name.includes(q) || (r.code||'').toLowerCase().includes(v) || (r.sup||'').includes(q))) return false;
+      }
+      return true;
+    });
+  }, [rows, cat, sourceFilter, q]);
 
-  // Stats
-  const totalPoints = rows.length;
-  const supplierCount = new Set(rows.map(r => r.sup).filter(x => x && x !== '—')).size;
-  const recent30 = rows.filter(r => r.age <= 30).length;
-  const stale180 = rows.filter(r => r.age > 180).length;
+  // Stats — single pass, memoised so filter toggles don't recompute
+  const { totalPoints, supplierCount, recent30, stale180 } = useMemo(() => {
+    let recent = 0, stale = 0;
+    const sups = new Set();
+    for (const r of rows) {
+      if (r.age <= 30) recent++;
+      if (r.age > 180) stale++;
+      if (r.sup && r.sup !== '—') sups.add(r.sup);
+    }
+    return { totalPoints: rows.length, supplierCount: sups.size, recent30: recent, stale180: stale };
+  }, [rows]);
 
   return (
     <div className="page">

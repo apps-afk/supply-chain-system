@@ -42,12 +42,17 @@ export function ScreenSettingsApprovalRoles({ go }) {
 
   async function remove(r) {
     if (!confirm(`ลบตำแหน่ง "${r.name}"?`)) return;
-    const res = await fetch('/api/approval-roles', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: r.id }),
-    });
-    if (!res.ok) { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
+    try {
+      const res = await fetch('/api/approval-roles', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: r.id }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch { alert('เครือข่ายขัดข้อง'); }
     load();
   }
 

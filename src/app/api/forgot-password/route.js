@@ -38,11 +38,15 @@ export async function PATCH(request) {
     if (!id) return NextResponse.json({ error: 'ต้องระบุ id' }, { status: 400 });
 
     if (isSupabaseConfigured) {
-      const { error } = await supabase
+      // Select after update so we can detect "no matching row" (otherwise the
+      // PATCH silently returns ok for non-existent ids).
+      const { data, error } = await supabase
         .from('forgot_password_queue')
         .update({ resolved_at: new Date().toISOString(), resolved_by: session.user.email })
-        .eq('id', id);
+        .eq('id', id)
+        .select('id');
       if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+      if (!data || data.length === 0) return NextResponse.json({ error: 'ไม่พบรายการ' }, { status: 404 });
     } else {
       if (!globalThis.__ieForgotQueue) globalThis.__ieForgotQueue = [];
       const r = globalThis.__ieForgotQueue.find(x => String(x.id) === String(id));

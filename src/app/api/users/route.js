@@ -33,6 +33,9 @@ export async function POST(request) {
     if (!name?.trim() || !email?.trim() || !password) {
       return NextResponse.json({ error: 'กรุณากรอกข้อมูลให้ครบ' }, { status: 400 });
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: 'รูปแบบอีเมลไม่ถูกต้อง' }, { status: 400 });
+    }
     if (!email.toLowerCase().endsWith(`@${DOMAIN}`)) {
       return NextResponse.json({ error: `อนุญาตเฉพาะบัญชี @${DOMAIN} เท่านั้น` }, { status: 403 });
     }

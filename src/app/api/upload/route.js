@@ -7,9 +7,15 @@ import { appendAudit } from '../../../lib/workspace';
 
 const MAX_MB = 25;
 const ALLOWED_MIME = ['application/pdf'];
+// Whitelisted entity_type values — keeps the file_attachments table tidy and
+// prevents callers from inventing categories that break later joins.
+const ALLOWED_ENTITY_TYPES = new Set(['rfq', 'contract', 'comparison', 'supplier', 'pricedb', '']);
 
 export const runtime = 'nodejs';  // googleapis isn't Edge-safe
 export const maxDuration = 60;    // PDFs can take a bit on slow links
+// Tell Next not to attempt static analysis: googleapis pulls in ~3MB of code
+// that the build's static-trace can hold onto. Force-dynamic keeps it lazy.
+export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
@@ -38,11 +44,19 @@ export async function POST(request) {
   if (!CATEGORIES[categoryKey]) {
     return NextResponse.json({ error: `หมวดหมู่ไม่ถูกต้อง — ที่ใช้ได้: ${Object.keys(CATEGORIES).join(', ')}` }, { status: 400 });
   }
+  // Reject 0-byte uploads — these come from empty file inputs / drag of a
+  // folder / corrupted browser state and produce useless empty PDFs in Drive.
+  if (!file.size || file.size === 0) {
+    return NextResponse.json({ error: 'ไฟล์ว่างเปล่า (0 ไบต์) — กรุณาเลือกไฟล์ใหม่' }, { status: 400 });
+  }
   if (file.size > MAX_MB * 1024 * 1024) {
     return NextResponse.json({ error: `ไฟล์ใหญ่เกิน — สูงสุด ${MAX_MB}MB` }, { status: 413 });
   }
   if (!ALLOWED_MIME.includes(file.type)) {
     return NextResponse.json({ error: `รับเฉพาะ PDF (ได้รับ: ${file.type || 'ไม่ระบุ'})` }, { status: 415 });
+  }
+  if (!ALLOWED_ENTITY_TYPES.has(entityType)) {
+    return NextResponse.json({ error: `entity_type ไม่ถูกต้อง: ${entityType}` }, { status: 400 });
   }
 
   try {
@@ -72,8 +86,20 @@ export async function POST(request) {
       };
       const { data, error } = await supabase
         .from('file_attachments').insert(row).select().single();
-      if (error) console.error('attachment insert failed:', error.message);
-      else attachmentRow = data;
+      if (error) {
+        // The file is already in Drive — we surface this so the caller knows
+        // the upload "succeeded" in Drive but won't appear in any list view.
+        // Previously this was logged only, leaving orphaned Drive files with
+        // no way for the UI to know they exist.
+        console.error('attachment insert failed:', error.message);
+        return NextResponse.json({
+          ok: false,
+          error: 'อัปโหลด Drive สำเร็จ แต่บันทึก metadata ไม่สำเร็จ',
+          detail: error.message,
+          file: { id: result.id, name: result.name, viewLink: result.webViewLink },
+        }, { status: 500 });
+      }
+      attachmentRow = data;
     }
 
     await appendAudit({

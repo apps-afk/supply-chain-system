@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, Av, Spark, Delta, money } from '../lib/shell';
 
 /*
@@ -47,9 +47,15 @@ export function ScreenRFQ({ go }) {
       ]);
       const dR = await rR.json();
       const dP = await rP.json();
-      if (!rR.ok) setErr(dR.error || 'โหลดข้อมูลไม่สำเร็จ');
-      setRfqs(dR.items || []);
-      setProjects(dP.items || []);
+      // Don't overwrite items[] when the response was an error — without this
+      // a 401 from /api/rfqs would simultaneously surface "unauthorised" and
+      // wipe the list to [], hiding any prior data the user had on screen.
+      if (!rR.ok) {
+        setErr(dR.error || 'โหลดข้อมูลไม่สำเร็จ');
+      } else {
+        setRfqs(dR.items || []);
+      }
+      if (rP.ok) setProjects(dP.items || []);
     } catch {
       setErr('เครือข่ายขัดข้อง');
     }
@@ -57,22 +63,38 @@ export function ScreenRFQ({ go }) {
   }
   useEffect(() => { load(); }, []);
 
-  const projName = (id) => projects.find(p => p.id === id)?.name || '—';
-
-  const waiting = rfqs.filter(r => r.status === 'sent').length;
-
-  const filtered = rfqs.filter(r => {
-    if (filter !== 'ทั้งหมด' && r.status !== filter) return false;
-    if (q) {
-      const v = q.toLowerCase();
-      if (!((r.no || '').toLowerCase().includes(v) || (r.title || '').toLowerCase().includes(v) || projName(r.project_id).toLowerCase().includes(v))) return false;
-    }
-    return true;
-  });
+  // O(1) project name lookup
+  const projById = useMemo(() => {
+    const m = new Map();
+    for (const p of projects) m.set(p.id, p);
+    return m;
+  }, [projects]);
+  const projName = (id) => projById.get(id)?.name || '—';
 
   // Past-due heuristic: due_date in the past + status 'sent'
   const today = new Date().toISOString().slice(0,10);
-  const overdue = rfqs.filter(r => r.status === 'sent' && r.due_date && r.due_date < today).length;
+
+  // status counts + overdue computed in one pass (was 6 .filter() calls per render)
+  const { statusCounts, overdue } = useMemo(() => {
+    const counts = { draft:0, sent:0, received:0, closed:0, cancelled:0 };
+    let od = 0;
+    for (const r of rfqs) {
+      if (counts[r.status] !== undefined) counts[r.status]++;
+      if (r.status === 'sent' && r.due_date && r.due_date < today) od++;
+    }
+    return { statusCounts: counts, overdue: od };
+  }, [rfqs, today]);
+
+  const filtered = useMemo(() => {
+    const v = q.toLowerCase();
+    return rfqs.filter(r => {
+      if (filter !== 'ทั้งหมด' && r.status !== filter) return false;
+      if (q) {
+        if (!((r.no || '').toLowerCase().includes(v) || (r.title || '').toLowerCase().includes(v) || (projById.get(r.project_id)?.name || '').toLowerCase().includes(v))) return false;
+      }
+      return true;
+    });
+  }, [rfqs, filter, q, projById]);
 
   return (
     <div className="page">
@@ -97,7 +119,7 @@ export function ScreenRFQ({ go }) {
         padding:'24px 0', marginBottom:32,
       }}>
         {Object.keys(RFQ_STATUS).map((s, i) => {
-          const count = rfqs.filter(r => r.status === s).length;
+          const count = statusCounts[s] || 0;
           const sp = RFQ_STATUS[s];
           return (
             <div key={s} style={{ paddingLeft: i === 0 ? 0 : 24, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
@@ -285,7 +307,7 @@ export function ScreenRFQConfirm({ go }) {
     setUploading(false);
   }
 
-  const toggle = (id) => setItems(items.map(it => it.id === id ? { ...it, save: !it.save } : it));
+  const toggle = (id) => setItems(its => its.map(it => it.id === id ? { ...it, save: !it.save } : it));
 
   const saving = items.filter(i => i.save).length;
   const flagged = items.filter(i => i.outlier).length;

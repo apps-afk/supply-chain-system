@@ -63,13 +63,26 @@ export function ScreenCompareCreateRFQ({ go }) {
   }, []);
 
   const ELIGIBLE_RFQS = rfqs;
-  const pickedRfqs = picked.map(no => ELIGIBLE_RFQS.find(r => r.no === no)).filter(Boolean);
+  // Memoised — O(1) lookup table + single pass to resolve `picked` to objects
+  const rfqByNo = useMemo(() => {
+    const m = new Map();
+    for (const r of ELIGIBLE_RFQS) m.set(r.no, r);
+    return m;
+  }, [ELIGIBLE_RFQS]);
+  const pickedRfqs = useMemo(
+    () => picked.map(no => rfqByNo.get(no)).filter(Boolean),
+    [picked, rfqByNo]
+  );
 
   // Validate: must share same category
-  const categories = [...new Set(pickedRfqs.map(r => r.category))];
+  const categories = useMemo(
+    () => [...new Set(pickedRfqs.map(r => r.category))],
+    [pickedRfqs]
+  );
   const categoryConflict = categories.length > 1;
 
-  // Merge items across RFQs by code
+  // Merge items across RFQs by code — dep was `picked` (stale on rfq fetch);
+  // pickedRfqs already memoised so depend on that
   const mergedItems = useMemo(() => {
     const map = new Map();
     pickedRfqs.forEach(r => {
@@ -81,18 +94,18 @@ export function ScreenCompareCreateRFQ({ go }) {
       });
     });
     return [...map.values()];
-  }, [picked]);
+  }, [pickedRfqs]);
 
-  const supplierIds = pickedRfqs.map(r => r.supplierId);
+  const supplierIds = useMemo(() => pickedRfqs.map(r => r.supplierId), [pickedRfqs]);
 
-  // Totals
+  // Totals — same stale-dep fix
   const totals = useMemo(() => {
     const t = {};
     pickedRfqs.forEach(r => {
       t[r.supplierId] = r.items.reduce((s, it) => s + it.price * it.qty, 0);
     });
     return t;
-  }, [picked]);
+  }, [pickedRfqs]);
 
   // AI best
   const aiBest = useMemo(() => {

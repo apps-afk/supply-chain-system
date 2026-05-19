@@ -5,6 +5,9 @@ const h = createCrudRoutes('rfqs', {
   orderBy: 'created_at',
   orderDir: 'desc',
   idPrefix: 'rfq',
+  // RFQs are operational data — any authenticated user (procurement, etc.)
+  // must be able to create / update / delete their own RFQs.
+  writeRole: 'session',
 });
 
 export const GET    = h.list;

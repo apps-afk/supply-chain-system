@@ -49,28 +49,36 @@ export function ScreenSettingsTeam() {
   useEffect(() => { load(); }, []);
 
   async function changeRole(email, role) {
-    const res = await fetch('/api/users', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, role }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      alert(d.error || 'เกิดข้อผิดพลาด');
+    try {
+      const res = await fetch('/api/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, role }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch {
+      alert('เครือข่ายขัดข้อง');
     }
     load();
   }
 
   async function removeUser(email, name) {
     if (!confirm(`ต้องการลบผู้ใช้ "${name}" (${email}) ใช่หรือไม่?`)) return;
-    const res = await fetch('/api/users', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-    if (!res.ok) {
-      const d = await res.json();
-      alert(d.error || 'เกิดข้อผิดพลาด');
+    try {
+      const res = await fetch('/api/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch {
+      alert('เครือข่ายขัดข้อง');
     }
     load();
   }

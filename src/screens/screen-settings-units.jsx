@@ -47,12 +47,17 @@ export function ScreenSettingsUnits() {
 
   async function remove(u) {
     if (!confirm(`ลบหน่วย "${u.name}"?`)) return;
-    const res = await fetch('/api/units', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: u.id }),
-    });
-    if (!res.ok) { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
+    try {
+      const res = await fetch('/api/units', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: u.id }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch { alert('เครือข่ายขัดข้อง'); }
     load();
   }
 

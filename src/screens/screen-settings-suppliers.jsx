@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Av } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
 
@@ -36,32 +36,44 @@ export function ScreenSettingsSuppliers({ go }) {
 
   async function remove(s) {
     if (!confirm(`ลบ Supplier "${s.name}"?`)) return;
-    const res = await fetch('/api/suppliers', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: s.id }),
-    });
-    if (!res.ok) { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
+    try {
+      const res = await fetch('/api/suppliers', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: s.id }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch {
+      alert('เครือข่ายขัดข้อง');
+    }
     load();
   }
 
-  const filtered = items.filter(s => {
-    const status = s.active ? 'Active' : 'Non-Active';
-    if (filter !== 'ทั้งหมด' && status !== filter) return false;
-    if (q) {
-      const v = q.toLowerCase();
-      const hit =
-        s.name?.toLowerCase().includes(v) ||
-        s.code?.toLowerCase().includes(v) ||
-        s.tax_id?.includes(q) ||
-        s.contact_name?.toLowerCase().includes(v);
-      if (!hit) return false;
-    }
-    return true;
-  });
+  const filtered = useMemo(() => {
+    const v = q.toLowerCase();
+    return items.filter(s => {
+      const status = s.active ? 'Active' : 'Non-Active';
+      if (filter !== 'ทั้งหมด' && status !== filter) return false;
+      if (q) {
+        const hit =
+          s.name?.toLowerCase().includes(v) ||
+          s.code?.toLowerCase().includes(v) ||
+          s.tax_id?.includes(q) ||
+          s.contact_name?.toLowerCase().includes(v);
+        if (!hit) return false;
+      }
+      return true;
+    });
+  }, [items, filter, q]);
 
-  const activeCount   = items.filter(s => s.active).length;
-  const inactiveCount = items.length - activeCount;
+  const { activeCount, inactiveCount } = useMemo(() => {
+    let active = 0;
+    for (const s of items) if (s.active) active++;
+    return { activeCount: active, inactiveCount: items.length - active };
+  }, [items]);
 
   return (
     <div className="page">

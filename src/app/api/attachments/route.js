@@ -21,7 +21,9 @@ export async function GET(request) {
   if (et) q = q.eq('entity_type', et);
   if (ei) q = q.eq('entity_id', ei);
   if (ct) q = q.eq('category', ct);
-  q = q.limit(parseInt(url.searchParams.get('limit') || '200', 10));
+  const rawLimit = parseInt(url.searchParams.get('limit') || '200', 10);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 200;
+  q = q.limit(limit);
 
   const { data, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

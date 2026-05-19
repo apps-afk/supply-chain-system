@@ -15,6 +15,9 @@ const h = createCrudRoutes('contracts', {
   orderBy: 'created_at',
   orderDir: 'desc',
   idPrefix: 'ct',
+  // Contracts are uploaded by procurement users; only the DELETE handler
+  // below remains admin-only because it cascades into Drive file deletes.
+  writeRole: 'session',
 });
 
 export const GET   = h.list;

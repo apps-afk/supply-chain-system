@@ -25,7 +25,10 @@ export function ScreenSupplierDB({ go }) {
     if (cat !== 'ทั้งหมด' && !s.categories.includes(cat)) return false;
     if (q) {
       const v = q.toLowerCase();
-      if (!(s.name.toLowerCase().includes(v) || s.id.toLowerCase().includes(v) || s.categories.some(c => c.includes(q)))) return false;
+      // Lowercased compare across all 3 fields (was case-sensitive on the
+      // categories branch, so searching "งานไฟฟ้า" missed "งานระบบไฟฟ้า"
+      // entries when the user's case didn't match exactly).
+      if (!(s.name.toLowerCase().includes(v) || s.id.toLowerCase().includes(v) || s.categories.some(c => c.toLowerCase().includes(v)))) return false;
     }
     return true;
   });

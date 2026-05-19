@@ -264,8 +264,11 @@ export function ScreenCompareCreatePriceDB({ go }) {
 
   /* ===================== Main builder UI ===================== */
   // Suppliers eligible to add (haven't been added yet, filtered to source-relevant categories)
-  const alreadyAdded = new Set(suppliersData.map(s => s.id));
-  const addable = supplierOptions.filter(s => !alreadyAdded.has(s.id));
+  // Memoised — was rebuilt on every render (incl. while typing in any input)
+  const addable = useMemo(() => {
+    const already = new Set(suppliersData.map(s => s.id));
+    return supplierOptions.filter(s => !already.has(s.id));
+  }, [suppliersData, supplierOptions]);
 
   if (loading) {
     return (
@@ -653,12 +656,19 @@ function ItemPickerModal({ categories, source, targetSupplier, alreadyPicked = n
   const [picked, setPicked] = useState(new Set());
   const [q, setQ] = useState('');
 
-  const cat = categories.find(c => c.short === selectedCat);
-  const items = (cat?.items || []).filter(it => {
-    if (!q) return true;
+  // Memoised so the per-row IIFE price lookup doesn't trigger full re-filter
+  // (matters: each category can have hundreds of items).
+  const cat = useMemo(
+    () => categories.find(c => c.short === selectedCat),
+    [categories, selectedCat]
+  );
+  const items = useMemo(() => {
+    if (!q) return cat?.items || [];
     const v = q.toLowerCase();
-    return it.name.toLowerCase().includes(v) || it.code.toLowerCase().includes(v);
-  });
+    return (cat?.items || []).filter(it =>
+      it.name.toLowerCase().includes(v) || it.code.toLowerCase().includes(v)
+    );
+  }, [cat, q]);
 
   const toggle = (code) => {
     const next = new Set(picked);

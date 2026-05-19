@@ -11,6 +11,12 @@ export async function POST(request) {
     if (!email || typeof email !== 'string') {
       return NextResponse.json({ error: 'กรุณาระบุอีเมล' }, { status: 400 });
     }
+    // Reject obviously-invalid emails BEFORE the domain check — prevents the
+    // queue from filling with junk like "foo bar@initialestate.com" that the
+    // domain suffix check alone would accept.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: 'รูปแบบอีเมลไม่ถูกต้อง' }, { status: 400 });
+    }
     if (!email.toLowerCase().endsWith(`@${DOMAIN}`)) {
       return NextResponse.json(
         { error: `อนุญาตเฉพาะบัญชี @${DOMAIN} เท่านั้น` },

@@ -28,8 +28,13 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
       try {
         const r = await fetch('/api/suppliers');
         const d = await r.json();
+        // Surface auth/server errors so the Supplier dropdown isn't silently
+        // empty when /api/suppliers returns 401/500.
+        if (!r.ok) { setErr(d.error || 'โหลด Supplier ไม่สำเร็จ'); return; }
         setSuppliers(d.items || []);
-      } catch {}
+      } catch {
+        setErr('เครือข่ายขัดข้อง');
+      }
     })();
   }, []);
 
@@ -173,8 +178,10 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
               <div style={{ fontSize:13, fontWeight:500, color:'var(--ink-2)', marginBottom:4 }}>
                 ลากไฟล์มาที่นี่ หรือ <span style={{ color:'var(--teal)', textDecoration:'underline' }}>เลือกไฟล์</span>
               </div>
-              <div style={{ fontSize:11, color:'var(--ink-3)' }}>รองรับ .pdf .jpg .png · ไม่เกิน 10 MB</div>
-              <input type="file" accept=".pdf,.jpg,.png" style={{ display:'none' }}
+              <div style={{ fontSize:11, color:'var(--ink-3)' }}>รองรับเฉพาะ .pdf · ไม่เกิน 25 MB</div>
+              {/* Server only accepts application/pdf — previously the picker
+                  let users select .jpg/.png which failed with 415 at upload. */}
+              <input type="file" accept=".pdf,application/pdf" style={{ display:'none' }}
                 onChange={e => { const f = e.target.files?.[0]; setFile(f || null); setFilename(f?.name || ''); }} />
             </label>
 

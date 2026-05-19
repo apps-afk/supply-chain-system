@@ -10,6 +10,11 @@ export async function POST(request) {
     if (!name?.trim() || !email?.trim() || !password) {
       return NextResponse.json({ error: 'กรุณากรอกข้อมูลให้ครบถ้วน' }, { status: 400 });
     }
+    // The domain suffix check alone accepts "evil@example.com@initialestate.com"
+    // and other malformed strings — validate basic shape first.
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: 'รูปแบบอีเมลไม่ถูกต้อง' }, { status: 400 });
+    }
     if (!email.toLowerCase().endsWith(`@${DOMAIN}`)) {
       return NextResponse.json({ error: `อนุญาตเฉพาะบัญชี @${DOMAIN} เท่านั้น` }, { status: 403 });
     }

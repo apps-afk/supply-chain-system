@@ -18,6 +18,7 @@ export function ScreenSettingsAccount() {
   const [profile, setProfile] = useState(null);   // server data
   const [form,    setForm]    = useState({ name: '', email: '', phone: '' });
   const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg,    setProfileMsg]    = useState({ msg: '', tone: '' });
 
@@ -30,7 +31,7 @@ export function ScreenSettingsAccount() {
   const [pwdMsg,    setPwdMsg]    = useState({ msg: '', tone: '' });
 
   async function loadProfile() {
-    setLoading(true);
+    setLoading(true); setLoadErr('');
     try {
       const res = await fetch('/api/account/profile');
       const data = await res.json();
@@ -41,8 +42,14 @@ export function ScreenSettingsAccount() {
           email: data.profile.email || '',
           phone: data.profile.phone || '',
         });
+      } else {
+        // Previously: silent failure left the screen stuck on "loading…".
+        // Surface the real reason so the user can react (e.g., session expired).
+        setLoadErr(data?.error || `โหลดข้อมูลไม่สำเร็จ (HTTP ${res.status})`);
       }
-    } catch {}
+    } catch {
+      setLoadErr('เครือข่ายขัดข้อง');
+    }
     setLoading(false);
   }
   useEffect(() => { loadProfile(); }, []);
@@ -119,10 +126,23 @@ export function ScreenSettingsAccount() {
     setSavingPwd(false);
   }
 
-  if (loading || !profile) {
+  if (loading) {
     return (
       <div className="page">
         <div style={{ padding: 60, textAlign: 'center', color: 'var(--ink-3)' }}>กำลังโหลด…</div>
+      </div>
+    );
+  }
+  if (!profile) {
+    return (
+      <div className="page">
+        <div style={{
+          padding: '20px 24px', margin: 40,
+          background: '#FDE8E4', color: '#8B2A1A',
+          border: '1px solid #F5C0B4', borderRadius: 6, fontSize: 13,
+        }}>
+          {loadErr || 'ไม่พบข้อมูลบัญชี — กรุณาลองเข้าสู่ระบบใหม่'}
+        </div>
       </div>
     );
   }

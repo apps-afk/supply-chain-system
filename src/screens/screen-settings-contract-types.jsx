@@ -33,12 +33,17 @@ export function ScreenSettingsContractTypes({ go }) {
 
   async function remove(t) {
     if (!confirm(`ลบประเภท "${t.name}"?`)) return;
-    const res = await fetch('/api/contract-types', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: t.id }),
-    });
-    if (!res.ok) { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
+    try {
+      const res = await fetch('/api/contract-types', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: t.id }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch { alert('เครือข่ายขัดข้อง'); }
     load();
   }
 

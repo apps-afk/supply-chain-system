@@ -38,12 +38,17 @@ export function ScreenSettingsProjectTypes({ go }) {
 
   async function remove(p) {
     if (!confirm(`ลบประเภท "${p.name}"?`)) return;
-    const res = await fetch('/api/project-types', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: p.id }),
-    });
-    if (!res.ok) { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
+    try {
+      const res = await fetch('/api/project-types', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: p.id }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert(d.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch { alert('เครือข่ายขัดข้อง'); }
     load();
   }
 

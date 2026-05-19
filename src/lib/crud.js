@@ -62,6 +62,10 @@ export function createCrudRoutes(table, opts = {}) {
   const orderBy       = opts.orderBy || 'created_at';
   const orderDir      = opts.orderDir || 'asc';
   const idPrefix      = opts.idPrefix || table;
+  // Default: writes are admin-only (safe default for master data). Pass
+  // `writeRole: 'session'` for tables like rfqs/comparisons that any
+  // authenticated user must be able to write.
+  const writeGuard    = opts.writeRole === 'session' ? requireSession : requireAdmin;
 
   async function list() {
     const { err } = await requireSession();
@@ -75,7 +79,7 @@ export function createCrudRoutes(table, opts = {}) {
   }
 
   async function create(req) {
-    const { err, session } = await requireAdmin();
+    const { err, session } = await writeGuard();
     if (err) return err;
     if (!isSupabaseConfigured) return notConfigured();
 
@@ -93,7 +97,7 @@ export function createCrudRoutes(table, opts = {}) {
   }
 
   async function update(req) {
-    const { err, session } = await requireAdmin();
+    const { err, session } = await writeGuard();
     if (err) return err;
     if (!isSupabaseConfigured) return notConfigured();
 
@@ -103,8 +107,10 @@ export function createCrudRoutes(table, opts = {}) {
     if (!body.id) return NextResponse.json({ error: 'ต้องระบุ id' }, { status: 400 });
 
     const payload = pickFields(body, allowedFields);
+    // .single() returns an error when no rows match — use maybeSingle so we
+    // can distinguish "DB error" from "row gone" and return a proper 404.
     const { data, error } = await supabase
-      .from(table).update(payload).eq('id', body.id).select().single();
+      .from(table).update(payload).eq('id', body.id).select().maybeSingle();
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
     if (!data) return NextResponse.json({ error: 'ไม่พบรายการ' }, { status: 404 });
     await appendAudit({ actor: session.user.email, action: `${table}.update`, target: body.id });
@@ -112,7 +118,7 @@ export function createCrudRoutes(table, opts = {}) {
   }
 
   async function remove(req) {
-    const { err, session } = await requireAdmin();
+    const { err, session } = await writeGuard();
     if (err) return err;
     if (!isSupabaseConfigured) return notConfigured();
 
@@ -121,8 +127,14 @@ export function createCrudRoutes(table, opts = {}) {
     catch { return NextResponse.json({ error: 'invalid JSON' }, { status: 400 }); }
     if (!body.id) return NextResponse.json({ error: 'ต้องระบุ id' }, { status: 400 });
 
-    const { error } = await supabase.from(table).delete().eq('id', body.id);
+    // Return how many rows actually got deleted so concurrent double-delete
+    // doesn't silently look "successful" — second caller now gets 404.
+    const { data, error } = await supabase
+      .from(table).delete().eq('id', body.id).select('id');
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (!data || data.length === 0) {
+      return NextResponse.json({ error: 'ไม่พบรายการ (อาจถูกลบไปแล้ว)' }, { status: 404 });
+    }
     await appendAudit({ actor: session.user.email, action: `${table}.delete`, target: body.id });
     return NextResponse.json({ ok: true });
   }
