@@ -1,23 +1,56 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icons } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
 
 /*
   Settings → Project Type List
-  Single-level master — used by Projects page to pick type
+  Single-level master — used by Projects page to pick type.
+  Data is now stored in DB and fetched from /api/project-types.
 */
 
+// NOTE: stub kept for backwards compatibility.
+// PROJECT_TYPES_DATA is now stored in the DB; consumers should migrate to
+// fetching from `/api/project-types` directly instead of importing this constant.
 export const PROJECT_TYPES_DATA = [];
 
 export function ScreenSettingsProjectTypes({ go }) {
-  const [q, setQ] = useState('');
+  const [items, setItems]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr]       = useState('');
+  const [q, setQ]           = useState('');
   const [filter, setFilter] = useState('ทั้งหมด');
-  const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState(null); // null | 'new' | object
 
-  const filtered = PROJECT_TYPES_DATA.filter(p => {
-    if (filter !== 'ทั้งหมด' && p.status !== filter) return false;
-    if (q && !(p.name.toLowerCase().includes(q.toLowerCase()) || p.code.toLowerCase().includes(q.toLowerCase()))) return false;
+  async function load() {
+    setLoading(true); setErr('');
+    try {
+      const res = await fetch('/api/project-types');
+      const data = await res.json();
+      if (!res.ok) setErr(data.error || 'โหลดข้อมูลไม่สำเร็จ');
+      else setItems(data.items || []);
+    } catch {
+      setErr('เครือข่ายขัดข้อง');
+    }
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function remove(p) {
+    if (!confirm(`ลบประเภท "${p.name}"?`)) return;
+    const res = await fetch('/api/project-types', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: p.id }),
+    });
+    if (!res.ok) { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
+    load();
+  }
+
+  const filtered = items.filter(p => {
+    const status = p.active ? 'Active' : 'Non-Active';
+    if (filter !== 'ทั้งหมด' && status !== filter) return false;
+    if (q && !(p.name?.toLowerCase().includes(q.toLowerCase()) || p.code?.toLowerCase().includes(q.toLowerCase()))) return false;
     return true;
   });
 
@@ -28,16 +61,16 @@ export function ScreenSettingsProjectTypes({ go }) {
           <div className="eyebrow">Settings · Master Data</div>
           <h1 className="h-display">ประเภทโครงการ (Project Type)</h1>
           <p style={{ fontSize:14, color:'var(--ink-3)', margin:'6px 0 0', maxWidth:600 }}>
-            ใช้ในการแยกประเภทของโครงการ — Auto-Run รหัส <span className="font-mono" style={{ color:'var(--ink-2)' }}>PT-NNN</span>
+            ใช้ในการแยกประเภทของโครงการ
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn primary" onClick={() => setAddOpen(true)}>{Icons.plus} เพิ่มประเภท</button>
+          <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่มประเภท</button>
         </div>
       </div>
 
       <SettingsStatStrip stats={[
-        { label:'ประเภททั้งหมด', value: PROJECT_TYPES_DATA.length, sub:`${PROJECT_TYPES_DATA.filter(p=>p.status==='Active').length} Active` },
+        { label:'ประเภททั้งหมด', value: items.length, sub:`${items.filter(p=>p.active).length} Active` },
       ]} />
 
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16 }}>
@@ -56,6 +89,10 @@ export function ScreenSettingsProjectTypes({ go }) {
         </div>
       </div>
 
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
+
       <div className="card" style={{ padding:0 }}>
         <table className="tbl">
           <thead>
@@ -63,25 +100,26 @@ export function ScreenSettingsProjectTypes({ go }) {
               <th style={{ width:100 }}>รหัส</th>
               <th style={{ width:'24%' }}>ชื่อประเภท</th>
               <th>คำอธิบาย</th>
-              <th className="num-col">โครงการที่ใช้</th>
               <th style={{ width:120 }}>สถานะ</th>
-              <th style={{ width:48 }}></th>
+              <th style={{ width:80 }}></th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+            {loading ? (
+              <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล — คลิก "เพิ่มประเภท" เพื่อสร้างรายการแรก
               </td></tr>
             ) : filtered.map(p => (
-              <tr key={p.code}>
+              <tr key={p.id}>
                 <td className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{p.code}</td>
                 <td style={{ fontWeight:500 }}>{p.name}</td>
-                <td style={{ fontSize:12.5, color:'var(--ink-3)' }}>{p.desc}</td>
-                <td className="num-col num" style={{ color:'var(--ink-2)' }}>{p.projects}</td>
-                <td><StatusPill status={p.status} /></td>
+                <td style={{ fontSize:12.5, color:'var(--ink-3)' }}>{p.description}</td>
+                <td><StatusPill status={p.active ? 'Active' : 'Non-Active'} /></td>
                 <td style={{ textAlign:'right' }}>
-                  <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }}>{Icons.edit}</button>
+                  <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(p)} title="แก้ไข">{Icons.edit}</button>
+                  <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(p)} title="ลบ">×</button>
                 </td>
               </tr>
             ))}
@@ -89,36 +127,75 @@ export function ScreenSettingsProjectTypes({ go }) {
         </table>
       </div>
 
-      {addOpen && <AddProjectTypeModal onClose={() => setAddOpen(false)} />}
+      {editing && (
+        <ProjectTypeModal
+          item={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function AddProjectTypeModal({ onClose }) {
-  const [form, setForm] = useState({ name:'', desc:'', status:'Active' });
-  const set = (k,v) => setForm({ ...form, [k]:v });
-  const nextCode = `PT-${String(PROJECT_TYPES_DATA.length + 1).padStart(3,'0')}`;
+function ProjectTypeModal({ item, onClose, onSaved }) {
+  const isEdit = !!item;
+  const [form, setForm] = useState({
+    code:        item?.code        || '',
+    name:        item?.name        || '',
+    description: item?.description || '',
+    active:      item?.active !== false,
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState('');
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function save() {
+    setErr('');
+    if (!form.code.trim() || !form.name.trim()) {
+      setErr('กรอกรหัสและชื่อให้ครบ'); return;
+    }
+    setBusy(true);
+    const payload = isEdit ? { ...form, id: item.id } : form;
+    const res = await fetch('/api/project-types', {
+      method: isEdit ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) { setErr(data.error || 'บันทึกไม่สำเร็จ'); setBusy(false); return; }
+    setBusy(false);
+    onSaved();
+  }
 
   return (
-    <SettingsModal eyebrow="เพิ่มประเภทโครงการ" title="ประเภทใหม่" onClose={onClose} width={520}>
-      <div style={{
-        padding:'14px 16px', background:'var(--surface-2)',
-        border:'1px solid var(--rule)', borderRadius:6, marginBottom:20,
-      }}>
-        <div className="eyebrow" style={{ marginBottom:4 }}>รหัส (auto-generate)</div>
-        <div className="font-mono" style={{ fontSize:18, color:'var(--teal)' }}>{nextCode}</div>
-      </div>
-
-      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:14 }}>
+    <SettingsModal eyebrow={isEdit ? 'แก้ไขประเภทโครงการ' : 'เพิ่มประเภทโครงการ'} title={isEdit ? item.name : 'ประเภทใหม่'} onClose={onClose} width={520}>
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{err}</div>
+      )}
+      <div style={{ display:'grid', gridTemplateColumns:'140px 1fr', gap:14 }}>
+        <SettingsField label="รหัส" required hint="เช่น PT-001">
+          <input value={form.code} onChange={e=>set('code', e.target.value)} placeholder="PT-001" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
+        </SettingsField>
         <SettingsField label="ชื่อประเภท" required>
           <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น Mixed-use" style={settingsInputStyle} />
         </SettingsField>
-        <SettingsField label="คำอธิบาย">
-          <input value={form.desc} onChange={e=>set('desc', e.target.value)} placeholder="คำอธิบายสั้น ๆ" style={settingsInputStyle} />
-        </SettingsField>
-        <SettingsField label="สถานะ">
-          <StatusToggle options={['Active','Non-Active']} value={form.status} onChange={v => set('status', v)} />
-        </SettingsField>
+        <div style={{ gridColumn:'1 / -1' }}>
+          <SettingsField label="คำอธิบาย">
+            <input value={form.description} onChange={e=>set('description', e.target.value)} placeholder="คำอธิบายสั้น ๆ" style={settingsInputStyle} />
+          </SettingsField>
+        </div>
+        <div style={{ gridColumn:'1 / -1' }}>
+          <SettingsField label="สถานะ">
+            <StatusToggle options={['Active','Non-Active']} value={form.active ? 'Active' : 'Non-Active'} onChange={v => set('active', v === 'Active')} />
+          </SettingsField>
+        </div>
+      </div>
+      <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:20 }}>
+        <button className="btn" onClick={onClose}>ยกเลิก</button>
+        <button className="btn primary" onClick={save} disabled={busy}>
+          {busy ? 'กำลังบันทึก…' : (isEdit ? 'บันทึก' : 'เพิ่ม')}
+        </button>
       </div>
     </SettingsModal>
   );
