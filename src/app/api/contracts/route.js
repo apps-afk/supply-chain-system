@@ -71,9 +71,15 @@ export async function DELETE(request) {
         .eq('entity_id', body.id);
     }
 
-    // 4) Delete the contract row itself
-    const { error } = await supabase.from('contracts').delete().eq('id', body.id);
+    // 4) Delete the contract row itself — .select('id') so we can detect
+    //    "row didn't exist" and surface 404 instead of silently returning ok
+    //    when two admins delete the same contract simultaneously.
+    const { data: deleted, error } = await supabase
+      .from('contracts').delete().eq('id', body.id).select('id');
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (!deleted || deleted.length === 0) {
+      return NextResponse.json({ error: 'ไม่พบสัญญา (อาจถูกลบไปแล้ว)' }, { status: 404 });
+    }
 
     await appendAudit({
       actor: session.user.email,
