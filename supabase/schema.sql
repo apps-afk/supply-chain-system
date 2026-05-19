@@ -216,3 +216,24 @@ create table if not exists contracts (
 );
 create index if not exists contracts_status_idx on contracts (status);
 create index if not exists contracts_supplier_idx on contracts (supplier_id);
+
+-- ============================================================
+-- File attachments (Google Drive metadata)
+-- Actual files live in Google Drive; this table maps them to entities.
+-- ============================================================
+
+create table if not exists file_attachments (
+  id              text         primary key,
+  entity_type     text         default '',
+  entity_id       text         default '',
+  category        text         not null,
+  drive_file_id   text         not null,
+  drive_view_link text         default '',
+  filename        text         not null,
+  mime_type       text         default '',
+  size            bigint       default 0,
+  uploaded_by     text,
+  uploaded_at     timestamptz  default now()
+);
+create index if not exists attachments_entity_idx on file_attachments (entity_type, entity_id);
+create index if not exists attachments_category_idx on file_attachments (category);

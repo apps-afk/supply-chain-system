@@ -1,0 +1,71 @@
+name: Setup Google Drive
+
+on:
+  workflow_dispatch:
+    inputs:
+      folder_id:
+        description: 'Google Drive parent folder ID (from URL: drive.google.com/drive/folders/<ID>)'
+        required: true
+        type: string
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      - name: Sanity-check service account credentials and folder access
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          FOLDER:  ${{ inputs.folder_id }}
+        run: |
+          # Write SA JSON to a file for the test script
+          echo "$SA_JSON" > /tmp/sa.json
+          npm install --no-save googleapis 2>&1 | tail -1
+          node -e "
+            const { google } = require('googleapis');
+            const fs = require('fs');
+            const credentials = JSON.parse(fs.readFileSync('/tmp/sa.json', 'utf8'));
+            const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/drive'] });
+            const drive = google.drive({ version: 'v3', auth });
+            drive.files.get({ fileId: '$FOLDER', supportsAllDrives: true, fields: 'id,name,driveId,parents' })
+              .then(r => { console.log('✓ Folder accessible:', r.data); })
+              .catch(e => { console.error('✗ Cannot access folder:', e.message); process.exit(1); });
+          "
+          rm /tmp/sa.json
+
+      - name: Pull Vercel project config
+        run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Add env vars to Vercel
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          FOLDER:  ${{ inputs.folder_id }}
+          VTOKEN:  ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          add_env() {
+            local key="$1"
+            echo "→ $key"
+            for tgt in production preview development; do
+              vercel env rm "$key" "$tgt" --yes --token="$VTOKEN" 2>/dev/null || true
+              # Pipe value via stdin so multi-line JSON isn't mangled
+              if [ "$key" = "GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+                printf '%s' "$SA_JSON" | vercel env add "$key" "$tgt" --token="$VTOKEN" 2>&1 | tail -1
+              else
+                printf '%s' "$FOLDER" | vercel env add "$key" "$tgt" --token="$VTOKEN" 2>&1 | tail -1
+              fi
+            done
+          }
+          add_env "GOOGLE_SERVICE_ACCOUNT_JSON"
+          add_env "GOOGLE_DRIVE_PARENT_FOLDER_ID"
+          echo
+          echo "=== Current Drive-related env vars ==="
+          vercel env ls --token="$VTOKEN" 2>&1 | grep -E "GOOGLE_" || echo "(none matched)"
+
+      - name: Redeploy production
+        run: |
+          vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+          vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
