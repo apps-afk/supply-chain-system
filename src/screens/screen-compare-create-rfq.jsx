@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Av, money } from '../lib/shell';
 import {
   NEXT_CMP_NO,
@@ -15,14 +15,55 @@ import {
   Flow: Pick ≥2 received RFQs (same category) → merge items → live compare with terms
 */
 
-// Synthetic RFQ data — only "received" RFQs are eligible
-const ELIGIBLE_RFQS = [];
+function makeCmpNo() {
+  const y = new Date().getFullYear();
+  const seq = Math.floor(Math.random() * 9000 + 1000);
+  return `CMP-${y}-${seq}`;
+}
 
 export function ScreenCompareCreateRFQ({ go }) {
   const [picked, setPicked] = useState([]); // RFQ no's
   const [generated, setGenerated] = useState(false);
+  const [generatedNo, setGeneratedNo] = useState('');
 
-  const pickedRfqs = picked.map(no => ELIGIBLE_RFQS.find(r => r.no === no));
+  // Live data
+  const [rfqs, setRfqs]       = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitErr, setSubmitErr]   = useState('');
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true); setLoadErr('');
+      try {
+        const r = await fetch('/api/rfqs');
+        const d = await r.json();
+        if (!r.ok) setLoadErr(d.error || 'โหลดข้อมูลไม่สำเร็จ');
+        else {
+          // Filter received status client-side, and normalize the shape this screen expects
+          const list = (d.items || []).filter(x => x.status === 'received').map(x => ({
+            no: x.no || x.id,
+            supplierId: x.supplier_id || '',
+            supName:    x.supplier_name || x.title || x.no || '—',
+            supKind:    'company',
+            category:   x.category || x.project_id || 'ทั่วไป',
+            project:    x.project_id || '',
+            credit:     x.payment_terms || '—',
+            received:   x.received_at || x.updated_at || '',
+            items:      Array.isArray(x.items_json) ? x.items_json : [],
+          }));
+          setRfqs(list);
+        }
+      } catch {
+        setLoadErr('เครือข่ายขัดข้อง');
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  const ELIGIBLE_RFQS = rfqs;
+  const pickedRfqs = picked.map(no => ELIGIBLE_RFQS.find(r => r.no === no)).filter(Boolean);
 
   // Validate: must share same category
   const categories = [...new Set(pickedRfqs.map(r => r.category))];
@@ -64,13 +105,67 @@ export function ScreenCompareCreateRFQ({ go }) {
 
   const canCompare = picked.length >= 2 && !categoryConflict;
 
+  async function submitComparison() {
+    setSubmitErr('');
+    setSubmitting(true);
+    const cmpNo = makeCmpNo();
+    const totalVals = Object.values(totals).filter(v => v > 0);
+    const total_low  = totalVals.length ? Math.min(...totalVals) : 0;
+    const total_high = totalVals.length ? Math.max(...totalVals) : 0;
+    const payload = {
+      no: cmpNo,
+      title: `เปรียบเทียบราคา RFQ · ${categories[0] || ''} · ${mergedItems.length} รายการ`,
+      status: 'draft',
+      items_json: mergedItems.map(it => ({
+        code: it.code, name: it.name, spec: it.spec || '', unit: it.unit || '',
+        qty: Number(it.qty) || 1, prices: it.prices,
+      })),
+      suppliers_json: {
+        mode: 'RFQ',
+        category: categories[0] || '',
+        rfqNos: picked,
+        list: pickedRfqs.map(r => ({ id: r.supplierId, name: r.supName, kind: r.supKind, rfqNo: r.no })),
+        selectedSupplier: aiBest ? (pickedRfqs.find(r => r.supplierId === aiBest.winnerId)?.supName || '') : '',
+      },
+      total_low, total_high,
+      notes: '',
+    };
+    try {
+      const res = await fetch('/api/comparisons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) { setSubmitErr(data.error || 'บันทึกไม่สำเร็จ'); setSubmitting(false); return; }
+      setGeneratedNo(cmpNo);
+      setGenerated(true);
+    } catch {
+      setSubmitErr('เครือข่ายขัดข้อง');
+    }
+    setSubmitting(false);
+  }
+
+  if (loading) {
+    return (
+      <div className="page">
+        <button className="btn ghost sm" onClick={() => go('compare')} style={{ marginBottom:20, marginLeft:-8 }}>
+          {Icons.back} กลับไป Compare
+        </button>
+        <div style={{ padding:40, textAlign:'center', color:'var(--ink-3)' }}>กำลังโหลด…</div>
+      </div>
+    );
+  }
+
   if (generated) {
     return <GeneratedCompare go={go} rfqMode={true}
       source={categories[0] || 'RFQ'}
       items={mergedItems}
       suppliers={supplierIds}
+      supplierObjs={pickedRfqs.map(r => ({ id:r.supplierId, name:r.supName, kind:r.supKind }))}
       totals={totals}
-      aiBest={aiBest} />;
+      aiBest={aiBest}
+      cmpNo={generatedNo} />;
   }
 
   return (
@@ -78,6 +173,12 @@ export function ScreenCompareCreateRFQ({ go }) {
       <button className="btn ghost sm" onClick={() => go('compare')} style={{ marginBottom:20, marginLeft:-8 }}>
         {Icons.back} กลับไป Compare
       </button>
+      {loadErr && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{loadErr}</div>
+      )}
+      {submitErr && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{submitErr}</div>
+      )}
 
       <div className="page-head" style={{ alignItems:'flex-start' }}>
         <div className="page-title">
@@ -284,11 +385,11 @@ export function ScreenCompareCreateRFQ({ go }) {
         </div>
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
           <button className="btn ghost" onClick={() => go('compare')}>ยกเลิก</button>
-          <button className="btn" disabled={!canCompare}>บันทึกร่าง</button>
-          <button className="btn primary" disabled={!canCompare}
-            onClick={() => setGenerated(true)}
-            style={{ padding:'10px 20px', opacity: canCompare ? 1 : 0.5, cursor: canCompare ? 'pointer' : 'not-allowed' }}>
-            {Icons.check} Compare & สร้างเอกสาร
+          <button className="btn" disabled={!canCompare || submitting} onClick={submitComparison}>บันทึกร่าง</button>
+          <button className="btn primary" disabled={!canCompare || submitting}
+            onClick={submitComparison}
+            style={{ padding:'10px 20px', opacity: (canCompare && !submitting) ? 1 : 0.5, cursor: (canCompare && !submitting) ? 'pointer' : 'not-allowed' }}>
+            {Icons.check} {submitting ? 'กำลังบันทึก…' : 'Compare & สร้างเอกสาร'}
           </button>
         </div>
       </div>

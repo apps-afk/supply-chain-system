@@ -56,6 +56,15 @@ export function ScreenCompareList({ go }) {
     return true;
   });
 
+  function fmtDate(s) {
+    if (!s) return '—';
+    try {
+      const d = new Date(s);
+      if (isNaN(d)) return s;
+      return d.toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' });
+    } catch { return s; }
+  }
+
   const draft     = docs.filter(d => d.status === 'draft').length;
   const finalized = docs.filter(d => d.status === 'finalized').length;
   const archived  = docs.filter(d => d.status === 'archived').length;
@@ -147,15 +156,21 @@ export function ScreenCompareList({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loading ? (
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+            ) : filtered.length === 0 ? (
               <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
             ) : filtered.map(d => {
-              const sp = STATUS_PILL[d.status];
-              const mp = MODE_PILL[d.mode];
+              const sp = STATUS_PILL[d.status] || STATUS_PILL.draft;
+              const mode = d.suppliers_json?.mode || 'PriceDB';
+              const mp = MODE_PILL[mode] || MODE_PILL.PriceDB;
+              const itemsCount    = Array.isArray(d.items_json) ? d.items_json.length : 0;
+              const suppliersList = Array.isArray(d.suppliers_json?.list) ? d.suppliers_json.list : [];
+              const selectedSup   = d.suppliers_json?.selectedSupplier || '';
               return (
-                <tr key={d.code} onClick={() => go('compare-detail')} style={{ cursor:'pointer' }}>
+                <tr key={d.id || d.no} onClick={() => go('compare-detail')} style={{ cursor:'pointer' }}>
                   <td>
-                    <div className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{d.code}</div>
+                    <div className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{d.no}</div>
                   </td>
                   <td>
                     <span style={{
@@ -165,25 +180,24 @@ export function ScreenCompareList({ go }) {
                     }}>{mp.label}</span>
                   </td>
                   <td>
-                    <div style={{ fontWeight:500 }}>{d.category}</div>
-                    <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:2 }}>{d.project}</div>
+                    <div style={{ fontWeight:500 }}>{d.title}</div>
+                    {d.project_id && <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:2 }}>{d.project_id}</div>}
                   </td>
                   <td className="num-col">
                     <span className="num" style={{ fontSize:12.5, color:'var(--ink-2)' }}>
-                      {d.items} <span style={{ color:'var(--ink-4)' }}>รายการ ×</span> {d.suppliers} <span style={{ color:'var(--ink-4)' }}>Supplier</span>
+                      {itemsCount} <span style={{ color:'var(--ink-4)' }}>รายการ ×</span> {suppliersList.length} <span style={{ color:'var(--ink-4)' }}>Supplier</span>
                     </span>
                   </td>
                   <td>
-                    {d.selectedSupplier
+                    {selectedSup
                       ? <span style={{ fontSize:12.5, color:'var(--ink-2)', display:'inline-flex', alignItems:'center', gap:6 }}>
                           <span style={{ width:5, height:5, borderRadius:999, background:'var(--moss)' }} />
-                          {d.selectedSupplier}
+                          {selectedSup}
                         </span>
                       : <span style={{ fontSize:11.5, color:'var(--ink-4)', fontStyle:'italic' }}>—</span>}
                   </td>
                   <td style={{ fontSize:12, color:'var(--ink-3)' }}>
-                    {d.created}
-                    {d.refUploaded && <div style={{ fontSize:10.5, color:'var(--moss)', marginTop:2 }}>📎 Ref {d.refUploaded}</div>}
+                    {fmtDate(d.created_at)}
                   </td>
                   <td>
                     <span style={{

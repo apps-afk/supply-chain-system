@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icons, Chip } from '../lib/shell';
 import { settingsInputStyle, SettingsField } from '../lib/settings-shared';
 
@@ -9,7 +9,8 @@ import { settingsInputStyle, SettingsField } from '../lib/settings-shared';
   user uploads the signed reference doc back into the system.
 */
 
-export function ScreenCompareUploadRef({ go }) {
+export function ScreenCompareUploadRef({ go, comparisonId }) {
+  const [file, setFile] = useState(null);
   const [filename, setFilename] = useState('');
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [approvedBy, setApprovedBy] = useState('');
@@ -17,7 +18,43 @@ export function ScreenCompareUploadRef({ go }) {
   const [notes, setNotes] = useState('');
   const [uploaded, setUploaded] = useState(false);
 
-  const canSave = filename && selectedSupplier && approvedBy && approvedDate;
+  // Suppliers dropdown
+  const [suppliers, setSuppliers] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/suppliers');
+        const d = await r.json();
+        setSuppliers(d.items || []);
+      } catch {}
+    })();
+  }, []);
+
+  const canSave = file && selectedSupplier && approvedBy && approvedDate && !busy;
+
+  async function doUpload() {
+    setErr('');
+    if (!file) { setErr('กรุณาเลือกไฟล์'); return; }
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('category', 'compare_report');
+      fd.append('entity_type', 'comparison');
+      if (comparisonId) fd.append('entity_id', comparisonId);
+      fd.append('entity_ref', `${selectedSupplier}|${approvedBy}|${approvedDate}|${notes}`);
+      const res = await fetch('/api/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) { setErr(data.error || 'อัปโหลดไม่สำเร็จ'); setBusy(false); return; }
+      setUploaded(true);
+    } catch {
+      setErr('เครือข่ายขัดข้อง');
+    }
+    setBusy(false);
+  }
 
   if (uploaded) {
     return (
@@ -138,7 +175,7 @@ export function ScreenCompareUploadRef({ go }) {
               </div>
               <div style={{ fontSize:11, color:'var(--ink-3)' }}>รองรับ .pdf .jpg .png · ไม่เกิน 10 MB</div>
               <input type="file" accept=".pdf,.jpg,.png" style={{ display:'none' }}
-                onChange={e => setFilename(e.target.files?.[0]?.name || '')} />
+                onChange={e => { const f = e.target.files?.[0]; setFile(f || null); setFilename(f?.name || ''); }} />
             </label>
 
             {filename && (
@@ -156,7 +193,7 @@ export function ScreenCompareUploadRef({ go }) {
                   <div style={{ fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{filename}</div>
                   <div style={{ fontSize:11, color:'var(--moss)', marginTop:2 }}>✓ พร้อมอัพโหลด</div>
                 </div>
-                <button className="btn ghost sm" onClick={() => setFilename('')} style={{ color:'var(--ink-4)' }}>×</button>
+                <button className="btn ghost sm" onClick={() => { setFile(null); setFilename(''); }} style={{ color:'var(--ink-4)' }}>×</button>
               </div>
             )}
           </div>
@@ -179,6 +216,7 @@ export function ScreenCompareUploadRef({ go }) {
               <SettingsField label="Supplier ที่เลือก" required>
                 <select value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value)} style={settingsInputStyle}>
                   <option value="">— เลือก —</option>
+                  {suppliers.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                 </select>
               </SettingsField>
               <SettingsField label="วันที่อนุมัติ" required>
@@ -205,6 +243,10 @@ export function ScreenCompareUploadRef({ go }) {
         </div>
       </div>
 
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, margin:'16px 0' }}>{err}</div>
+      )}
+
       {/* Sticky footer */}
       <div style={{
         position:'fixed', left:240, right:0, bottom:0,
@@ -218,9 +260,9 @@ export function ScreenCompareUploadRef({ go }) {
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
           <button className="btn ghost" onClick={() => go('compare')}>ยกเลิก</button>
           <button className="btn primary" disabled={!canSave}
-            onClick={() => setUploaded(true)}
+            onClick={doUpload}
             style={{ padding:'10px 20px', opacity: canSave ? 1 : 0.5, cursor: canSave ? 'pointer' : 'not-allowed' }}>
-            {Icons.check} บันทึก Ref & เปลี่ยนสถานะเป็น Decided
+            {Icons.check} {busy ? 'กำลังอัพโหลด…' : 'บันทึก Ref & เปลี่ยนสถานะเป็น Decided'}
           </button>
         </div>
       </div>

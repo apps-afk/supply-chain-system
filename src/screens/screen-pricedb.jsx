@@ -1,15 +1,13 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Stat, Spark, Delta, Av, money } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox } from '../lib/settings-shared';
 
 /*
   Price DB — list + detail.
 
-  Concept: keep prices ever quoted by Suppliers.
-  Two entry methods:
-    1. Manual — fields: Supplier, Category, Item, Description?, unit price, unit, quote date, age (days)
-    2. Pull from RFQ — pick received RFQs and import their line items
+  Backed by /api/prices (price_points table). Materials, suppliers, and units
+  are pulled from their own master endpoints and joined client-side for display.
   Prices stored are NET — exclude VAT and Overhead.
 */
 
@@ -25,17 +23,89 @@ export function ScreenPriceDB({ go }) {
   const [manualOpen, setManualOpen] = useState(false);
   const [rfqPullOpen, setRfqPullOpen] = useState(false);
 
-  const cats = ['ทั้งหมด','งานโครงสร้าง','งานก่ออิฐ-ฉาบปูน','งานหลังคา','งานพื้น-ผนัง','งานสุขภัณฑ์','งานสี','งานระบบไฟฟ้า'];
+  // Live data
+  const [prices, setPrices]       = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [units, setUnits]         = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [err, setErr]             = useState('');
 
-  const filtered = pdbRows.filter(r => {
+  async function load() {
+    setLoading(true); setErr('');
+    try {
+      const [pR, mR, sR, uR] = await Promise.all([
+        fetch('/api/prices').then(r => r.json()),
+        fetch('/api/materials').then(r => r.json()),
+        fetch('/api/suppliers').then(r => r.json()),
+        fetch('/api/units').then(r => r.json()),
+      ]);
+      setPrices(pR.items || []);
+      setMaterials(mR.items || []);
+      setSuppliers(sR.items || []);
+      setUnits(uR.items || []);
+    } catch {
+      setErr('โหลดข้อมูลไม่สำเร็จ');
+    }
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  // Maps for joining
+  const matById = useMemo(() => new Map(materials.map(m => [m.id, m])), [materials]);
+  const supById = useMemo(() => new Map(suppliers.map(s => [s.id, s])), [suppliers]);
+  const unitById = useMemo(() => new Map(units.map(u => [u.id, u])), [units]);
+
+  // Categories derived from materials
+  const cats = useMemo(() => {
+    const s = new Set();
+    materials.forEach(m => { if (m.category) s.add(m.category); });
+    return ['ทั้งหมด', ...[...s].sort()];
+  }, [materials]);
+
+  // Build display rows
+  const rows = useMemo(() => prices.map(p => {
+    const m = matById.get(p.material_id) || {};
+    const s = supById.get(p.supplier_id) || {};
+    const u = unitById.get(p.unit_id || m.unit_id) || {};
+    const captured = p.captured_at ? new Date(p.captured_at) : null;
+    const ageDays = captured ? Math.max(0, Math.round((Date.now() - captured.getTime()) / 86400000)) : 0;
+    const source = (p.source && p.source.toLowerCase().includes('rfq')) ? 'RFQ' : (p.source || 'Manual');
+    return {
+      id:        p.id,
+      code:      m.code || p.material_id,
+      name:      m.name || '—',
+      spec:      m.spec || '',
+      cat:       m.category || '',
+      unit:      u.name || u.code || m.unit_id || '',
+      sup:       s.name || '—',
+      supkind:   s.type || 'company',
+      price:     Number(p.price) || 0,
+      mom: 0, momDir: 'flat', yoy: 0, yoyDir: 'flat',
+      spark:     [],
+      date:      captured ? captured.toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' }) : '—',
+      age:       ageDays,
+      source,
+      sourceRef: p.source_id || '',
+      flag:      null,
+    };
+  }), [prices, matById, supById, unitById]);
+
+  const filtered = rows.filter(r => {
     if (cat !== 'ทั้งหมด' && r.cat !== cat) return false;
     if (sourceFilter !== 'ทั้งหมด' && r.source !== sourceFilter) return false;
     if (q) {
       const v = q.toLowerCase();
-      if (!(r.name.includes(q) || r.code.toLowerCase().includes(v) || (r.sup||'').includes(q))) return false;
+      if (!(r.name.includes(q) || (r.code||'').toLowerCase().includes(v) || (r.sup||'').includes(q))) return false;
     }
     return true;
   });
+
+  // Stats
+  const totalPoints = rows.length;
+  const supplierCount = new Set(rows.map(r => r.sup).filter(x => x && x !== '—')).size;
+  const recent30 = rows.filter(r => r.age <= 30).length;
+  const stale180 = rows.filter(r => r.age > 180).length;
 
   return (
     <div className="page">
@@ -50,10 +120,14 @@ export function ScreenPriceDB({ go }) {
         </div>
         <div style={{ display:'flex', gap:8 }}>
           <button className="btn" onClick={() => setRfqPullOpen(true)}>{Icons.upload} ดึงจาก RFQ</button>
-          <button className="btn primary" onClick={() => setManualOpen(true)}>{Icons.plus} เพิ่ม Manual</button>
+          <button className="btn primary" onClick={() => setManualOpen(true)}>{Icons.plus} เพิ่มราคา</button>
           <button className="btn">{Icons.download} Export</button>
         </div>
       </div>
+
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
 
       {/* Top-line stats */}
       <div style={{
@@ -62,11 +136,11 @@ export function ScreenPriceDB({ go }) {
         padding:'24px 0', marginBottom:32,
       }}>
         {[
-          { label:'รายการในระบบ',     value:'0', sub:'ยังไม่มีข้อมูล' },
-          { label:'Supplier ใช้งาน',    value:'0',   sub:'ยังไม่มีข้อมูล' },
-          { label:'เพิ่มเข้าระบบ 30 วัน', value:'0',   sub:'ยังไม่มีข้อมูล' },
-          { label:'ขาขึ้น (YoY)',       value:'0',    sub:'ยังไม่มีข้อมูล' },
-          { label:'ค้างไม่อัพเดท',       value:'0',    sub:'ยังไม่มีข้อมูล' },
+          { label:'รายการในระบบ',     value: String(totalPoints), sub: totalPoints ? 'price points ทั้งหมด' : 'ยังไม่มีข้อมูล' },
+          { label:'Supplier ใช้งาน',    value: String(supplierCount), sub: supplierCount ? 'มีราคาบันทึกไว้' : 'ยังไม่มีข้อมูล' },
+          { label:'เพิ่มเข้าระบบ 30 วัน', value: String(recent30), sub: recent30 ? 'ราคาที่อัพเดทล่าสุด' : 'ยังไม่มีข้อมูล' },
+          { label:'ขาขึ้น (YoY)',       value: '—',                 sub: 'ต้องการประวัติเทียบ' },
+          { label:'ค้างไม่อัพเดท',       value: String(stale180),   sub: stale180 ? 'เกิน 180 วัน' : 'ยังไม่มีข้อมูล' },
         ].map((s, i) => (
           <div key={i} style={{ paddingLeft: i === 0 ? 0 : 28, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
             <Stat {...s} />
@@ -125,9 +199,13 @@ export function ScreenPriceDB({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loading ? (
               <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
-                ยังไม่มีข้อมูล
+                กำลังโหลด…
+              </td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล — คลิก "เพิ่มราคา" เพื่อสร้างรายการแรก
               </td></tr>
             ) : filtered.map((r, i) => (
               <tr key={i} onClick={() => go('pricedb-detail')} style={{ cursor:'pointer' }} className={r.flag ? `row-flag-${r.flag}` : ''}>
@@ -178,37 +256,65 @@ export function ScreenPriceDB({ go }) {
         </div>
       </div>
 
-      {manualOpen  && <ManualPriceModal  onClose={() => setManualOpen(false)} />}
+      {manualOpen  && <ManualPriceModal
+        materials={materials} suppliers={suppliers} units={units}
+        onClose={() => setManualOpen(false)}
+        onSaved={() => { setManualOpen(false); load(); }} />}
       {rfqPullOpen && <PullFromRFQModal onClose={() => setRfqPullOpen(false)} />}
     </div>
   );
 }
 
-const pdbRows = [];
-
 /* =================== Manual entry modal =================== */
-function ManualPriceModal({ onClose }) {
+function ManualPriceModal({ materials, suppliers, units, onClose, onSaved }) {
   const [form, setForm] = useState({
-    supplier:'', category:'งานโครงสร้าง', itemCode:'', itemName:'',
-    description:'', price:'', unit:'', quoteDate:'', ageHint:'',
+    materialId:'', supplierId:'', price:'', unitId:'', source:'Manual', sourceId:'',
   });
   const set = (k,v) => setForm({ ...form, [k]:v });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState('');
 
-  // Compute age if quoteDate provided
-  const computedAge = useMemo(() => {
-    if (!form.quoteDate) return null;
-    const today = new Date('2025-05-17');
-    const d = new Date(form.quoteDate);
-    if (isNaN(d)) return null;
-    return Math.max(0, Math.round((today - d) / 86400000));
-  }, [form.quoteDate]);
+  const selectedMat = materials.find(m => m.id === form.materialId);
 
-  const cats = ['งานโครงสร้าง','งานก่ออิฐ-ฉาบปูน','งานหลังคา','งานพื้น-ผนัง','งานสุขภัณฑ์','งานสี','งานระบบไฟฟ้า'];
-  const units = ['ถุง 50 กก.','เส้น','ก้อน','แผ่น','ตร.ม.','ลบ.ม.','ม.','กก.','ตัน','ลิตร','แกลลอน','ม้วน','ชุด','ชิ้น','ตัว'];
-  const suppliers = ['เอเชียสตีล','รุ่งเรืองสตีล','SCG Distribution','TOA Distribution','COTTO Wholesale','CPAC Roof','Q-CON Direct','ไทยเซรามิค','BCC Electric'];
+  // Auto-fill unit from material
+  useEffect(() => {
+    if (selectedMat && selectedMat.unit_id && !form.unitId) {
+      setForm(f => ({ ...f, unitId: selectedMat.unit_id }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.materialId]);
+
+  async function save() {
+    setErr('');
+    if (!form.materialId || !form.supplierId || !form.price) {
+      setErr('กรุณาเลือก Material, Supplier และกรอกราคา'); return;
+    }
+    setBusy(true);
+    const payload = {
+      material_id: form.materialId,
+      supplier_id: form.supplierId,
+      price:       Number(form.price),
+      unit_id:     form.unitId || selectedMat?.unit_id || null,
+      source:      form.source || 'Manual',
+      source_id:   form.sourceId || '',
+    };
+    try {
+      const res = await fetch('/api/prices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) { setErr(data.error || 'บันทึกไม่สำเร็จ'); setBusy(false); return; }
+      setBusy(false);
+      onSaved && onSaved();
+    } catch {
+      setErr('เครือข่ายขัดข้อง'); setBusy(false);
+    }
+  }
 
   return (
-    <SettingsModal eyebrow="บันทึกราคาเข้าระบบ" title="เพิ่มราคา · Manual" onClose={onClose} width={680}>
+    <SettingsModal eyebrow="บันทึกราคาเข้าระบบ" title="เพิ่มราคา · Manual" onClose={onClose} onSave={save} width={680}>
       <div style={{
         padding:'12px 14px', background:'var(--surface-2)',
         border:'1px solid var(--rule)', borderRadius:6, marginBottom:20,
@@ -221,67 +327,49 @@ function ManualPriceModal({ onClose }) {
         </div>
       </div>
 
-      <div className="eyebrow" style={{ marginBottom:10 }}>ข้อมูล Supplier และวัสดุ</div>
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{err}</div>
+      )}
+
+      <div className="eyebrow" style={{ marginBottom:10 }}>ข้อมูล Material และ Supplier</div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:20 }}>
-        <SettingsField label="Supplier" required>
-          <select value={form.supplier} onChange={e => set('supplier', e.target.value)} style={settingsInputStyle}>
+        <SettingsField label="Material" required>
+          <select value={form.materialId} onChange={e => set('materialId', e.target.value)} style={settingsInputStyle}>
             <option value="">— เลือก —</option>
-            {suppliers.map(s => <option key={s}>{s}</option>)}
+            {materials.map(m => <option key={m.id} value={m.id}>{m.code ? `${m.code} · ` : ''}{m.name}</option>)}
           </select>
         </SettingsField>
-        <SettingsField label="หมวด (Category)" required>
-          <select value={form.category} onChange={e => set('category', e.target.value)} style={settingsInputStyle}>
-            {cats.map(c => <option key={c}>{c}</option>)}
+        <SettingsField label="Supplier" required>
+          <select value={form.supplierId} onChange={e => set('supplierId', e.target.value)} style={settingsInputStyle}>
+            <option value="">— เลือก —</option>
+            {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </SettingsField>
-        <SettingsField label="รหัส Item" hint="ดึงจาก Material/SubContract master">
-          <input value={form.itemCode} onChange={e => set('itemCode', e.target.value)}
-            placeholder="เช่น MAT-STR-00003"
-            style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
-        </SettingsField>
-        <SettingsField label="ชื่อ Item" required>
-          <input value={form.itemName} onChange={e => set('itemName', e.target.value)}
-            placeholder="เช่น เหล็กเส้น DB12" style={settingsInputStyle} />
-        </SettingsField>
-        <div style={{ gridColumn:'1 / -1' }}>
-          <SettingsField label="Description (ถ้ามี)" hint="รายละเอียดเพิ่มเติม เช่น Spec, มอก., ขนาด">
-            <input value={form.description} onChange={e => set('description', e.target.value)}
-              placeholder="เช่น มอก. 24-2559 · ข้ออ้อย ⌀12mm × 10m" style={settingsInputStyle} />
-          </SettingsField>
-        </div>
       </div>
 
-      <div className="eyebrow" style={{ marginBottom:10 }}>ราคาและช่วงเวลา</div>
+      <div className="eyebrow" style={{ marginBottom:10 }}>ราคาและที่มา</div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
         <SettingsField label="ราคาต่อหน่วย (บาท · net)" required hint="ไม่รวม VAT และ Overhead">
           <input type="number" value={form.price} onChange={e => set('price', e.target.value)}
             placeholder="0" className="num"
             style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)', textAlign:'right' }} />
         </SettingsField>
-        <SettingsField label="หน่วย" required>
-          <select value={form.unit} onChange={e => set('unit', e.target.value)} style={settingsInputStyle}>
-            <option value="">— เลือก —</option>
-            {units.map(u => <option key={u}>{u}</option>)}
+        <SettingsField label="หน่วย" hint={selectedMat?.unit_id ? `auto-fill จาก Material — เปลี่ยนได้` : 'เลือกจาก master หน่วยนับ'}>
+          <select value={form.unitId} onChange={e => set('unitId', e.target.value)} style={settingsInputStyle}>
+            <option value="">— ใช้หน่วยจาก Material —</option>
+            {units.map(u => <option key={u.id} value={u.id}>{u.code ? `${u.code} · ` : ''}{u.name}</option>)}
           </select>
         </SettingsField>
-        <SettingsField label="วันที่เสนอราคา" required>
-          <input type="date" value={form.quoteDate} onChange={e => set('quoteDate', e.target.value)}
-            style={settingsInputStyle} />
+        <SettingsField label="ที่มา (Source)" hint='เช่น "Manual" หรือ "RFQ-2025-1234"'>
+          <input value={form.source} onChange={e => set('source', e.target.value)}
+            placeholder="Manual" style={settingsInputStyle} />
         </SettingsField>
-        <SettingsField label="ราคานี้ขอมาแล้วกี่วัน" hint={computedAge != null ? `auto-คำนวณจากวันที่เสนอราคา = ${computedAge} วัน` : 'หากไม่ระบุวันที่ ระบุได้เอง'}>
-          <input
-            type="number"
-            value={computedAge != null ? computedAge : form.ageHint}
-            onChange={e => set('ageHint', e.target.value)}
-            placeholder="0"
-            readOnly={computedAge != null}
-            style={{
-              ...settingsInputStyle, fontFamily:'var(--font-mono)', textAlign:'right',
-              background: computedAge != null ? 'var(--surface-2)' : 'var(--paper)',
-              color: computedAge != null ? 'var(--ink-3)' : 'var(--ink)',
-            }} />
+        <SettingsField label="รหัสที่มา (Source ID)" hint="(ไม่บังคับ)">
+          <input value={form.sourceId} onChange={e => set('sourceId', e.target.value)}
+            placeholder="" style={settingsInputStyle} />
         </SettingsField>
       </div>
+      {busy && <div style={{ marginTop:12, fontSize:12, color:'var(--ink-3)' }}>กำลังบันทึก…</div>}
     </SettingsModal>
   );
 }
@@ -429,6 +517,26 @@ export function ScreenPriceDBDetail({ go }) {
   const tabs = ['ภาพรวม','ประวัติราคา','Supplier เปรียบเทียบ','RFQ ที่เกี่ยวข้อง'];
   const [tab, setTab] = useState('ภาพรวม');
 
+  // Pull the latest material for the detail header (chart/history stays placeholder).
+  const [material, setMaterial] = useState(null);
+  const [unit, setUnit]         = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [mR, uR] = await Promise.all([
+          fetch('/api/materials').then(r => r.json()),
+          fetch('/api/units').then(r => r.json()),
+        ]);
+        const list = mR.items || [];
+        const m = list[0] || null;
+        setMaterial(m);
+        if (m && m.unit_id) {
+          setUnit((uR.items || []).find(u => u.id === m.unit_id) || null);
+        }
+      } catch {}
+    })();
+  }, []);
+
   const supplierRows = [];
   const activities = [];
 
@@ -441,16 +549,16 @@ export function ScreenPriceDBDetail({ go }) {
       <div className="page-head" style={{ alignItems:'flex-start' }}>
         <div className="page-title">
           <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6 }}>
-            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>—</span>
+            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{material?.code || '—'}</span>
             <span style={{ fontSize:11, padding:'1px 8px', borderRadius:3, background:'var(--paper-2)', color:'var(--ink-3)' }}>
               ราคาทั้งหมดเป็น net · ไม่รวม VAT/Overhead
             </span>
           </div>
-          <h1 className="h-display">ยังไม่มีข้อมูล</h1>
+          <h1 className="h-display">{material?.name || 'ยังไม่มีข้อมูล'}</h1>
           <div style={{ display:'flex', gap:24, marginTop:12, fontSize:13, color:'var(--ink-3)' }}>
-            <span>หมวด: <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
-            <span>หน่วย: <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
-            <span>Spec: <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
+            <span>หมวด: <strong style={{ color:'var(--ink-2)' }}>{material?.category || '—'}</strong></span>
+            <span>หน่วย: <strong style={{ color:'var(--ink-2)' }}>{unit?.name || unit?.code || '—'}</strong></span>
+            <span>Spec: <strong style={{ color:'var(--ink-2)' }}>{material?.spec || '—'}</strong></span>
           </div>
         </div>
         <div style={{ display:'flex', gap:8 }}>

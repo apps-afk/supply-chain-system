@@ -1,9 +1,7 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Av, money } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
-import { MATERIAL_CATEGORIES } from './screen-settings-materials';
-import { SUBCONTRACT_CATEGORIES } from './screen-settings-subcontracts';
 import { getActiveApprovalRoles } from './screen-settings-approval-roles';
 
 /*
@@ -11,6 +9,12 @@ import { getActiveApprovalRoles } from './screen-settings-approval-roles';
   Flow: Source (MAT/SUB) → pick Items → pick Suppliers (≥2) → live compare
 */
 
+// Auto comparison number — generated on submit
+function makeCmpNo() {
+  const y = new Date().getFullYear();
+  const seq = Math.floor(Math.random() * 9000 + 1000);
+  return `CMP-${y}-${seq}`;
+}
 export const NEXT_CMP_NO = '';
 
 // Synthetic per-supplier price data — for demo, generated from base price
@@ -28,9 +32,9 @@ export function pricesForItem(itemCode, basePrice, supplierIds) {
   return out;
 }
 
+// Kept as exported placeholders for backwards-compat with any consumers.
+// Real data is fetched at runtime inside ScreenCompareCreatePriceDB.
 export const PRICEDB_SUPPLIERS = [];
-
-// Base reference prices used to generate per-supplier variations
 export const BASE_PRICES = {};
 
 export function ScreenCompareCreatePriceDB({ go }) {
@@ -42,10 +46,69 @@ export function ScreenCompareCreatePriceDB({ go }) {
   const [picker, setPicker] = useState(null);            // { supplierId } when item picker is open
   const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
   const [generated, setGenerated] = useState(false);
+  const [generatedNo, setGeneratedNo] = useState('');
 
-  const categories = source === 'Material'
-    ? (MATERIAL_CATEGORIES || [])
-    : (SUBCONTRACT_CATEGORIES || []);
+  // Live data
+  const [suppliers, setSuppliers] = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [priceRows, setPriceRows] = useState([]);
+  const [loading, setLoading]    = useState(true);
+  const [loadErr, setLoadErr]    = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitErr, setSubmitErr]   = useState('');
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true); setLoadErr('');
+      try {
+        const [sR, mR, pR] = await Promise.all([
+          fetch('/api/suppliers').then(r => r.json()),
+          fetch('/api/materials').then(r => r.json()),
+          fetch('/api/prices').then(r => r.json()),
+        ]);
+        setSuppliers(sR.items || []);
+        setMaterials(mR.items || []);
+        setPriceRows(pR.items || []);
+      } catch {
+        setLoadErr('โหลดข้อมูลไม่สำเร็จ');
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  // Latest price per (material_id, supplier_id) — prices come back sorted captured_at desc
+  const priceLookup = useMemo(() => {
+    const map = new Map();
+    for (const p of priceRows) {
+      const k = `${p.material_id}::${p.supplier_id}`;
+      if (!map.has(k)) map.set(k, p);
+    }
+    return map;
+  }, [priceRows]);
+
+  // Categories derived from materials in DB
+  const categories = useMemo(() => {
+    const byCat = new Map();
+    for (const m of materials) {
+      const catName = m.category || 'ไม่ระบุ';
+      if (!byCat.has(catName)) byCat.set(catName, { name: catName, short: catName.slice(0,4).toUpperCase(), items: [] });
+      byCat.get(catName).items.push({
+        code: m.code || m.id,
+        name: m.name,
+        spec: m.spec || '',
+        unit: m.unit_id || '',
+        id:   m.id,
+      });
+    }
+    return [...byCat.values()];
+  }, [materials]);
+
+  // Suppliers that can be added (with kind hint based on type)
+  const supplierOptions = useMemo(() =>
+    suppliers.filter(s => s.active !== false).map(s => ({
+      id: s.id, name: s.name, kind: s.type || 'company', cats: [s.type || ''],
+    })),
+  [suppliers]);
 
   // --- helpers --------------------------------------------------------------
   const addSupplier = (s) => {
@@ -61,12 +124,11 @@ export function ScreenCompareCreatePriceDB({ go }) {
       const existing = new Set(list.map(i => i.code));
       const fresh = items.filter(i => !existing.has(i.code))
         .map(i => {
-          const basePrice = BASE_PRICES[i.code];
-          // Per-supplier spread — mirrors pricesForItem logic
-          const hash = [...sid].reduce((s,c) => s + c.charCodeAt(0), 0);
-          const pct = ((hash % 11) - 5) / 100;
-          const price = basePrice ? Math.round(basePrice * (1 + pct)) : null;
-          return { ...i, qty:1, price };
+          // Real price lookup from /api/prices: latest captured_at for (material_id, supplier_id)
+          const matId = i.id || i.code;
+          const p = priceLookup.get(`${matId}::${sid}`);
+          const price = p ? Number(p.price) : null;
+          return { ...i, materialId: matId, qty: 1, price };
         });
       return [...list, ...fresh];
     });
@@ -144,6 +206,48 @@ export function ScreenCompareCreatePriceDB({ go }) {
   const allHaveItems    = suppliersData.length > 0 && suppliersData.every(s => s.items.length > 0);
   const canCompare      = hasMinSuppliers && allHaveItems;
 
+  /* ===================== Submit handler ===================== */
+  async function submitComparison() {
+    setSubmitErr('');
+    setSubmitting(true);
+    const cmpNo = makeCmpNo();
+    // Compute total_low / total_high from per-supplier totals
+    const totalVals = Object.values(totals).filter(v => v > 0);
+    const total_low  = totalVals.length ? Math.min(...totalVals) : 0;
+    const total_high = totalVals.length ? Math.max(...totalVals) : 0;
+    const payload = {
+      no: cmpNo,
+      title: `เปรียบเทียบราคา ${source} · ${grid.length} รายการ`,
+      status: 'draft',
+      items_json: grid.map(it => ({
+        code: it.code, name: it.name, spec: it.spec || '', unit: it.unit || '',
+        qty: Number(it.qty) || 1, prices: it.prices,
+      })),
+      suppliers_json: {
+        mode: 'PriceDB',
+        source,
+        list: suppliersData.map(s => ({ id: s.id, name: s.name, kind: s.kind })),
+        selectedSupplier: aiBest ? (suppliersData.find(s => s.id === aiBest.winnerId)?.name || '') : '',
+      },
+      total_low, total_high,
+      notes: '',
+    };
+    try {
+      const res = await fetch('/api/comparisons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) { setSubmitErr(data.error || 'บันทึกไม่สำเร็จ'); setSubmitting(false); return; }
+      setGeneratedNo(cmpNo);
+      setGenerated(true);
+    } catch {
+      setSubmitErr('เครือข่ายขัดข้อง');
+    }
+    setSubmitting(false);
+  }
+
   /* ===================== Success ===================== */
   if (generated) {
     return <GeneratedCompare
@@ -151,21 +255,41 @@ export function ScreenCompareCreatePriceDB({ go }) {
       source={source}
       items={grid}
       suppliers={suppliersData.map(s => s.id)}
+      supplierObjs={suppliersData}
       totals={totals}
       aiBest={aiBest}
+      cmpNo={generatedNo}
     />;
   }
 
   /* ===================== Main builder UI ===================== */
   // Suppliers eligible to add (haven't been added yet, filtered to source-relevant categories)
   const alreadyAdded = new Set(suppliersData.map(s => s.id));
-  const addable = PRICEDB_SUPPLIERS.filter(s => !alreadyAdded.has(s.id));
+  const addable = supplierOptions.filter(s => !alreadyAdded.has(s.id));
+
+  if (loading) {
+    return (
+      <div className="page">
+        <button className="btn ghost sm" onClick={() => go('compare')} style={{ marginBottom:20, marginLeft:-8 }}>
+          {Icons.back} กลับไป Compare
+        </button>
+        <div style={{ padding:40, textAlign:'center', color:'var(--ink-3)' }}>กำลังโหลด…</div>
+      </div>
+    );
+  }
 
   return (
     <div className="page" style={{ paddingBottom:200 }}>
       <button className="btn ghost sm" onClick={() => go('compare')} style={{ marginBottom:20, marginLeft:-8 }}>
         {Icons.back} กลับไป Compare
       </button>
+
+      {loadErr && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{loadErr}</div>
+      )}
+      {submitErr && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{submitErr}</div>
+      )}
 
       <div className="page-head" style={{ alignItems:'flex-start' }}>
         <div className="page-title">
@@ -176,7 +300,7 @@ export function ScreenCompareCreatePriceDB({ go }) {
               background:'var(--teal-soft)', color:'var(--teal-ink)',
               fontFamily:'var(--font-mono)', fontSize:12, fontWeight:600,
             }}>
-              {NEXT_CMP_NO}
+              {NEXT_CMP_NO || 'CMP-YYYY-XXXX'}
               <span style={{ fontSize:9, color:'var(--ink-3)', fontWeight:400, letterSpacing:0.06, textTransform:'uppercase' }}>auto</span>
             </span>
             <span style={{
@@ -321,7 +445,7 @@ export function ScreenCompareCreatePriceDB({ go }) {
         <div style={{ display:'flex', gap:32 }}>
           <div>
             <div className="eyebrow" style={{ marginBottom:2 }}>เอกสาร</div>
-            <div className="font-mono" style={{ fontSize:16, lineHeight:1, marginTop:2 }}>{NEXT_CMP_NO}</div>
+            <div className="font-mono" style={{ fontSize:16, lineHeight:1, marginTop:2 }}>{NEXT_CMP_NO || 'CMP-YYYY-XXXX'}</div>
           </div>
           <div>
             <div className="eyebrow" style={{ marginBottom:2 }}>Supplier</div>
@@ -346,11 +470,12 @@ export function ScreenCompareCreatePriceDB({ go }) {
         </div>
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
           <button className="btn ghost" onClick={() => go('compare')}>ยกเลิก</button>
-          <button className="btn" disabled={!canCompare}>บันทึกร่าง</button>
-          <button className="btn primary" disabled={!canCompare}
-            onClick={() => setGenerated(true)}
-            style={{ padding:'10px 20px', opacity: canCompare ? 1 : 0.5, cursor: canCompare ? 'pointer' : 'not-allowed' }}>
-            {Icons.check} Compare & สร้างเอกสาร
+          <button className="btn" disabled={!canCompare || submitting}
+            onClick={submitComparison}>บันทึกร่าง</button>
+          <button className="btn primary" disabled={!canCompare || submitting}
+            onClick={submitComparison}
+            style={{ padding:'10px 20px', opacity: (canCompare && !submitting) ? 1 : 0.5, cursor: (canCompare && !submitting) ? 'pointer' : 'not-allowed' }}>
+            {Icons.check} {submitting ? 'กำลังบันทึก…' : 'Compare & สร้างเอกสาร'}
           </button>
         </div>
       </div>
@@ -370,6 +495,8 @@ export function ScreenCompareCreatePriceDB({ go }) {
           categories={categories} source={source}
           targetSupplier={suppliersData.find(s => s.id === picker.supplierId)}
           alreadyPicked={new Set((suppliersData.find(s => s.id === picker.supplierId)?.items || []).map(i => i.code))}
+          priceLookup={priceLookup}
+          supplierId={picker.supplierId}
           onClose={() => setPicker(null)}
           onAdd={(items) => { addItemsTo(picker.supplierId, items); setPicker(null); }} />
       )}
@@ -521,7 +648,7 @@ function SupplierPickerModal({ addable, onClose, onPick }) {
 }
 
 /* =================== Item picker modal =================== */
-function ItemPickerModal({ categories, source, targetSupplier, alreadyPicked = new Set(), onClose, onAdd }) {
+function ItemPickerModal({ categories, source, targetSupplier, alreadyPicked = new Set(), priceLookup, supplierId, onClose, onAdd }) {
   const [selectedCat, setSelectedCat] = useState(categories[0]?.short || '');
   const [picked, setPicked] = useState(new Set());
   const [q, setQ] = useState('');
@@ -620,7 +747,10 @@ function ItemPickerModal({ categories, source, targetSupplier, alreadyPicked = n
                       </td>
                       <td style={{ fontSize:12.5, color:'var(--ink-3)' }}>{it.unit}</td>
                       <td className="num-col num" style={{ color:'var(--ink-2)' }}>
-                        {BASE_PRICES[it.code] ? money(BASE_PRICES[it.code]) : '—'}
+                        {(() => {
+                          const p = priceLookup && supplierId ? priceLookup.get(`${it.id || it.code}::${supplierId}`) : null;
+                          return p ? money(Number(p.price)) : '—';
+                        })()}
                       </td>
                     </tr>
                   );
@@ -835,9 +965,13 @@ export function Row({ label, value, last }) {
 }
 
 /* =================== Generated success view (shared by Mode A + Mode B) =================== */
-export function GeneratedCompare({ go, rfqMode, source, items, suppliers, totals, aiBest }) {
-  const suppObjs = suppliers.map(id => PRICEDB_SUPPLIERS.find(s => s.id === id));
+export function GeneratedCompare({ go, rfqMode, source, items, suppliers, supplierObjs, totals, aiBest, cmpNo }) {
+  // supplierObjs: provided when caller has full supplier rows ({id,name,kind}); fallback to ID-only stubs
+  const suppObjs = Array.isArray(supplierObjs) && supplierObjs.length
+    ? supplierObjs
+    : suppliers.map(id => ({ id, name: id, kind: 'company' }));
   const winner = suppObjs.find(s => s.id === aiBest?.winnerId);
+  const displayNo = cmpNo || NEXT_CMP_NO || 'CMP-YYYY-XXXX';
 
   return (
     <div className="page">
@@ -848,7 +982,7 @@ export function GeneratedCompare({ go, rfqMode, source, items, suppliers, totals
       <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:32, marginBottom:32, alignItems:'flex-start' }}>
         <div>
           <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{NEXT_CMP_NO}</span>
+            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{displayNo}</span>
             <Chip kind="active">{Icons.check} สร้างสำเร็จ</Chip>
             <span style={{ fontSize:12, color:'var(--ink-3)' }}>· พร้อมดาวน์โหลด PDF</span>
           </div>
@@ -875,7 +1009,7 @@ export function GeneratedCompare({ go, rfqMode, source, items, suppliers, totals
               fontSize:11, fontWeight:600, letterSpacing:0.5, flexShrink:0,
             }}>PDF</div>
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:13, fontWeight:500 }}>{NEXT_CMP_NO}_Compare.pdf</div>
+              <div style={{ fontSize:13, fontWeight:500 }}>{displayNo}_Compare.pdf</div>
               <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:4 }}>18 KB · พร้อมเซ็นอนุมัติ</div>
               <div style={{ marginTop:14, fontSize:11.5, color:'var(--ink-3)', lineHeight:1.7 }}>
                 <div>📋 ตารางเปรียบเทียบ {items.length} รายการ × {suppliers.length} Supplier</div>
@@ -888,14 +1022,15 @@ export function GeneratedCompare({ go, rfqMode, source, items, suppliers, totals
       </div>
 
       <h3 className="h-section" style={{ marginBottom:16 }}>ตัวอย่างเอกสาร PDF</h3>
-      <ComparePDFPreview items={items} suppliers={suppObjs} totals={totals} aiBest={aiBest} winner={winner} mode={rfqMode ? 'RFQ' : 'PriceDB'} />
+      <ComparePDFPreview items={items} suppliers={suppObjs} totals={totals} aiBest={aiBest} winner={winner} mode={rfqMode ? 'RFQ' : 'PriceDB'} cmpNo={displayNo} />
     </div>
   );
 }
 
 /* =================== PDF doc preview (success page) =================== */
-export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mode }) {
+export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mode, cmpNo }) {
   const savingsPct = aiBest?.worstTotal ? ((aiBest.savings / aiBest.worstTotal) * 100).toFixed(1) : 0;
+  const displayNo = cmpNo || NEXT_CMP_NO || 'CMP-YYYY-XXXX';
 
   return (
     <div className="card" style={{ padding:0, overflow:'hidden', boxShadow:'0 8px 32px -16px rgba(20,18,14,0.18)' }}>
@@ -904,7 +1039,7 @@ export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mo
         fontSize:11, color:'var(--ink-3)', display:'flex', alignItems:'center', gap:12, fontFamily:'var(--font-mono)',
       }}>
         <span style={{ background:'var(--clay)', color:'#fff', padding:'2px 6px', borderRadius:2, fontSize:9.5, fontWeight:600 }}>PDF</span>
-        <span>{NEXT_CMP_NO}_Compare.pdf</span>
+        <span>{displayNo}_Compare.pdf</span>
       </div>
 
       <div style={{ padding:'36px 48px', background:'#FFFFFF', minHeight:600 }}>
@@ -916,7 +1051,7 @@ export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mo
             <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:4 }}>Price Comparison · {mode === 'RFQ' ? 'จากใบเสนอราคา (RFQ)' : 'จากฐานข้อมูลราคา (Price DB)'}</div>
           </div>
           <div style={{ textAlign:'right', fontSize:11.5, lineHeight:1.7 }}>
-            <div><span style={{ color:'var(--ink-3)' }}>เลขที่:</span> <span className="font-mono" style={{ fontWeight:500 }}>{NEXT_CMP_NO}</span></div>
+            <div><span style={{ color:'var(--ink-3)' }}>เลขที่:</span> <span className="font-mono" style={{ fontWeight:500 }}>{displayNo}</span></div>
             <div><span style={{ color:'var(--ink-3)' }}>วันที่:</span> —</div>
           </div>
         </div>

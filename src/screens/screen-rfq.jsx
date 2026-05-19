@@ -1,40 +1,78 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icons, Chip, Av, Spark, Delta, money } from '../lib/shell';
 
 /*
   RFQ — list + the post-quote "confirm to Price DB" screen.
 
-  Per latest spec:
-  - Title shows "ใบขอให้เสนอราคา (RFQ)"
-  - Single summary card: docs waiting for Supplier to reply
-  - Simpler table: RFQ No. / รายการ / Supplier / สร้างเอกสาร / ครบกำหนด / สถานะ
-  - Statuses reduced to 2: Wait | Received
+  Wired to /api/rfqs (CRUD), /api/upload (Drive), /api/attachments.
+
+  DB statuses: draft | sent | received | closed | cancelled
 */
 
-/* =================== Data =================== */
+/* =================== Constants =================== */
 
-// status: 'wait'    = created but Supplier hasn't sent back & been confirmed yet
-// status: 'received' = supplier reply uploaded AND confirmed in system
-const rfqRows = [];
+const RFQ_STATUS = {
+  draft:     { bg:'var(--paper-2)',      fg:'var(--ink-3)',         dot:'var(--ink-4)', label:'ร่าง' },
+  sent:      { bg:'var(--ochre-soft)',   fg:'#6B5121',              dot:'var(--ochre)', label:'ส่งแล้ว · รอตอบกลับ' },
+  received:  { bg:'var(--moss-soft)',    fg:'#2F4A1A',              dot:'var(--moss)',  label:'ได้รับ Quote' },
+  closed:    { bg:'var(--teal-soft)',    fg:'var(--teal-ink)',      dot:'var(--teal)',  label:'ปิดงาน' },
+  cancelled: { bg:'var(--clay-soft)',    fg:'#6B2D1A',              dot:'var(--clay)',  label:'ยกเลิก' },
+};
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' });
+  } catch { return iso; }
+}
 
 /* =================== List =================== */
 
 export function ScreenRFQ({ go }) {
-  const [filter, setFilter] = useState('ทั้งหมด');
+  const [rfqs,     setRfqs]     = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [err,      setErr]      = useState('');
+  const [filter,   setFilter]   = useState('ทั้งหมด');
   const [q, setQ] = useState('');
 
-  const waiting = rfqRows.filter(r => r.status === 'wait').length;
+  async function load() {
+    setLoading(true); setErr('');
+    try {
+      const [rR, rP] = await Promise.all([
+        fetch('/api/rfqs'),
+        fetch('/api/projects'),
+      ]);
+      const dR = await rR.json();
+      const dP = await rP.json();
+      if (!rR.ok) setErr(dR.error || 'โหลดข้อมูลไม่สำเร็จ');
+      setRfqs(dR.items || []);
+      setProjects(dP.items || []);
+    } catch {
+      setErr('เครือข่ายขัดข้อง');
+    }
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
 
-  const filtered = rfqRows.filter(r => {
-    if (filter === 'Wait'     && r.status !== 'wait')     return false;
-    if (filter === 'Received' && r.status !== 'received') return false;
+  const projName = (id) => projects.find(p => p.id === id)?.name || '—';
+
+  const waiting = rfqs.filter(r => r.status === 'sent').length;
+
+  const filtered = rfqs.filter(r => {
+    if (filter !== 'ทั้งหมด' && r.status !== filter) return false;
     if (q) {
       const v = q.toLowerCase();
-      if (!(r.no.toLowerCase().includes(v) || r.title.includes(q) || r.sup.includes(q))) return false;
+      if (!((r.no || '').toLowerCase().includes(v) || (r.title || '').toLowerCase().includes(v) || projName(r.project_id).toLowerCase().includes(v))) return false;
     }
     return true;
   });
+
+  // Past-due heuristic: due_date in the past + status 'sent'
+  const today = new Date().toISOString().slice(0,10);
+  const overdue = rfqs.filter(r => r.status === 'sent' && r.due_date && r.due_date < today).length;
 
   return (
     <div className="page">
@@ -47,51 +85,57 @@ export function ScreenRFQ({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn">{Icons.upload} Upload Quote</button>
+          <button className="btn" onClick={() => go('rfq-confirm')}>{Icons.upload} Upload Quote</button>
           <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้าง RFQ ใหม่</button>
         </div>
       </div>
 
-      {/* Single stat: docs waiting for supplier reply */}
+      {/* Stat strip — derived counts from data */}
       <div style={{
-        display:'grid', gridTemplateColumns:'1fr', gap:0,
+        display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:0,
         borderTop:'1px solid var(--rule)', borderBottom:'1px solid var(--rule)',
         padding:'24px 0', marginBottom:32,
       }}>
-        <div style={{ display:'flex', alignItems:'center', gap:24 }}>
-          <div>
-            <div className="stat-label">รอ Supplier ตอบกลับ</div>
-            <div className="stat-value" style={{ color: waiting > 0 ? 'var(--clay)' : 'var(--ink)' }}>
-              {waiting} <span className="unit">ฉบับ</span>
+        {Object.keys(RFQ_STATUS).map((s, i) => {
+          const count = rfqs.filter(r => r.status === s).length;
+          const sp = RFQ_STATUS[s];
+          return (
+            <div key={s} style={{ paddingLeft: i === 0 ? 0 : 24, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
+              <div className="eyebrow" style={{
+                display:'inline-flex', alignItems:'center', gap:6,
+                fontSize:10, color: sp.fg, marginBottom:6,
+              }}>
+                <span style={{ width:6, height:6, borderRadius:999, background:sp.dot }} />
+                {sp.label}
+              </div>
+              <div style={{ fontFamily:'var(--font-serif)', fontSize:28, lineHeight:1 }}>{count}</div>
+              <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:4 }}>
+                {s === 'sent' && overdue > 0 && <span style={{ color:'var(--clay)' }}>{overdue} ใบเกินกำหนด</span>}
+                {s === 'sent' && overdue === 0 && 'รอ Supplier ตอบกลับ'}
+                {s === 'draft' && 'ยังไม่ได้ส่งออก'}
+                {s === 'received' && 'พร้อมตรวจสอบ'}
+                {s === 'closed' && 'ปิดงานแล้ว'}
+                {s === 'cancelled' && 'ยกเลิก'}
+              </div>
             </div>
-            <div className="stat-sub">ยังไม่ได้อัพโหลด Quote เข้าระบบ หรือยังไม่ได้ยืนยันราคา</div>
-          </div>
-          {waiting > 0 && (
-            <div style={{
-              marginLeft:'auto', display:'flex', gap:8, alignItems:'center',
-              padding:'10px 16px', background:'var(--surface-2)',
-              border:'1px solid var(--rule)', borderRadius:6,
-              fontSize:12.5, color:'var(--ink-2)',
-            }}>
-              <span style={{ color:'var(--clay)' }}>{Icons.clock}</span>
-              <span>
-                <strong>{rfqRows.filter(r => r.status==='wait' && (r.dueWarn==='วันนี้' || r.dueWarn==='เกินกำหนด')).length}</strong> ใบ ใกล้ครบกำหนดหรือเกินกำหนดแล้ว
-              </span>
-            </div>
-          )}
-        </div>
+          );
+        })}
       </div>
+
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
 
       {/* Filters */}
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16, flexWrap:'wrap' }}>
-        <div style={{ display:'flex', gap:4 }}>
-          {['ทั้งหมด','Wait','Received'].map(f => (
+        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+          {['ทั้งหมด', ...Object.keys(RFQ_STATUS)].map(f => (
             <button key={f} onClick={() => setFilter(f)} className="btn sm" style={{
               background: filter === f ? 'var(--ink)' : 'transparent',
               color: filter === f ? 'var(--paper)' : 'var(--ink-2)',
               borderColor: filter === f ? 'var(--ink)' : 'var(--rule)',
               padding:'5px 12px',
-            }}>{f}</button>
+            }}>{f === 'ทั้งหมด' ? f : RFQ_STATUS[f].label}</button>
           ))}
         </div>
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8, padding:'5px 10px', border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--surface)', width:240 }}>
@@ -111,57 +155,51 @@ export function ScreenRFQ({ go }) {
             <tr>
               <th style={{ width:'14%' }}>RFQ No.</th>
               <th>รายการ</th>
-              <th>Supplier</th>
+              <th>โครงการ</th>
               <th>วันที่สร้างเอกสาร</th>
               <th>วันที่ครบกำหนด</th>
               <th>สถานะ</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loading ? (
+              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+            ) : filtered.length === 0 ? (
               <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
-            ) : filtered.map((r, i) => (
-              <tr key={i} onClick={() => r.status === 'received' ? go('rfq-confirm') : null}
-                  style={{ cursor: r.status === 'received' ? 'pointer' : 'default' }}>
-                <td>
-                  <div className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{r.no}</div>
-                </td>
-                <td>
-                  <div style={{ fontWeight:500 }}>{r.title}</div>
-                  <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:2 }}>{r.items} รายการ</div>
-                </td>
-                <td>
-                  <span style={{ display:'inline-flex', gap:8, alignItems:'center' }}>
-                    <Av initials={r.sup.slice(0,2)} kind={r.supkind} />
-                    <span style={{ fontSize:12.5 }}>{r.sup}</span>
-                  </span>
-                </td>
-                <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{r.created}</td>
-                <td>
-                  <div style={{ fontSize:12.5 }}>{r.due}</div>
-                  {r.dueWarn && <div style={{ fontSize:11, color: r.dueWarn==='เกินกำหนด' ? 'var(--clay)' : 'var(--ochre)', marginTop:2 }}>{r.dueWarn}</div>}
-                </td>
-                <td>
-                  {r.status === 'wait'
-                    ? <span style={{
-                        display:'inline-flex', alignItems:'center', gap:6,
-                        fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
-                        background:'var(--ochre-soft)', color:'#6B5121',
-                      }}>
-                        <span style={{ width:6, height:6, borderRadius:999, background:'var(--ochre)' }} />
-                        Wait
-                      </span>
-                    : <span style={{
-                        display:'inline-flex', alignItems:'center', gap:6,
-                        fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
-                        background:'var(--moss-soft)', color:'#2F4A1A',
-                      }}>
-                        <span style={{ width:6, height:6, borderRadius:999, background:'var(--moss)' }} />
-                        Received
-                      </span>}
-                </td>
-              </tr>
-            ))}
+            ) : filtered.map(r => {
+              const sp = RFQ_STATUS[r.status] || RFQ_STATUS.draft;
+              const overdueFlag = r.status === 'sent' && r.due_date && r.due_date < today;
+              return (
+                <tr key={r.id} onClick={() => {
+                    try { window.localStorage.setItem('rfq.currentId', r.id); } catch {}
+                    if (r.status === 'sent' || r.status === 'received') go('rfq-confirm');
+                  }}
+                  style={{ cursor: (r.status === 'sent' || r.status === 'received') ? 'pointer' : 'default' }}>
+                  <td>
+                    <div className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{r.no}</div>
+                  </td>
+                  <td>
+                    <div style={{ fontWeight:500 }}>{r.title || '—'}</div>
+                  </td>
+                  <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{projName(r.project_id)}</td>
+                  <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{fmtDate(r.created_at)}</td>
+                  <td>
+                    <div style={{ fontSize:12.5 }}>{fmtDate(r.due_date)}</div>
+                    {overdueFlag && <div style={{ fontSize:11, color:'var(--clay)', marginTop:2 }}>เกินกำหนด</div>}
+                  </td>
+                  <td>
+                    <span style={{
+                      display:'inline-flex', alignItems:'center', gap:6,
+                      fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
+                      background: sp.bg, color: sp.fg,
+                    }}>
+                      <span style={{ width:6, height:6, borderRadius:999, background: sp.dot }} />
+                      {sp.label}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -169,10 +207,83 @@ export function ScreenRFQ({ go }) {
   );
 }
 
-/* =================== Post-quote confirm screen (kept as-is) =================== */
+/* =================== Post-quote confirm screen =================== */
+/*
+  Loads the "current" RFQ from localStorage (set by the list-row click).
+  Lets the user upload the supplier's quote PDF into Drive under category
+  'rfq_quote' linked to this RFQ id.  Items comparison stays mock for now
+  (no per-item API yet).
+*/
 
 export function ScreenRFQConfirm({ go }) {
-  const [items, setItems] = useState([]);
+  const [rfq,        setRfq]        = useState(null);
+  const [loading,    setLoading]    = useState(true);
+  const [err,        setErr]        = useState('');
+  const [items,      setItems]      = useState([]);  // mock for now
+  const [quoteFile,  setQuoteFile]  = useState(null);
+  const [uploading,  setUploading]  = useState(false);
+  const [uploadErr,  setUploadErr]  = useState('');
+  const [uploadOk,   setUploadOk]   = useState(null); // attachment record
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true); setErr('');
+      try {
+        const stashed = (typeof window !== 'undefined') ? window.localStorage.getItem('rfq.currentId') : null;
+        const r = await fetch('/api/rfqs');
+        const d = await r.json();
+        if (!r.ok) { setErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
+        const list = d.items || [];
+        const picked = (stashed && list.find(x => x.id === stashed)) || list[0] || null;
+        setRfq(picked);
+        // If notes contains stringified items, hydrate the items table
+        if (picked?.notes) {
+          try {
+            const parsed = JSON.parse(picked.notes);
+            if (parsed && Array.isArray(parsed.items)) {
+              setItems(parsed.items.map(it => ({
+                ...it,
+                save:    it.save ?? true,
+                outlier: it.outlier ?? false,
+                isNew:   it.isNew   ?? false,
+              })));
+            }
+          } catch { /* not JSON, ignore */ }
+        }
+      } catch {
+        setErr('เครือข่ายขัดข้อง');
+      }
+      setLoading(false);
+    })();
+  }, []);
+
+  async function uploadQuote() {
+    if (!quoteFile || !rfq) return;
+    setUploading(true); setUploadErr(''); setUploadOk(null);
+    const fd = new FormData();
+    fd.append('file', quoteFile);
+    fd.append('category',    'rfq_quote');
+    fd.append('entity_type', 'rfq');
+    fd.append('entity_id',   rfq.id);
+    fd.append('entity_ref',  rfq.no || '');
+    try {
+      const r = await fetch('/api/upload', { method:'POST', body: fd });
+      const d = await r.json();
+      if (!r.ok) { setUploadErr(d.error || 'อัปโหลดไม่สำเร็จ'); setUploading(false); return; }
+      // bump status to 'received'
+      try {
+        await fetch('/api/rfqs', {
+          method:'PATCH',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ id: rfq.id, status:'received' }),
+        });
+      } catch {}
+      setUploadOk(d.file);
+    } catch {
+      setUploadErr('เครือข่ายขัดข้อง');
+    }
+    setUploading(false);
+  }
 
   const toggle = (id) => setItems(items.map(it => it.id === id ? { ...it, save: !it.save } : it));
 
@@ -188,16 +299,78 @@ export function ScreenRFQConfirm({ go }) {
       <div className="page-head" style={{ alignItems: 'flex-start' }}>
         <div className="page-title">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-            <Chip kind="recv">รับ Quote แล้ว</Chip>
+            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{rfq?.no || '—'}</span>
+            <Chip kind="recv">{rfq?.status === 'received' ? 'รับ Quote แล้ว' : 'อัพโหลด Quote'}</Chip>
           </div>
-          <h1 className="h-display">ตรวจสอบก่อนบันทึก Price DB</h1>
+          <h1 className="h-display">{loading ? 'กำลังโหลด…' : (rfq?.title || 'ตรวจสอบก่อนบันทึก Price DB')}</h1>
           <p style={{ fontSize: 14, color: 'var(--ink-3)', margin: '8px 0 0', maxWidth: 620 }}>
-            เปรียบเทียบราคาใหม่จาก Supplier กับราคาเดิมในระบบ — ติ๊กเลือกรายการที่จะเก็บเข้า Price DB
+            อัพโหลดไฟล์ใบเสนอราคาจาก Supplier (PDF) เก็บเข้า Google Drive · จากนั้นเปรียบเทียบราคากับ Price DB
           </p>
         </div>
       </div>
 
-      {/* Main comparison panel */}
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
+
+      {/* Upload section */}
+      <div className="card" style={{ padding:'20px 24px', marginBottom:24 }}>
+        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12 }}>
+          <div>
+            <h3 className="h-card">อัพโหลด Quote PDF จาก Supplier</h3>
+            <p style={{ fontSize:12.5, color:'var(--ink-3)', margin:'4px 0 0' }}>
+              ไฟล์จะถูกเก็บเข้า Google Drive ภายใต้หมวด "ใบเสนอราคา (RFQ Quotes)"
+            </p>
+          </div>
+        </div>
+
+        {uploadErr && (
+          <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:12 }}>{uploadErr}</div>
+        )}
+
+        {uploadOk ? (
+          <div style={{
+            padding:'12px 14px', background:'var(--moss-soft)',
+            border:'1px solid var(--moss)', borderRadius:6,
+            display:'flex', gap:12, alignItems:'center',
+          }}>
+            <span style={{ color:'var(--moss)' }}>{Icons.check}</span>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:13, fontWeight:500, color:'#2F4A1A' }}>อัปโหลดสำเร็จ</div>
+              <div style={{ fontSize:11.5, color:'#2F4A1A', marginTop:2 }}>
+                {uploadOk.name} · เก็บเข้า Google Drive แล้ว
+              </div>
+            </div>
+            {uploadOk.viewLink && (
+              <a href={uploadOk.viewLink} target="_blank" rel="noreferrer" className="btn sm">
+                {Icons.external} เปิดดู
+              </a>
+            )}
+          </div>
+        ) : (
+          <div style={{ display:'flex', gap:12, alignItems:'center', flexWrap:'wrap' }}>
+            <label style={{
+              flex:'1 1 320px', padding:'18px 20px',
+              border:'2px dashed var(--rule-2)', borderRadius:8,
+              background:'var(--surface-2)', textAlign:'center', cursor:'pointer',
+            }}>
+              <div style={{ fontSize:13, fontWeight:500, color:'var(--ink-2)', marginBottom:4 }}>
+                {quoteFile ? quoteFile.name : <>เลือกไฟล์ PDF ของใบเสนอราคา</>}
+              </div>
+              <div style={{ fontSize:11, color:'var(--ink-3)' }}>
+                {quoteFile ? `${Math.round(quoteFile.size/1024)} KB` : 'รองรับ .pdf · ไม่เกิน 25 MB'}
+              </div>
+              <input type="file" accept=".pdf,application/pdf" style={{ display:'none' }}
+                onChange={e => setQuoteFile(e.target.files?.[0] || null)} />
+            </label>
+            <button className="btn primary" disabled={!quoteFile || uploading || !rfq} onClick={uploadQuote}>
+              {uploading ? 'กำลังอัปโหลด…' : <>{Icons.upload} อัพโหลด Quote</>}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Main comparison panel — items table remains mock */}
       <div className="card" style={{ padding: 0 }}>
         <div style={{ padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--rule)' }}>
           <div>
@@ -231,7 +404,7 @@ export function ScreenRFQConfirm({ go }) {
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
+              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล — อัพโหลด Quote ก่อน · ฟีเจอร์เปรียบเทียบราคารายตัวจะเชื่อม API ในขั้นถัดไป</td></tr>
             ) : items.map((it) => {
               const delta = it.oldP == null ? null : ((it.newP - it.oldP) / it.oldP) * 100;
               const dir = delta == null ? 'new' : delta > 0.5 ? 'up' : delta < -0.5 ? 'down' : 'flat';
@@ -255,7 +428,7 @@ export function ScreenRFQConfirm({ go }) {
                     </div>
                     <div className="font-mono" style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>{it.id}</div>
                   </td>
-                  <td className="num-col num" style={{ color: 'var(--ink-2)' }}>{it.qty.toLocaleString()} {it.unit}</td>
+                  <td className="num-col num" style={{ color: 'var(--ink-2)' }}>{(it.qty || 0).toLocaleString()} {it.unit}</td>
                   <td>
                     {it.oldP == null
                       ? <span style={{ fontSize:12, color:'var(--ink-4)' }}>— ไม่มีในระบบ</span>
@@ -265,7 +438,7 @@ export function ScreenRFQConfirm({ go }) {
                         </>)}
                   </td>
                   <td className="num-col">
-                    <input type="text" defaultValue={it.newP.toLocaleString()} className="num"
+                    <input type="text" defaultValue={(it.newP || 0).toLocaleString()} className="num"
                       style={{ width:90, padding:'6px 10px', fontSize:13, border:'1px solid var(--rule)', borderRadius:4, textAlign:'right', background:'var(--paper)' }} />
                     <span style={{ marginLeft:6, fontSize:11, color:'var(--ink-3)' }}>฿</span>
                   </td>
@@ -314,9 +487,9 @@ export function ScreenRFQConfirm({ go }) {
           </div>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-          <button className="btn ghost">ยกเลิก</button>
+          <button className="btn ghost" onClick={() => go('rfq')}>ยกเลิก</button>
           <button className="btn">บันทึก RFQ แต่ไม่เข้า Price DB</button>
-          <button className="btn primary" style={{ padding:'10px 20px' }}>
+          <button className="btn primary" style={{ padding:'10px 20px' }} disabled={items.length === 0}>
             {Icons.check} ยืนยันบันทึก Price DB
           </button>
         </div>

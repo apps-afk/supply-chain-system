@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Av } from '../lib/shell';
 import { MATERIAL_CATEGORIES } from './screen-settings-materials';
 import { SUBCONTRACT_CATEGORIES } from './screen-settings-subcontracts';
@@ -21,13 +21,14 @@ import { getActiveApprovalRoles } from './screen-settings-approval-roles';
 
 /* =================== Reference data =================== */
 
-const ALL_SUPPLIERS = [];
-
-const PROJECTS = [];
-
 const ALL_UNITS = ['ถุง 50 กก.','เส้น','ก้อน','แผ่น','ตร.ม.','ลบ.ม.','ม.','กก.','ตัน','ลิตร','แกลลอน','ม้วน','ชุด','ชิ้น','ตัว','อัน','หลอด','คน·วัน','ชั่วโมง','งวด','ต้น','จุด'];
 
-const NEXT_RFQ_NO = '';
+// Generate an RFQ number like RFQ-2026-4731 (year + random 4 digits).
+function generateRfqNo() {
+  const year = new Date().getFullYear();
+  const rnd  = Math.floor(1000 + Math.random() * 9000);
+  return `RFQ-${year}-${rnd}`;
+}
 
 /* =================== Helpers =================== */
 
@@ -61,6 +62,32 @@ function formatThaiDate(iso) {
 /* =================== Main screen =================== */
 
 export function ScreenRFQCreate({ go }) {
+  // Lookups
+  const [suppliers, setSuppliers] = useState([]);
+  const [projects,  setProjects]  = useState([]);
+  const [loadErr,   setLoadErr]   = useState('');
+  // Pre-generated RFQ number — held in state so it doesn't change on re-render
+  const [rfqNo] = useState(() => generateRfqNo());
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [rS, rP] = await Promise.all([
+          fetch('/api/suppliers'),
+          fetch('/api/projects'),
+        ]);
+        const dS = await rS.json();
+        const dP = await rP.json();
+        if (!rS.ok) { setLoadErr(dS.error || 'โหลด Supplier ไม่สำเร็จ'); return; }
+        if (!rP.ok) { setLoadErr(dP.error || 'โหลดโครงการไม่สำเร็จ'); return; }
+        setSuppliers(dS.items || []);
+        setProjects(dP.items || []);
+      } catch {
+        setLoadErr('เครือข่ายขัดข้อง');
+      }
+    })();
+  }, []);
+
   // Header form
   const [title, setTitle]   = useState('');
   const [project, setProj]  = useState('');
@@ -68,7 +95,7 @@ export function ScreenRFQCreate({ go }) {
 
   // Supplier
   const [supplierId, setSupplierId] = useState(null);
-  const supplier = ALL_SUPPLIERS.find(s => s.id === supplierId);
+  const supplier = suppliers.find(s => s.id === supplierId);
 
   // Items
   const [rows, setRows] = useState([blankRow(), blankRow(), blankRow()]);
@@ -81,6 +108,8 @@ export function ScreenRFQCreate({ go }) {
 
   // UI state
   const [generated, setGenerated] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState('');
 
   const pickSupplier = (s) => {
     setSupplierId(s.id);
@@ -89,7 +118,51 @@ export function ScreenRFQCreate({ go }) {
   // Derived
   const itemsFilled = rows.filter(r => r.itemCode);
   const itemsValid  = rows.filter(r => r.itemCode && Number(r.qty) > 0 && r.unit);
-  const canGenerate = !!supplier && itemsValid.length > 0 && title.trim().length > 0;
+  const canGenerate = !!supplier && itemsValid.length > 0 && title.trim().length > 0 && !saving;
+
+  async function submit() {
+    setSaveErr('');
+    if (!canGenerate) return;
+    setSaving(true);
+    // TODO: per-item RFQ lines need their own API (rfq_items?). For now we
+    // stash the items + supplier + conditions in the rfqs.notes field as JSON
+    // so the confirm screen can hydrate them.
+    const notesPayload = {
+      supplier_id: supplierId,
+      supplier_name: supplier?.name,
+      overheadHint,
+      vatPolicy,
+      memo: notes,
+      items: itemsValid.map(r => ({
+        uid: r.uid, source: r.source, catShort: r.catShort,
+        itemCode: r.itemCode, qty: r.qty, unit: r.unit,
+        name: (findItem(r.source, r.itemCode) || {}).name,
+      })),
+    };
+    try {
+      const r = await fetch('/api/rfqs', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({
+          no:         rfqNo,
+          project_id: project || null,
+          title:      title.trim(),
+          status:     'draft',
+          due_date:   due || null,
+          notes:      JSON.stringify(notesPayload),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setSaveErr(d.error || 'บันทึกไม่สำเร็จ'); setSaving(false); return; }
+      // Stash id so the rfq-confirm screen can find it later
+      try { window.localStorage.setItem('rfq.currentId', d.item.id); } catch {}
+      setSaving(false);
+      setGenerated(true);
+    } catch {
+      setSaveErr('เครือข่ายขัดข้อง');
+      setSaving(false);
+    }
+  }
 
   // Row helpers
   const updateRow = (uid, patch) => setRows(rows.map(r => r.uid === uid ? { ...r, ...patch } : r));
@@ -104,7 +177,7 @@ export function ScreenRFQCreate({ go }) {
   const removeRow = (uid) => setRows(rows.length === 1 ? [blankRow()] : rows.filter(r => r.uid !== uid));
 
   if (generated) {
-    return <GeneratedView go={go} title={title} supplier={supplier} project={project} items={itemsValid} due={due} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />;
+    return <GeneratedView go={go} rfqNo={rfqNo} title={title} supplier={supplier} project={project} projects={projects} items={itemsValid} due={due} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />;
   }
 
   return (
@@ -122,7 +195,7 @@ export function ScreenRFQCreate({ go }) {
               background:'var(--teal-soft)', color:'var(--teal-ink)',
               fontFamily:'var(--font-mono)', fontSize:12, fontWeight:600,
             }}>
-              {NEXT_RFQ_NO}
+              {rfqNo}
               <span style={{ fontSize:9, color:'var(--ink-3)', fontWeight:400, letterSpacing:0.06, textTransform:'uppercase' }}>auto</span>
             </span>
             <Chip kind="draft">ร่าง</Chip>
@@ -150,7 +223,7 @@ export function ScreenRFQCreate({ go }) {
               <Field label="โครงการ" required>
                 <select value={project} onChange={e => setProj(e.target.value)} style={inputStyle}>
                   <option value="">— เลือกโครงการ —</option>
-                  {PROJECTS.map(p => <option key={p.id} value={p.id}>{p.id} · {p.name}</option>)}
+                  {projects.map(p => <option key={p.id} value={p.id}>{p.code ? `${p.code} · ` : ''}{p.name}</option>)}
                 </select>
               </Field>
               <Field label="ครบกำหนดเสนอราคา" required>
@@ -162,7 +235,7 @@ export function ScreenRFQCreate({ go }) {
           {/* Section 2: supplier */}
           <SectionCard step="2" label="เลือก Supplier" desc="หนึ่งใบ ต่อ Supplier หนึ่งราย">
             {!supplier
-              ? <SupplierPicker onPick={pickSupplier} />
+              ? <SupplierPicker suppliers={suppliers} onPick={pickSupplier} />
               : <SelectedSupplierCard supplier={supplier} onChange={() => setSupplierId(null)} />}
           </SectionCard>
 
@@ -360,9 +433,9 @@ export function ScreenRFQCreate({ go }) {
         {/* ========== RIGHT: summary + preview ========== */}
         <div style={{ display:'flex', flexDirection:'column', gap:16, position:'sticky', top:80 }}>
           <SummaryCard
-            rfqNo={NEXT_RFQ_NO}
+            rfqNo={rfqNo}
             title={title}
-            project={PROJECTS.find(p => p.id === project)}
+            project={projects.find(p => p.id === project)}
             supplier={supplier}
             items={itemsValid}
             due={due}
@@ -383,7 +456,7 @@ export function ScreenRFQCreate({ go }) {
         <div style={{ display:'flex', gap:32 }}>
           <div>
             <div className="eyebrow" style={{ marginBottom:2 }}>เอกสาร</div>
-            <div className="font-mono" style={{ fontSize:16, lineHeight:1, marginTop:2 }}>{NEXT_RFQ_NO}</div>
+            <div className="font-mono" style={{ fontSize:16, lineHeight:1, marginTop:2 }}>{rfqNo}</div>
           </div>
           <div>
             <div className="eyebrow" style={{ marginBottom:2 }}>รายการ</div>
@@ -397,13 +470,19 @@ export function ScreenRFQCreate({ go }) {
               {supplier ? supplier.name : <span style={{ color:'var(--ink-4)', fontStyle:'italic' }}>ยังไม่เลือก</span>}
             </div>
           </div>
+          {(loadErr || saveErr) && (
+            <div style={{
+              padding:'8px 12px', background:'#FDE8E4', color:'#8B2A1A',
+              borderRadius:6, fontSize:12, alignSelf:'center',
+            }}>{saveErr || loadErr}</div>
+          )}
         </div>
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-          <button className="btn ghost" onClick={() => go('rfq')}>ยกเลิก</button>
-          <button className="btn" disabled={!canGenerate}>บันทึกร่าง</button>
-          <button className="btn primary" disabled={!canGenerate} onClick={() => setGenerated(true)}
+          <button className="btn ghost" onClick={() => go('rfq')} disabled={saving}>ยกเลิก</button>
+          <button className="btn" disabled={!canGenerate} onClick={submit}>บันทึกร่าง</button>
+          <button className="btn primary" disabled={!canGenerate} onClick={submit}
             style={{ padding:'10px 20px', opacity: canGenerate ? 1 : 0.5, cursor: canGenerate ? 'pointer' : 'not-allowed' }}>
-            {Icons.download} Submit & ดาวน์โหลด Excel
+            {saving ? 'กำลังบันทึก…' : <>{Icons.download} Submit & ดาวน์โหลด Excel</>}
           </button>
         </div>
       </div>
@@ -413,8 +492,8 @@ export function ScreenRFQCreate({ go }) {
 
 /* =================== Generated success view =================== */
 
-function GeneratedView({ go, title, supplier, project, items, due, overheadHint, vatPolicy, notes }) {
-  const projectObj = PROJECTS.find(p => p.id === project);
+function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, due, overheadHint, vatPolicy, notes }) {
+  const projectObj = projects.find(p => p.id === project);
   return (
     <div className="page">
       <button className="btn ghost sm" onClick={() => go('rfq')} style={{ marginBottom:20, marginLeft:-8 }}>
@@ -424,7 +503,7 @@ function GeneratedView({ go, title, supplier, project, items, due, overheadHint,
       <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:32, marginBottom:32, alignItems:'flex-start' }}>
         <div>
           <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{NEXT_RFQ_NO}</span>
+            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{rfqNo}</span>
             <span style={{
               display:'inline-flex', alignItems:'center', gap:6,
               fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
@@ -469,7 +548,7 @@ function GeneratedView({ go, title, supplier, project, items, due, overheadHint,
             }}>XLSX</div>
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                {NEXT_RFQ_NO}_{(supplier?.name || '').replace(/\s+/g,'_')}.xlsx
+                {rfqNo}_{(supplier?.name || '').replace(/\s+/g,'_')}.xlsx
               </div>
               <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:4 }}>24 KB · สร้างเมื่อสักครู่</div>
               <div style={{ marginTop:14, fontSize:11.5, color:'var(--ink-3)', lineHeight:1.7 }}>
@@ -484,7 +563,7 @@ function GeneratedView({ go, title, supplier, project, items, due, overheadHint,
       </div>
 
       <h3 className="h-section" style={{ marginBottom:16 }}>ตัวอย่างเอกสาร Excel</h3>
-      <ExcelDocPreview rfqNo={NEXT_RFQ_NO} supplier={supplier} project={projectObj} items={items}
+      <ExcelDocPreview rfqNo={rfqNo} supplier={supplier} project={projectObj} items={items}
         due={due} title={title} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />
     </div>
   );
@@ -541,9 +620,9 @@ const tableSelectStyle = {
 };
 
 /* ----- Supplier picker (table layout) ----- */
-function SupplierPicker({ onPick }) {
+function SupplierPicker({ suppliers, onPick }) {
   const [q, setQ] = useState('');
-  const filtered = ALL_SUPPLIERS.filter(s => !q || s.name.toLowerCase().includes(q.toLowerCase()));
+  const filtered = suppliers.filter(s => !q || (s.name || '').toLowerCase().includes(q.toLowerCase()) || (s.code || '').toLowerCase().includes(q.toLowerCase()));
 
   return (
     <div>
@@ -557,7 +636,7 @@ function SupplierPicker({ onPick }) {
             style={{ flex:1, border:0, outline:0, background:'transparent', fontSize:13 }} />
         </div>
         <span style={{ fontSize:12, color:'var(--ink-3)', marginLeft:'auto' }}>
-          {filtered.length} จาก {ALL_SUPPLIERS.length} ราย
+          {filtered.length} จาก {suppliers.length} ราย
         </span>
       </div>
 
@@ -567,16 +646,16 @@ function SupplierPicker({ onPick }) {
             {filtered.map(s => (
               <tr key={s.id} onClick={() => onPick(s)} style={{ cursor:'pointer' }}>
                 <td style={{ padding:'12px 16px', width:36 }}>
-                  <Av initials={s.name.slice(0,2)} kind={s.kind} />
+                  <Av initials={(s.name || '').slice(0,2)} kind="default" />
                 </td>
                 <td style={{ padding:'12px 8px' }}>
                   <div style={{ fontSize:13, fontWeight:500 }}>{s.name}</div>
                   <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:3 }}>
-                    {s.categories.join(' · ')} · {s.contact}
+                    {s.code ? `${s.code} · ` : ''}{s.type || '—'}{s.contact_name ? ` · ${s.contact_name}` : ''}
                   </div>
                 </td>
                 <td style={{ padding:'12px 8px', fontSize:11.5, color:'var(--ink-3)', whiteSpace:'nowrap' }}>
-                  <div>เครดิต {s.credit}</div>
+                  <div>{s.payment_terms ? `เครดิต ${s.payment_terms}` : ''}</div>
                 </td>
                 <td style={{ padding:'12px 16px', textAlign:'right' }}>
                   <button className="btn sm" style={{ background:'var(--teal)', color:'var(--paper)', borderColor:'var(--teal)' }}>
@@ -601,14 +680,14 @@ function SelectedSupplierCard({ supplier, onChange }) {
       display:'flex', alignItems:'center', gap:16, padding:'14px 16px',
       background:'var(--teal-soft)', borderRadius:6, border:'1px solid var(--teal)',
     }}>
-      <Av initials={supplier.name.slice(0,2)} kind={supplier.kind} />
+      <Av initials={(supplier.name || '').slice(0,2)} kind="default" />
       <div style={{ flex:1 }}>
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:2 }}>
           <span style={{ fontSize:14, fontWeight:500 }}>{supplier.name}</span>
-          <span className="font-mono" style={{ fontSize:11, color:'var(--ink-3)' }}>{supplier.id}</span>
+          <span className="font-mono" style={{ fontSize:11, color:'var(--ink-3)' }}>{supplier.code || supplier.id}</span>
         </div>
         <div style={{ fontSize:12, color:'var(--ink-3)' }}>
-          {supplier.contact} · {supplier.email} · เครดิต {supplier.credit}
+          {[supplier.contact_name, supplier.email, supplier.payment_terms && `เครดิต ${supplier.payment_terms}`].filter(Boolean).join(' · ')}
         </div>
       </div>
       <button className="btn sm" onClick={onChange} style={{ background:'var(--paper)' }}>เปลี่ยน Supplier</button>
@@ -624,7 +703,7 @@ function SummaryCard({ rfqNo, title, project, supplier, items, due, overheadHint
       <div className="eyebrow" style={{ marginBottom:12 }}>สรุปก่อน Submit</div>
       <Row label="เลขที่"   value={<span className="font-mono">{rfqNo}</span>} />
       <Row label="หัวข้อ"   value={title || <em style={{ color:'var(--ink-4)' }}>—</em>} />
-      <Row label="โครงการ" value={project ? `${project.id}` : '—'} />
+      <Row label="โครงการ" value={project ? (project.code || project.name) : '—'} />
       <Row label="Supplier" value={supplier ? supplier.name : <em style={{ color:'var(--ink-4)' }}>ยังไม่เลือก</em>} />
       <Row label="รายการ"   value={`${items.length} รายการ`} />
       <Row label="ครบกำหนด" value={formatThaiDate(due)} />
@@ -758,14 +837,14 @@ function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overhead
             <div style={{ fontSize:10, letterSpacing:0.12, textTransform:'uppercase', color:'var(--ink-3)', marginBottom:6 }}>เรียน — Supplier</div>
             <div style={{ fontSize:14, fontWeight:500 }}>{supplier?.name}</div>
             <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:4, lineHeight:1.6 }}>
-              {supplier?.contact}<br/>
+              {supplier?.contact_name}<br/>
               {supplier?.email}
             </div>
           </div>
           <div>
             <div style={{ fontSize:10, letterSpacing:0.12, textTransform:'uppercase', color:'var(--ink-3)', marginBottom:6 }}>โครงการ</div>
             <div style={{ fontSize:14, fontWeight:500 }}>{project?.name}</div>
-            <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:4 }}>รหัส: {project?.id}</div>
+            <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:4 }}>รหัส: {project?.code || project?.id}</div>
           </div>
         </div>
 
