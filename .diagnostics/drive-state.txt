@@ -1,0 +1,43 @@
+=== Generated at: Tue May 19 11:32:24 UTC 2026 ===
+
+=== 1) Parent folder ===
+{
+  "id": "0AH8osbMRD4plUk9PVA",
+  "name": "Drive",
+  "mimeType": "application/vnd.google-apps.folder",
+  "driveId": "0AH8osbMRD4plUk9PVA"
+}
+
+=== 2) Children (depth 1) ===
+  [FOLDER] สัญญา (Contracts)  (13l31RIoryUNF-MJDiTL2z7kPnlRds3HL)  size=-
+
+=== 3) Depth 2 (inside subfolders) ===
+  Folder "สัญญา (Contracts)":
+    (empty)
+
+=== 4) ALL files visible to service account (excl folders) ===
+Found 3 non-folder files
+  - QC  parents=undefined
+    link: https://docs.google.com/spreadsheets/d/18YawtQc0KbbwrLZ8M7hOnFA0KAYeG4C2fasPt9TIFTE/edit?usp=drivesdk
+  - Walk Today | CRM  parents=undefined
+    link: https://docs.google.com/spreadsheets/d/11bpi2TVIWiNEajC1niKCcXpa2F9wxgbmGE0Y7TnvJpc/edit?usp=drivesdk
+  - Book Today | CRM  parents=undefined
+    link: https://docs.google.com/spreadsheets/d/1RhroNTqWws8oAHy5SMIlpYeSe8MXt2cV9SfGy_0zn68/edit?usp=drivesdk
+
+=== 5) Supabase: file_attachments (latest 20) ===
+[]
+
+=== 6) Supabase: contracts (latest 10) ===
+[
+    {
+        "id": "ct_1779187798268_qs4lhy",
+        "no": "CT-2026-5246",
+        "title": "55555",
+        "status": "draft",
+        "supplier_id": "sup_1779186054208_xqke1e",
+        "created_at": "2026-05-19T10:49:58.476333+00:00"
+    }
+]
+
+=== 7) Supabase: rfqs (latest 10) ===
+[]
