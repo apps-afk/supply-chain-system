@@ -9,7 +9,7 @@ export async function GET() {
     return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
   }
   return NextResponse.json({
-    settings: getSettings(),
+    settings: await getSettings(),
     subProcessors: SUB_PROCESSORS,
   });
 }
@@ -51,8 +51,8 @@ export async function PATCH(request) {
         patch.aiUsage.monthlyTokenBudget = checkInt(patch.aiUsage.monthlyTokenBudget, 0, 10000000000, 'งบ token รายเดือน');
     }
 
-    const updated = updateSettings(patch);
-    appendAudit({
+    const updated = await updateSettings(patch);
+    await appendAudit({
       actor: session.user.email,
       action: 'workspace.update',
       target: 'settings',

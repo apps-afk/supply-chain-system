@@ -13,7 +13,7 @@ async function adminGuard() {
 export async function GET() {
   const { err } = await adminGuard();
   if (err) return err;
-  return NextResponse.json({ queue: getDsarQueue(), stats: getDsarStats() });
+  return NextResponse.json({ queue: await getDsarQueue(), stats: await getDsarStats() });
 }
 
 export async function POST(request) {
@@ -24,7 +24,7 @@ export async function POST(request) {
     if (!applicantEmail) {
       return NextResponse.json({ error: 'ต้องระบุอีเมลของเจ้าของข้อมูล' }, { status: 400 });
     }
-    const r = createDsar({ applicantEmail, type, note });
+    const r = await createDsar({ applicantEmail, type, note });
     return NextResponse.json({ ok: true, request: r });
   } catch (e) {
     return NextResponse.json({ error: e.message || 'เกิดข้อผิดพลาด' }, { status: 400 });
@@ -36,7 +36,7 @@ export async function PATCH(request) {
   if (err) return err;
   try {
     const { id } = await request.json();
-    const r = resolveDsar(id, session.user.email);
+    const r = await resolveDsar(id, session.user.email);
     return NextResponse.json({ ok: true, request: r });
   } catch (e) {
     return NextResponse.json({ error: e.message || 'เกิดข้อผิดพลาด' }, { status: 400 });

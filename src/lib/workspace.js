@@ -1,5 +1,4 @@
-// Workspace-wide settings, kept on globalThis so all API routes share state.
-// In production with multi-instance deploys, persist this to Vercel KV / DB.
+import { supabase, isSupabaseConfigured } from './supabase';
 
 const NOW = () => new Date().toISOString();
 
@@ -17,7 +16,7 @@ const DEFAULTS = {
     defaultModel: 'claude-haiku-4-5',
     autoEvaluateOnUpload: true,
     recomputeOnRequirementChange: true,
-    explanationLevel: 'medium', // 'short' | 'medium' | 'detailed'
+    explanationLevel: 'medium',
     showConfidence: false,
   },
   security: {
@@ -44,70 +43,139 @@ const DEFAULTS = {
   },
 };
 
-function ensureGlobals() {
-  if (!globalThis.__ieWorkspace) {
-    globalThis.__ieWorkspace = JSON.parse(JSON.stringify(DEFAULTS));
-  }
+function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
+
+function ensureMem() {
+  if (!globalThis.__ieWorkspace) globalThis.__ieWorkspace = deepClone(DEFAULTS);
   if (!globalThis.__ieDsar) {
-    // Seed a small backlog so the UI looks lived-in
     globalThis.__ieDsar = [
-      { id: 'dsar_001', applicantEmail: 'somchai@example.com', type: 'access',  status: 'pending', createdAt: NOW(), resolvedAt: null, note: 'ขอดูข้อมูลส่วนตัวทั้งหมด' },
-      { id: 'dsar_002', applicantEmail: 'wichai@example.com', type: 'delete',  status: 'pending', createdAt: NOW(), resolvedAt: null, note: 'ขอลบข้อมูลทั้งหมด' },
-      { id: 'dsar_003', applicantEmail: 'malee@example.com',  type: 'export',  status: 'pending', createdAt: NOW(), resolvedAt: null, note: 'ขอ export ข้อมูล' },
+      { id: 'dsar_seed_1', applicantEmail: 'somchai@example.com', type: 'access', status: 'pending', createdAt: NOW(), resolvedAt: null, note: 'ขอดูข้อมูลส่วนตัวทั้งหมด' },
     ];
   }
-  if (!globalThis.__ieAuditLog) {
-    globalThis.__ieAuditLog = [];
-  }
+  if (!globalThis.__ieAuditLog) globalThis.__ieAuditLog = [];
 }
 
-export function getSettings() {
-  ensureGlobals();
+/* ============================================================
+   Settings
+   ============================================================ */
+
+export async function getSettings() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('workspace_settings').select('settings').eq('id', 'default').maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data?.settings) {
+      // Merge with defaults so newly-added keys still appear
+      return mergeDefaults(data.settings);
+    }
+    // Seed defaults on first run
+    await supabase.from('workspace_settings')
+      .upsert({ id: 'default', settings: DEFAULTS }, { onConflict: 'id' });
+    return deepClone(DEFAULTS);
+  }
+  ensureMem();
   return globalThis.__ieWorkspace;
 }
 
-export function updateSettings(patch) {
-  ensureGlobals();
-  const cur = globalThis.__ieWorkspace;
-  for (const key of Object.keys(patch || {})) {
-    if (patch[key] && typeof patch[key] === 'object' && !Array.isArray(patch[key])) {
-      cur[key] = { ...(cur[key] || {}), ...patch[key] };
+function mergeDefaults(s) {
+  const merged = deepClone(DEFAULTS);
+  for (const key of Object.keys(s || {})) {
+    if (s[key] && typeof s[key] === 'object' && !Array.isArray(s[key])) {
+      merged[key] = { ...(merged[key] || {}), ...s[key] };
     } else {
-      cur[key] = patch[key];
+      merged[key] = s[key];
     }
   }
-  return cur;
+  return merged;
 }
 
-export function appendAudit(entry) {
-  ensureGlobals();
-  globalThis.__ieAuditLog.push({ ...entry, timestamp: NOW() });
-  // Trim by retention
-  const days = globalThis.__ieWorkspace?.security?.auditLogRetentionDays || 365;
-  const cutoff = Date.now() - days * 86400000;
-  globalThis.__ieAuditLog = globalThis.__ieAuditLog.filter(e =>
-    new Date(e.timestamp).getTime() >= cutoff
-  );
+export async function updateSettings(patch) {
+  const current = await getSettings();
+  for (const key of Object.keys(patch || {})) {
+    if (patch[key] && typeof patch[key] === 'object' && !Array.isArray(patch[key])) {
+      current[key] = { ...(current[key] || {}), ...patch[key] };
+    } else {
+      current[key] = patch[key];
+    }
+  }
+  if (isSupabaseConfigured) {
+    const { error } = await supabase.from('workspace_settings')
+      .upsert({ id: 'default', settings: current }, { onConflict: 'id' });
+    if (error) throw new Error(error.message);
+  } else {
+    ensureMem();
+    globalThis.__ieWorkspace = current;
+  }
+  return current;
 }
 
-export function getAuditLog(limit = 100) {
-  ensureGlobals();
+/* ============================================================
+   Audit log
+   ============================================================ */
+
+export async function appendAudit(entry) {
+  const e = { ...entry, timestamp: NOW() };
+  if (isSupabaseConfigured) {
+    await supabase.from('audit_log').insert({
+      actor: e.actor || 'system',
+      action: e.action || 'unknown',
+      target: e.target || null,
+      metadata: { changes: e.changes },
+      timestamp: e.timestamp,
+    }).then(({ error }) => { if (error) console.error('audit insert:', error.message); });
+    return;
+  }
+  ensureMem();
+  globalThis.__ieAuditLog.push(e);
+}
+
+export async function getAuditLog(limit = 100) {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('audit_log').select('*').order('timestamp', { ascending: false }).limit(limit);
+    if (error) throw new Error(error.message);
+    return (data || []).map(r => ({
+      actor: r.actor, action: r.action, target: r.target,
+      timestamp: r.timestamp, ...r.metadata,
+    }));
+  }
+  ensureMem();
   return globalThis.__ieAuditLog.slice(-limit).reverse();
 }
 
-/* ====== DSAR (Data Subject Access Request) queue ====== */
+/* ============================================================
+   DSAR queue
+   ============================================================ */
 
-export function getDsarQueue() {
-  ensureGlobals();
+function dsarFromRow(r) {
+  return {
+    id: r.id,
+    applicantEmail: r.applicant_email,
+    type: r.type,
+    status: r.status,
+    note: r.note || '',
+    createdAt: r.created_at,
+    resolvedAt: r.resolved_at,
+    resolvedBy: r.resolved_by,
+  };
+}
+
+export async function getDsarQueue() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('dsar_requests').select('*').order('created_at', { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data || []).map(dsarFromRow);
+  }
+  ensureMem();
   return globalThis.__ieDsar;
 }
 
-export function getDsarStats() {
-  ensureGlobals();
-  const list = globalThis.__ieDsar;
+export async function getDsarStats() {
+  const list = await getDsarQueue();
   const pending = list.filter(d => d.status === 'pending').length;
   const resolved = list.filter(d => d.status === 'resolved' && d.resolvedAt);
-  let avgDays = 4; // sensible default for display
+  let avgDays = 4;
   if (resolved.length) {
     const totalMs = resolved.reduce((acc, d) =>
       acc + (new Date(d.resolvedAt) - new Date(d.createdAt)), 0);
@@ -116,19 +184,27 @@ export function getDsarStats() {
   return { pending, resolved: resolved.length, avgDays };
 }
 
-export function resolveDsar(id, resolvedBy) {
-  ensureGlobals();
+export async function resolveDsar(id, resolvedBy) {
+  const resolvedAt = NOW();
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('dsar_requests')
+      .update({ status: 'resolved', resolved_at: resolvedAt, resolved_by: resolvedBy })
+      .eq('id', id).select().maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error('ไม่พบคำขอ');
+    await appendAudit({ actor: resolvedBy, action: 'dsar.resolve', target: id });
+    return dsarFromRow(data);
+  }
+  ensureMem();
   const r = globalThis.__ieDsar.find(d => d.id === id);
   if (!r) throw new Error('ไม่พบคำขอ');
-  r.status = 'resolved';
-  r.resolvedAt = NOW();
-  r.resolvedBy = resolvedBy;
-  appendAudit({ actor: resolvedBy, action: 'dsar.resolve', target: id });
+  r.status = 'resolved'; r.resolvedAt = resolvedAt; r.resolvedBy = resolvedBy;
+  await appendAudit({ actor: resolvedBy, action: 'dsar.resolve', target: id });
   return r;
 }
 
-export function createDsar({ applicantEmail, type, note }) {
-  ensureGlobals();
+export async function createDsar({ applicantEmail, type, note }) {
   if (!['access', 'export', 'correct', 'delete'].includes(type)) {
     throw new Error('ประเภทคำขอไม่ถูกต้อง');
   }
@@ -137,32 +213,24 @@ export function createDsar({ applicantEmail, type, note }) {
     applicantEmail, type, note: note || '',
     status: 'pending', createdAt: NOW(), resolvedAt: null,
   };
-  globalThis.__ieDsar.push(newReq);
+  if (isSupabaseConfigured) {
+    const { error } = await supabase.from('dsar_requests').insert({
+      id: newReq.id, applicant_email: applicantEmail, type, status: 'pending',
+      note: newReq.note, created_at: newReq.createdAt,
+    });
+    if (error) throw new Error(error.message);
+  } else {
+    ensureMem();
+    globalThis.__ieDsar.push(newReq);
+  }
   return newReq;
 }
 
-/* ====== Sub-processors registry (read-only meta) ====== */
-
+/* ============================================================
+   Sub-processors registry (static — same in all modes)
+   ============================================================ */
 export const SUB_PROCESSORS = [
-  {
-    code: 'anthropic',
-    name: 'Anthropic Claude API',
-    purpose: 'ให้คะแนน AI และเตรียมข้อมูลก่อนนำเสนอ',
-    region: 'สหรัฐฯ',
-    note: 'ข้อมูลไม่ถูกใช้ฝึกโมเดล',
-  },
-  {
-    code: 'aws-s3',
-    name: 'Amazon S3 (ap-southeast-1)',
-    purpose: 'เก็บไฟล์เอกสารและใบเสนอราคา',
-    region: 'สิงคโปร์',
-    note: '',
-  },
-  {
-    code: 'postmark',
-    name: 'Postmark',
-    purpose: 'อีเมลธุรกรรม (แจ้งเตือน, OTP, รีเซ็ตรหัสผ่าน)',
-    region: 'สหรัฐฯ',
-    note: '',
-  },
+  { code: 'anthropic', name: 'Anthropic Claude API',         purpose: 'ให้คะแนน AI และเตรียมข้อมูลก่อนนำเสนอ', region: 'สหรัฐฯ',    note: 'ข้อมูลไม่ถูกใช้ฝึกโมเดล' },
+  { code: 'aws-s3',    name: 'Amazon S3 (ap-southeast-1)',   purpose: 'เก็บไฟล์เอกสารและใบเสนอราคา',            region: 'สิงคโปร์',   note: '' },
+  { code: 'postmark',  name: 'Postmark',                     purpose: 'อีเมลธุรกรรม (แจ้งเตือน, OTP, รีเซ็ต)',  region: 'สหรัฐฯ',    note: '' },
 ];

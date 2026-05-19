@@ -1,8 +1,13 @@
 import { createHash } from 'crypto';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 function hash(salt, password) {
   return createHash('sha256').update(salt + password).digest('hex');
 }
+function newSalt() {
+  return `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+const NOW = () => new Date().toISOString();
 
 export const ROLES = [
   { value: 'admin',       label: 'ผู้ดูแลระบบ' },
@@ -17,10 +22,10 @@ export function roleLabel(value) {
   return ROLES.find(r => r.value === value)?.label || value || '—';
 }
 
-const NOW = () => new Date().toISOString();
-
-// Built-in accounts — always available, no database needed
-// Change these passwords via ADMIN_PASSWORD env var in production
+/* ============================================================
+   BUILTIN admin — exists as code, never stored in DB.
+   Password derived from ADMIN_PASSWORD env var (default Admin1234!).
+   ============================================================ */
 const BUILTIN = [
   {
     id: 'admin',
@@ -33,79 +38,173 @@ const BUILTIN = [
     createdAt: '2025-01-01T00:00:00.000Z',
     verified: true,
     lastLogin: null,
+    isBuiltin: true,
   },
 ];
 
-// In-memory registered users — attached to globalThis so all API routes share
-// the same array. Without this, Next.js dev mode (and production with multiple
-// route bundles) gives each route its own users.js instance and registered
-// users disappear when you call a different endpoint.
-//
-// PRODUCTION NOTE: this still resets when the Vercel serverless function goes
-// cold (~5 min idle). For real persistence, wire this up to Vercel KV / Postgres.
-if (!globalThis.__ieRegisteredUsers) {
-  globalThis.__ieRegisteredUsers = [];
-}
-if (!globalThis.__ieBuiltinMeta) {
-  // Mutable overlay on BUILTIN users: lastLogin, role overrides, etc.
-  globalThis.__ieBuiltinMeta = {};
-}
-const registered  = globalThis.__ieRegisteredUsers;
-const builtinMeta = globalThis.__ieBuiltinMeta;
+/* ============================================================
+   Storage adapter — Supabase if configured, else in-memory.
+   In-memory state lives on globalThis so all API routes share it.
+   ============================================================ */
 
-function allUsers() {
-  return [
-    ...BUILTIN.map(u => {
-      const meta = builtinMeta[u.email.toLowerCase()] || {};
-      return { ...u, ...meta };
-    }),
-    ...registered,
-  ];
+if (!globalThis.__ieRegisteredUsers) globalThis.__ieRegisteredUsers = [];
+if (!globalThis.__ieBuiltinMeta)     globalThis.__ieBuiltinMeta     = {};
+const memRegistered = globalThis.__ieRegisteredUsers;
+const memBuiltinMeta = globalThis.__ieBuiltinMeta;
+
+const DB_COLS = 'id, email, name, phone, role, salt, hash, verified, created_at, last_login';
+
+function fromRow(row) {
+  if (!row) return null;
+  return {
+    id:         row.id,
+    email:      row.email,
+    name:       row.name,
+    phone:      row.phone || '',
+    role:       row.role,
+    salt:       row.salt,
+    hash:       row.hash,
+    verified:   row.verified !== false,
+    createdAt:  row.created_at,
+    lastLogin:  row.last_login,
+    isBuiltin:  false,
+  };
 }
 
-function recordLogin(email) {
-  const key = email.toLowerCase();
-  const r = registered.find(u => u.email.toLowerCase() === key);
-  if (r) { r.lastLogin = NOW(); return; }
-  builtinMeta[key] = { ...(builtinMeta[key] || {}), lastLogin: NOW() };
+async function findByEmail(emailLower) {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('users')
+      .select(DB_COLS)
+      .ilike('email', emailLower)
+      .maybeSingle();
+    if (error) throw new Error(`DB error: ${error.message}`);
+    return fromRow(data);
+  }
+  const u = memRegistered.find(r => r.email.toLowerCase() === emailLower);
+  return u ? { ...u, isBuiltin: false } : null;
+}
+
+async function listRegistered() {
+  if (isSupabaseConfigured) {
+    const { data, error } = await supabase
+      .from('users').select(DB_COLS).order('created_at', { ascending: true });
+    if (error) throw new Error(`DB error: ${error.message}`);
+    return (data || []).map(fromRow);
+  }
+  return memRegistered.map(u => ({ ...u, isBuiltin: false }));
+}
+
+async function insertUser(u) {
+  if (isSupabaseConfigured) {
+    const { error } = await supabase.from('users').insert({
+      id: u.id, email: u.email, name: u.name, phone: u.phone || '',
+      role: u.role, salt: u.salt, hash: u.hash, verified: u.verified !== false,
+      created_at: u.createdAt, last_login: u.lastLogin,
+    });
+    if (error) throw new Error(error.message);
+    return;
+  }
+  memRegistered.push({ ...u });
+}
+
+async function updateUser(emailLower, patch) {
+  if (isSupabaseConfigured) {
+    const dbPatch = {};
+    if (patch.name      !== undefined) dbPatch.name      = patch.name;
+    if (patch.phone     !== undefined) dbPatch.phone     = patch.phone;
+    if (patch.email     !== undefined) dbPatch.email     = patch.email;
+    if (patch.role      !== undefined) dbPatch.role      = patch.role;
+    if (patch.salt      !== undefined) dbPatch.salt      = patch.salt;
+    if (patch.hash      !== undefined) dbPatch.hash      = patch.hash;
+    if (patch.lastLogin !== undefined) dbPatch.last_login = patch.lastLogin;
+    const { error } = await supabase.from('users').update(dbPatch).ilike('email', emailLower);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const u = memRegistered.find(r => r.email.toLowerCase() === emailLower);
+  if (!u) return;
+  Object.assign(u, patch);
+}
+
+async function deleteByEmail(emailLower) {
+  if (isSupabaseConfigured) {
+    const { error } = await supabase.from('users').delete().ilike('email', emailLower);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  const idx = memRegistered.findIndex(r => r.email.toLowerCase() === emailLower);
+  if (idx !== -1) memRegistered.splice(idx, 1);
+}
+
+/* ============================================================
+   Public API
+   ============================================================ */
+
+function applyBuiltinMeta(u) {
+  const meta = memBuiltinMeta[u.email.toLowerCase()] || {};
+  return { ...u, ...meta };
 }
 
 export async function validateUser(email, password) {
-  const user = allUsers().find(u => u.email.toLowerCase() === email.toLowerCase());
-  if (!user) return null;
-  if (hash(user.salt, password) !== user.hash) return null;
-  recordLogin(user.email);
-  return { id: user.id, email: user.email, name: user.name, role: user.role };
+  const key = email.toLowerCase();
+
+  // BUILTIN first — never hits DB
+  const b = BUILTIN.find(u => u.email.toLowerCase() === key);
+  if (b) {
+    if (hash(b.salt, password) !== b.hash) return null;
+    memBuiltinMeta[key] = { ...(memBuiltinMeta[key] || {}), lastLogin: NOW() };
+    return { id: b.id, email: b.email, name: b.name, role: (memBuiltinMeta[key]?.role || b.role) };
+  }
+
+  const u = await findByEmail(key);
+  if (!u) return null;
+  if (hash(u.salt, password) !== u.hash) return null;
+  await updateUser(key, { lastLogin: NOW() }).catch(() => {});
+  return { id: u.id, email: u.email, name: u.name, role: u.role };
 }
 
 export async function registerUser(name, email, password) {
-  if (allUsers().find(u => u.email.toLowerCase() === email.toLowerCase())) {
+  const key = email.toLowerCase();
+  if (BUILTIN.find(b => b.email.toLowerCase() === key)) {
     throw new Error('อีเมลนี้มีผู้ใช้งานแล้ว');
   }
-  const salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  if (await findByEmail(key)) {
+    throw new Error('อีเมลนี้มีผู้ใช้งานแล้ว');
+  }
+  const salt = newSalt();
   const newUser = {
     id: `user_${Date.now()}`,
-    name, email, role: 'user',
-    phone: '',
+    name, email: key, role: 'user', phone: '',
     salt, hash: hash(salt, password),
-    createdAt: NOW(),
-    lastLogin: null,
-    verified: true,
+    createdAt: NOW(), lastLogin: null, verified: true,
   };
-  registered.push(newUser);
+  await insertUser(newUser);
   return { id: newUser.id, email: newUser.email, name: newUser.name };
 }
 
-/* ===== Profile updates by the user themselves ===== */
+export async function updatePassword(email, oldPassword, newPassword) {
+  const key = email.toLowerCase();
+  if (BUILTIN.find(b => b.email.toLowerCase() === key)) {
+    throw new Error('บัญชีระบบเปลี่ยนรหัสผ่านได้ผ่านตัวแปร ADMIN_PASSWORD ใน Vercel เท่านั้น');
+  }
+  const u = await findByEmail(key);
+  if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
+  if (hash(u.salt, oldPassword) !== u.hash) {
+    throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+  }
+  const salt = newSalt();
+  await updateUser(key, { salt, hash: hash(salt, newPassword) });
+  return true;
+}
 
 const DOMAIN = 'initialestate.com';
 
 export async function updateProfile(currentEmail, patch) {
   const key = currentEmail.toLowerCase();
-  const r = registered.find(u => u.email.toLowerCase() === key);
   const builtin = BUILTIN.find(b => b.email.toLowerCase() === key);
-  const target = r || builtin;
-  if (!target) throw new Error('ไม่พบบัญชีผู้ใช้');
+  const u = builtin ? null : await findByEmail(key);
+  if (!builtin && !u) throw new Error('ไม่พบบัญชีผู้ใช้');
 
   let emailChanged = false;
   if (patch.email != null && patch.email.toLowerCase() !== key) {
@@ -113,144 +212,114 @@ export async function updateProfile(currentEmail, patch) {
     if (!patch.email.toLowerCase().endsWith(`@${DOMAIN}`)) {
       throw new Error(`อีเมลใหม่ต้องเป็น @${DOMAIN}`);
     }
-    if (allUsers().find(u => u.email.toLowerCase() === patch.email.toLowerCase())) {
+    const conflict = await findByEmail(patch.email.toLowerCase());
+    if (conflict || BUILTIN.find(b => b.email.toLowerCase() === patch.email.toLowerCase())) {
       throw new Error('อีเมลนี้มีผู้ใช้งานแล้ว');
     }
     emailChanged = true;
   }
 
-  if (r) {
-    if (patch.name  !== undefined) r.name  = patch.name;
-    if (patch.phone !== undefined) r.phone = patch.phone;
-    if (emailChanged) r.email = patch.email.toLowerCase();
-  } else if (builtin) {
-    builtinMeta[key] = builtinMeta[key] || {};
-    if (patch.name  !== undefined) builtinMeta[key].name  = patch.name;
-    if (patch.phone !== undefined) builtinMeta[key].phone = patch.phone;
+  if (builtin) {
+    memBuiltinMeta[key] = memBuiltinMeta[key] || {};
+    if (patch.name  !== undefined) memBuiltinMeta[key].name  = patch.name;
+    if (patch.phone !== undefined) memBuiltinMeta[key].phone = patch.phone;
+  } else {
+    const dbPatch = {};
+    if (patch.name      !== undefined) dbPatch.name  = patch.name;
+    if (patch.phone     !== undefined) dbPatch.phone = patch.phone;
+    if (emailChanged)                  dbPatch.email = patch.email.toLowerCase();
+    await updateUser(key, dbPatch);
   }
-
   return { emailChanged };
 }
 
-/* ===== Forced reset (no old-password check) ===== */
-// Used when the logged-in user clicks "forgot current password" — since we
-// already authenticated them via session cookie, we trust them to set a new one.
-
 export async function forceResetPassword(email, newPassword) {
-  const u = registered.find(r => r.email.toLowerCase() === email.toLowerCase());
-  if (u) {
-    u.salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    u.hash = hash(u.salt, newPassword);
-    return true;
-  }
-  const builtin = BUILTIN.find(b => b.email.toLowerCase() === email.toLowerCase());
-  if (builtin) {
+  const key = email.toLowerCase();
+  if (BUILTIN.find(b => b.email.toLowerCase() === key)) {
     throw new Error('บัญชีระบบเปลี่ยนรหัสผ่านได้ผ่านตัวแปร ADMIN_PASSWORD ใน Vercel เท่านั้น');
   }
-  throw new Error('ไม่พบบัญชีผู้ใช้');
-}
-
-export async function updatePassword(email, oldPassword, newPassword) {
-  const u = registered.find(r => r.email.toLowerCase() === email.toLowerCase());
-  if (u) {
-    if (hash(u.salt, oldPassword) !== u.hash) {
-      throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง');
-    }
-    u.salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    u.hash = hash(u.salt, newPassword);
-    return true;
-  }
-  const builtin = BUILTIN.find(b => b.email.toLowerCase() === email.toLowerCase());
-  if (builtin) {
-    throw new Error('บัญชีระบบเปลี่ยนรหัสผ่านได้ผ่านตัวแปร ADMIN_PASSWORD ใน Vercel เท่านั้น');
-  }
-  throw new Error('ไม่พบบัญชีผู้ใช้');
+  const u = await findByEmail(key);
+  if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
+  const salt = newSalt();
+  await updateUser(key, { salt, hash: hash(salt, newPassword) });
+  return true;
 }
 
 /* ===== Admin functions ===== */
 
 export async function listUsers() {
-  return allUsers().map(u => ({
-    id: u.id,
-    name: u.name,
-    email: u.email,
-    phone: u.phone || '',
-    role: u.role,
-    createdAt: u.createdAt || null,
-    lastLogin: u.lastLogin || null,
-    verified: u.verified !== false,
-    isBuiltin: !!BUILTIN.find(b => b.email.toLowerCase() === u.email.toLowerCase()),
-  }));
+  const reg = await listRegistered();
+  return [...BUILTIN.map(applyBuiltinMeta), ...reg];
 }
 
-/* Get one user's profile for the My-Account page */
 export async function getProfile(email) {
   const key = email.toLowerCase();
-  const u = allUsers().find(x => x.email.toLowerCase() === key);
+  const b = BUILTIN.find(u => u.email.toLowerCase() === key);
+  if (b) {
+    const u = applyBuiltinMeta(b);
+    return {
+      id: u.id, name: u.name, email: u.email, phone: u.phone || '',
+      role: u.role, createdAt: u.createdAt, isBuiltin: true,
+    };
+  }
+  const u = await findByEmail(key);
   if (!u) return null;
   return {
-    id: u.id,
-    name: u.name,
-    email: u.email,
-    phone: u.phone || '',
-    role: u.role,
-    createdAt: u.createdAt || null,
-    isBuiltin: !!BUILTIN.find(b => b.email.toLowerCase() === key),
+    id: u.id, name: u.name, email: u.email, phone: u.phone || '',
+    role: u.role, createdAt: u.createdAt, isBuiltin: false,
   };
 }
 
 export async function updateUserRole(email, newRole) {
-  if (!ROLES.find(r => r.value === newRole)) {
-    throw new Error('บทบาทไม่ถูกต้อง');
-  }
-  const r = registered.find(u => u.email.toLowerCase() === email.toLowerCase());
-  if (r) { r.role = newRole; return true; }
-  const builtin = BUILTIN.find(b => b.email.toLowerCase() === email.toLowerCase());
+  if (!ROLES.find(r => r.value === newRole)) throw new Error('บทบาทไม่ถูกต้อง');
+  const key = email.toLowerCase();
+  const builtin = BUILTIN.find(b => b.email.toLowerCase() === key);
   if (builtin) {
-    const key = email.toLowerCase();
-    builtinMeta[key] = { ...(builtinMeta[key] || {}), role: newRole };
+    memBuiltinMeta[key] = { ...(memBuiltinMeta[key] || {}), role: newRole };
     return true;
   }
-  throw new Error('ไม่พบบัญชีผู้ใช้');
+  const u = await findByEmail(key);
+  if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
+  await updateUser(key, { role: newRole });
+  return true;
 }
 
 export async function deleteUser(email) {
-  const builtin = BUILTIN.find(b => b.email.toLowerCase() === email.toLowerCase());
-  if (builtin) {
+  const key = email.toLowerCase();
+  if (BUILTIN.find(b => b.email.toLowerCase() === key)) {
     throw new Error('ไม่สามารถลบบัญชีระบบได้');
   }
-  const idx = registered.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-  if (idx === -1) throw new Error('ไม่พบบัญชีผู้ใช้');
-  registered.splice(idx, 1);
+  const u = await findByEmail(key);
+  if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
+  await deleteByEmail(key);
   return true;
 }
 
 export async function adminCreateUser(name, email, password, role = 'user') {
-  if (allUsers().find(u => u.email.toLowerCase() === email.toLowerCase())) {
+  if (!ROLES.find(r => r.value === role)) throw new Error('บทบาทไม่ถูกต้อง');
+  const key = email.toLowerCase();
+  if (BUILTIN.find(b => b.email.toLowerCase() === key) || await findByEmail(key)) {
     throw new Error('อีเมลนี้มีผู้ใช้งานแล้ว');
   }
-  if (!ROLES.find(r => r.value === role)) {
-    throw new Error('บทบาทไม่ถูกต้อง');
-  }
-  const salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const newUser = {
+  const salt = newSalt();
+  const u = {
     id: `user_${Date.now()}`,
-    name, email, role,
+    name, email: key, role, phone: '',
     salt, hash: hash(salt, password),
-    createdAt: NOW(),
-    lastLogin: null,
-    verified: true,
+    createdAt: NOW(), lastLogin: null, verified: true,
   };
-  registered.push(newUser);
-  return { id: newUser.id, email: newUser.email, name: newUser.name, role: newUser.role };
+  await insertUser(u);
+  return { id: u.id, email: u.email, name: u.name, role: u.role };
 }
 
 export async function adminResetPassword(email, newPassword) {
-  const r = registered.find(u => u.email.toLowerCase() === email.toLowerCase());
-  if (r) {
-    r.salt = `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    r.hash = hash(r.salt, newPassword);
-    return true;
+  const key = email.toLowerCase();
+  if (BUILTIN.find(b => b.email.toLowerCase() === key)) {
+    throw new Error('ไม่สามารถรีเซ็ตรหัสผ่านของบัญชีระบบได้ — ตั้งผ่าน ADMIN_PASSWORD');
   }
-  throw new Error('ไม่สามารถรีเซ็ตรหัสผ่านของบัญชีระบบได้ — ตั้งผ่าน ADMIN_PASSWORD');
+  const u = await findByEmail(key);
+  if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
+  const salt = newSalt();
+  await updateUser(key, { salt, hash: hash(salt, newPassword) });
+  return true;
 }
