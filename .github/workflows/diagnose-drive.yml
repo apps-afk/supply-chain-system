@@ -3,23 +3,33 @@ name: Diagnose Drive Uploads
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: npm install --no-save googleapis 2>&1 | tail -1
 
-      - name: Install dependencies
-        run: |
-          npm install --no-save googleapis 2>&1 | tail -1
-
-      - name: List everything in the Drive parent folder
+      - name: Run diagnostic and capture to file
         env:
           SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          FOLDER: ${{ vars.GOOGLE_DRIVE_PARENT_FOLDER_ID || '0AH8osbMRD4plUk9PVA' }}
+          URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
+          mkdir -p .diagnostics
+          OUT=.diagnostics/drive-state.txt
+          : > $OUT
           echo "$SA_JSON" > /tmp/sa.json
           FOLDER_ID="0AH8osbMRD4plUk9PVA"
+
+          {
+            echo "=== Generated at: $(date -u) ==="
+            echo ""
+          } >> $OUT
+
           node -e "
             const { google } = require('googleapis');
             const fs = require('fs');
@@ -28,84 +38,96 @@ jobs:
             const drive = google.drive({ version: 'v3', auth });
 
             (async () => {
-              console.log('=== 1) Parent folder details ===');
+              console.log('=== 1) Parent folder ===');
               const parent = await drive.files.get({
                 fileId: '$FOLDER_ID',
                 supportsAllDrives: true,
                 fields: 'id, name, driveId, mimeType, parents'
               });
               console.log(JSON.stringify(parent.data, null, 2));
+              const driveId = parent.data.driveId || '$FOLDER_ID';
 
               console.log('');
-              console.log('=== 2) All children of parent (depth 1) ===');
+              console.log('=== 2) Children (depth 1) ===');
               const children = await drive.files.list({
                 q: \`'$FOLDER_ID' in parents and trashed = false\`,
                 fields: 'files(id, name, mimeType, createdTime, size, webViewLink, parents)',
                 supportsAllDrives: true,
                 includeItemsFromAllDrives: true,
                 corpora: 'drive',
-                driveId: parent.data.driveId || '$FOLDER_ID',
+                driveId,
                 pageSize: 100,
               });
-              if (children.data.files.length === 0) {
-                console.log('(empty — no children)');
+              if (!children.data.files || children.data.files.length === 0) {
+                console.log('(empty)');
               } else {
                 children.data.files.forEach(f => {
                   const kind = f.mimeType === 'application/vnd.google-apps.folder' ? 'FOLDER' : 'FILE  ';
-                  console.log(\`  [\${kind}] \${f.name}  (\${f.id})  \${f.size || ''}\`);
+                  console.log(\`  [\${kind}] \${f.name}  (\${f.id})  size=\${f.size || '-'}\`);
                 });
+
+                console.log('');
+                console.log('=== 3) Depth 2 (inside subfolders) ===');
+                for (const f of children.data.files) {
+                  if (f.mimeType !== 'application/vnd.google-apps.folder') continue;
+                  const sub = await drive.files.list({
+                    q: \`'\${f.id}' in parents and trashed = false\`,
+                    fields: 'files(id, name, mimeType, size, createdTime, webViewLink)',
+                    supportsAllDrives: true,
+                    includeItemsFromAllDrives: true,
+                    corpora: 'drive', driveId,
+                    pageSize: 50,
+                  });
+                  console.log(\`  Folder \"\${f.name}\":\`);
+                  if (!sub.data.files || sub.data.files.length === 0) console.log('    (empty)');
+                  else sub.data.files.forEach(c =>
+                    console.log(\`    - \${c.name}  size=\${c.size || '-'}  link=\${c.webViewLink}\`));
+                }
               }
 
               console.log('');
-              console.log('=== 3) Look 2 levels deep (children of children) ===');
-              for (const f of children.data.files) {
-                if (f.mimeType !== 'application/vnd.google-apps.folder') continue;
-                const sub = await drive.files.list({
-                  q: \`'\${f.id}' in parents and trashed = false\`,
-                  fields: 'files(id, name, mimeType, size, createdTime, webViewLink)',
-                  supportsAllDrives: true,
-                  includeItemsFromAllDrives: true,
-                  corpora: 'drive',
-                  driveId: parent.data.driveId || '$FOLDER_ID',
-                  pageSize: 50,
-                });
-                console.log(\`  Folder \"\${f.name}\":\`);
-                if (sub.data.files.length === 0) console.log('    (empty)');
-                else sub.data.files.forEach(c => console.log(\`    - \${c.name}  (\${c.id})  \${c.webViewLink}\`));
-              }
-
-              console.log('');
-              console.log('=== 4) Search across ALL files owned/accessible by service account ===');
+              console.log('=== 4) ALL files visible to service account (excl folders) ===');
               const all = await drive.files.list({
-                q: \"trashed = false and mimeType != 'application/vnd.google-apps.folder'\",
-                fields: 'files(id, name, parents, createdTime, webViewLink)',
+                q: 'trashed = false and mimeType != \"application/vnd.google-apps.folder\"',
+                fields: 'files(id, name, parents, createdTime, webViewLink, owners(emailAddress))',
                 supportsAllDrives: true,
                 includeItemsFromAllDrives: true,
                 corpora: 'allDrives',
-                pageSize: 20,
+                pageSize: 30,
               });
-              console.log(\`  Found \${all.data.files.length} non-folder files visible to service account:\`);
-              all.data.files.forEach(f => {
-                console.log(\`    - \${f.name}  parents=\${JSON.stringify(f.parents)}  link=\${f.webViewLink}\`);
+              console.log(\`Found \${all.data.files?.length || 0} non-folder files\`);
+              (all.data.files || []).forEach(f => {
+                console.log(\`  - \${f.name}  parents=\${JSON.stringify(f.parents)}\`);
+                console.log(\`    link: \${f.webViewLink}\`);
               });
             })().catch(e => { console.error('ERROR:', e.message); process.exit(1); });
-          "
+          " >> $OUT 2>&1
 
-      - name: List file_attachments rows in Supabase
-        env:
-          URL: ${{ secrets.SUPABASE_URL }}
-          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: |
-          echo "=== file_attachments rows ==="
+          echo "" >> $OUT
+          echo "=== 5) Supabase: file_attachments (latest 20) ===" >> $OUT
           curl -sS "$URL/rest/v1/file_attachments?select=*&order=uploaded_at.desc&limit=20" \
-            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | python3 -m json.tool
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            | python3 -m json.tool >> $OUT 2>&1
+
+          echo "" >> $OUT
+          echo "=== 6) Supabase: contracts (latest 10) ===" >> $OUT
+          curl -sS "$URL/rest/v1/contracts?select=id,no,title,status,supplier_id,created_at&order=created_at.desc&limit=10" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            | python3 -m json.tool >> $OUT 2>&1
+
+          echo "" >> $OUT
+          echo "=== 7) Supabase: rfqs (latest 10) ===" >> $OUT
+          curl -sS "$URL/rest/v1/rfqs?select=id,no,title,status,project_id,created_at&order=created_at.desc&limit=10" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            | python3 -m json.tool >> $OUT 2>&1
 
           echo ""
-          echo "=== contracts table (latest 10) ==="
-          curl -sS "$URL/rest/v1/contracts?select=id,no,title,status,created_at&order=created_at.desc&limit=10" \
-            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | python3 -m json.tool
+          echo "=== File size: $(wc -l $OUT | awk '{print $1}') lines ==="
 
-          echo ""
-          echo "=== rfqs table (latest 10) ==="
-          curl -sS "$URL/rest/v1/rfqs?select=id,no,title,status,created_at&order=created_at.desc&limit=10" \
-            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | python3 -m json.tool
+      - name: Commit results back to repo
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add .diagnostics/
+          git commit -m "diagnose: drive state $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]" || echo "nothing to commit"
+          git push
