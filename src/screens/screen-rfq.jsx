@@ -16,18 +16,7 @@ import { Icons, Chip, Av, Spark, Delta, money } from '../lib/shell';
 
 // status: 'wait'    = created but Supplier hasn't sent back & been confirmed yet
 // status: 'received' = supplier reply uploaded AND confirmed in system
-const rfqRows = [
-  { no:'RFQ-2025-024', title:'งานปูกระเบื้องชั้น 2',         items:6,  sup:'หจก. กระเบื้องช่าง', supkind:'default', created:'17 พ.ค. 68', due:'24 พ.ค. 68', dueWarn:'อีก 7 วัน', status:'wait' },
-  { no:'RFQ-2025-023', title:'เหล็กรูปพรรณ H-Beam',          items:4,  sup:'เอเชียสตีล',          supkind:'aw',      created:'16 พ.ค. 68', due:'20 พ.ค. 68', dueWarn:'อีก 3 วัน', status:'wait' },
-  { no:'RFQ-2025-022', title:'สุขภัณฑ์ COTTO ชุดที่ 2',        items:12, sup:'COTTO Wholesale',    supkind:'default', created:'15 พ.ค. 68', due:'18 พ.ค. 68', dueWarn:'พรุ่งนี้',  status:'wait' },
-  { no:'RFQ-2025-021', title:'งานฐานราก ลาดพร้าว',            items:8,  sup:'พี.ที. คอนสตรัคชั่น', supkind:'default', created:'14 พ.ค. 68', due:'17 พ.ค. 68', dueWarn:'วันนี้',   status:'wait' },
-  { no:'RFQ-2025-020', title:'สีน้ำพลาสติก SuperShield',       items:5,  sup:'TOA Distribution',   supkind:'default', created:'12 พ.ค. 68', due:'15 พ.ค. 68', dueWarn:null,        status:'received' },
-  { no:'RFQ-2025-019', title:'เหล็กเส้น DB12/16 ล็อต Q2',      items:3,  sup:'เอเชียสตีล',          supkind:'aw',      created:'8 พ.ค. 68',  due:'12 พ.ค. 68', dueWarn:null,        status:'received' },
-  { no:'RFQ-2025-018', title:'งานทาสีภายนอก เฟส 1',           items:4,  sup:'หจก. ช่างสีไทย',      supkind:'default', created:'8 พ.ค. 68',  due:'10 พ.ค. 68', dueWarn:'เกินกำหนด', status:'wait' },
-  { no:'RFQ-2025-017', title:'กระเบื้องหลังคา CPAC',           items:2,  sup:'CPAC Roof',          supkind:'sc',      created:'5 พ.ค. 68',  due:'8 พ.ค. 68',  dueWarn:null,        status:'received' },
-  { no:'RFQ-2025-016', title:'อิฐมวลเบา Q-CON บล็อกตึก A',     items:2,  sup:'Q-CON Direct',       supkind:'default', created:'4 พ.ค. 68',  due:'7 พ.ค. 68',  dueWarn:null,        status:'received' },
-  { no:'RFQ-2025-015', title:'งานเดินสายไฟ THW Phase 1',      items:6,  sup:'BCC Electric',       supkind:'default', created:'2 พ.ค. 68',  due:'5 พ.ค. 68',  dueWarn:null,        status:'received' },
-];
+const rfqRows = [];
 
 /* =================== List =================== */
 
@@ -129,7 +118,9 @@ export function ScreenRFQ({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r, i) => (
+            {filtered.length === 0 ? (
+              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
+            ) : filtered.map((r, i) => (
               <tr key={i} onClick={() => r.status === 'received' ? go('rfq-confirm') : null}
                   style={{ cursor: r.status === 'received' ? 'pointer' : 'default' }}>
                 <td>
@@ -181,13 +172,7 @@ export function ScreenRFQ({ go }) {
 /* =================== Post-quote confirm screen (kept as-is) =================== */
 
 export function ScreenRFQConfirm({ go }) {
-  const [items, setItems] = useState([
-    { id:'STR-CEM-01', name:'ปูนซีเมนต์ ตราช้าง',     unit:'ถุง 50 กก.', qty:500,  oldP:162, oldDate:'15 ก.พ. 68', newP:165, save:true,  outlier:false },
-    { id:'STR-STL-12', name:'เหล็กเส้น DB12',          unit:'เส้น',       qty:2000, oldP:207, oldDate:'11 เม.ย. 68', newP:245, save:true,  outlier:true  },
-    { id:'STR-STL-16', name:'เหล็กเส้น DB16',          unit:'เส้น',       qty:1500, oldP:null,oldDate:null,         newP:325, save:true,  outlier:false, isNew:true },
-    { id:'STR-STL-20', name:'เหล็กเส้น DB20',          unit:'เส้น',       qty:400,  oldP:498, oldDate:'8 เม.ย. 68',  newP:512, save:true,  outlier:false },
-    { id:'STR-WIRE-22', name:'ลวดผูกเหล็ก เบอร์ 22',   unit:'กก.',        qty:800,  oldP:65,  oldDate:'2 มี.ค. 68',  newP:142, save:false, outlier:true  },
-  ]);
+  const [items, setItems] = useState([]);
 
   const toggle = (id) => setItems(items.map(it => it.id === id ? { ...it, save: !it.save } : it));
 
@@ -203,24 +188,12 @@ export function ScreenRFQConfirm({ go }) {
       <div className="page-head" style={{ alignItems: 'flex-start' }}>
         <div className="page-title">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-            <span className="font-mono" style={{ fontSize: 12, color: 'var(--ink-3)' }}>RFQ-2025-019</span>
             <Chip kind="recv">รับ Quote แล้ว</Chip>
           </div>
           <h1 className="h-display">ตรวจสอบก่อนบันทึก Price DB</h1>
           <p style={{ fontSize: 14, color: 'var(--ink-3)', margin: '8px 0 0', maxWidth: 620 }}>
             เปรียบเทียบราคาใหม่จาก Supplier กับราคาเดิมในระบบ — ติ๊กเลือกรายการที่จะเก็บเข้า Price DB
-            <strong style={{ color: 'var(--clay)' }}> 2 รายการ</strong> ถูก highlight ว่าผิดปกติ
           </p>
-        </div>
-        <div className="card" style={{ padding: 16, minWidth: 280, background: 'var(--surface-2)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-            <Av initials="อ" kind="aw" />
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>เอเชียสตีล จำกัด</div>
-              <div style={{ fontSize: 11, color: 'var(--ink-3)' }}>เครดิต 45 วัน · มอบใบเสนอราคา 16 พ.ค.</div>
-            </div>
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>โครงการ <strong style={{ color: 'var(--ink-2)' }}>IE-LV04 · Initial Living รังสิต</strong></div>
         </div>
       </div>
 
@@ -257,7 +230,9 @@ export function ScreenRFQConfirm({ go }) {
             </tr>
           </thead>
           <tbody>
-            {items.map((it) => {
+            {items.length === 0 ? (
+              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
+            ) : items.map((it) => {
               const delta = it.oldP == null ? null : ((it.newP - it.oldP) / it.oldP) * 100;
               const dir = delta == null ? 'new' : delta > 0.5 ? 'up' : delta < -0.5 ? 'down' : 'flat';
               return (
@@ -335,7 +310,7 @@ export function ScreenRFQConfirm({ go }) {
           </div>
           <div>
             <div className="eyebrow" style={{ marginBottom:2 }}>มูลค่ารวมตาม Quote</div>
-            <div style={{ fontFamily:'var(--font-serif)', fontSize:24, lineHeight:1 }}>฿1,242,500</div>
+            <div style={{ fontFamily:'var(--font-serif)', fontSize:24, lineHeight:1 }}>{money(items.filter(i=>i.save).reduce((s,i)=>s+(i.newP||0)*(i.qty||0),0))}</div>
           </div>
         </div>
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>

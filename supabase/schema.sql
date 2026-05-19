@@ -53,8 +53,3 @@ create table if not exists audit_log (
   timestamp  timestamptz  default now()
 );
 create index if not exists audit_log_timestamp_idx on audit_log (timestamp desc);
-
--- ===== Seed: one DSAR sample so the UI shows something on first run =====
-insert into dsar_requests (id, applicant_email, type, status, note) values
-  ('dsar_seed_1', 'somchai@example.com', 'access', 'pending', 'ขอดูข้อมูลส่วนตัวทั้งหมด')
-on conflict (id) do nothing;

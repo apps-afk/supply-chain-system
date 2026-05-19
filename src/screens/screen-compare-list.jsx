@@ -13,56 +13,7 @@ import { SettingsSearchBox } from '../lib/settings-shared';
       Reference = เพื่อเป็นข้อมูล (เปรียบเทียบเฉยๆ)
 */
 
-const COMPARE_DOCS = [
-  {
-    code:'CMP-2025-038', mode:'RFQ',     status:'Decided',   category:'งานโครงสร้าง',
-    project:'IE-LV04 · Initial Living รังสิต', items:5, suppliers:3,
-    selectedSupplier:'รุ่งเรืองสตีล',
-    created:'17 พ.ค. 68',  refUploaded:'19 พ.ค. 68',
-  },
-  {
-    code:'CMP-2025-037', mode:'RFQ',     status:'Pending',   category:'งานหลังคา',
-    project:'IE-VL02 · Initial Villa',         items:3, suppliers:3,
-    selectedSupplier:null,
-    created:'15 พ.ค. 68',  refUploaded:null,
-  },
-  {
-    code:'CMP-2025-036', mode:'PriceDB', status:'Pending',   category:'งานสี',
-    project:'IE-LV01 · Initial Living บางนา',  items:4, suppliers:3,
-    selectedSupplier:null,
-    created:'14 พ.ค. 68',  refUploaded:null,
-  },
-  {
-    code:'CMP-2025-035', mode:'RFQ',     status:'Decided',   category:'งานสุขภัณฑ์',
-    project:'IE-TH03 · Initial Town',          items:8, suppliers:2,
-    selectedSupplier:'COTTO Wholesale',
-    created:'12 พ.ค. 68',  refUploaded:'14 พ.ค. 68',
-  },
-  {
-    code:'CMP-2025-034', mode:'PriceDB', status:'Reference', category:'งานก่ออิฐ-ฉาบปูน',
-    project:'IE-LV01 · Initial Living บางนา',  items:2, suppliers:3,
-    selectedSupplier:null,
-    created:'12 พ.ค. 68',  refUploaded:null,
-  },
-  {
-    code:'CMP-2025-033', mode:'RFQ',     status:'Decided',   category:'งานพื้น-ผนัง',
-    project:'IE-LV04 · Initial Living รังสิต', items:6, suppliers:3,
-    selectedSupplier:'ไทยเซรามิค',
-    created:'10 พ.ค. 68',  refUploaded:'12 พ.ค. 68',
-  },
-  {
-    code:'CMP-2025-032', mode:'PriceDB', status:'Decided',   category:'งานระบบไฟฟ้า',
-    project:'IE-LV04 · Initial Living รังสิต', items:3, suppliers:3,
-    selectedSupplier:'BCC Electric',
-    created:'8 พ.ค. 68',   refUploaded:'10 พ.ค. 68',
-  },
-  {
-    code:'CMP-2025-031', mode:'PriceDB', status:'Reference', category:'งานโครงสร้าง',
-    project:'IE-LV04 · Initial Living รังสิต', items:5, suppliers:3,
-    selectedSupplier:null,
-    created:'5 พ.ค. 68',   refUploaded:null,
-  },
-];
+const COMPARE_DOCS = [];
 
 const STATUS_PILL = {
   'Pending':   { bg:'var(--chip-recv-bg)', fg:'var(--chip-recv-fg)', dot:'var(--ochre)', label:'รอเลือก' },
@@ -178,7 +129,9 @@ export function ScreenCompareList({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(d => {
+            {filtered.length === 0 ? (
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
+            ) : filtered.map(d => {
               const sp = STATUS_PILL[d.status];
               const mp = MODE_PILL[d.mode];
               return (

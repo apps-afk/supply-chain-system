@@ -14,36 +14,7 @@ import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox } f
 */
 
 /* =================== Synthetic RFQ pool for "pull from RFQ" =================== */
-const RECEIVED_RFQS_FOR_PRICEDB = [
-  {
-    no:'RFQ-2025-019', supplier:'เอเชียสตีล',         supKind:'aw',     quoteDate:'2025-05-16', category:'งานโครงสร้าง', project:'IE-LV04',
-    items:[
-      { code:'MAT-STR-00003', name:'เหล็กเส้น DB12',  unit:'เส้น', desc:'มอก. · ⌀12mm × 10m', price:245 },
-      { code:'MAT-STR-00004', name:'เหล็กเส้น DB16',  unit:'เส้น', desc:'มอก. · ⌀16mm × 10m', price:325 },
-      { code:'MAT-STR-00005', name:'เหล็กเส้น DB20',  unit:'เส้น', desc:'มอก. · ⌀20mm × 10m', price:512 },
-    ],
-  },
-  {
-    no:'RFQ-2025-018', supplier:'รุ่งเรืองสตีล',       supKind:'rr',     quoteDate:'2025-05-14', category:'งานโครงสร้าง', project:'IE-LV04',
-    items:[
-      { code:'MAT-STR-00003', name:'เหล็กเส้น DB12',  unit:'เส้น', desc:'มอก. · ⌀12mm × 10m', price:248 },
-      { code:'MAT-STR-00004', name:'เหล็กเส้น DB16',  unit:'เส้น', desc:'มอก. · ⌀16mm × 10m', price:318 },
-    ],
-  },
-  {
-    no:'RFQ-2025-017', supplier:'SCG Distribution',   supKind:'sc',     quoteDate:'2025-05-15', category:'งานโครงสร้าง', project:'IE-LV04',
-    items:[
-      { code:'MAT-STR-00001', name:'ปูนซีเมนต์ ตราช้าง', unit:'ถุง 50 กก.', desc:'ปอร์ตแลนด์ ประเภท 1', price:166 },
-      { code:'MAT-STR-00003', name:'เหล็กเส้น DB12',     unit:'เส้น',       desc:'มอก. · ⌀12mm × 10m',  price:252 },
-    ],
-  },
-  {
-    no:'RFQ-2025-016', supplier:'CPAC Roof',          supKind:'sc',     quoteDate:'2025-05-10', category:'งานหลังคา', project:'IE-VL02',
-    items:[
-      { code:'MAT-ROF-00001', name:'กระเบื้องหลังคา CPAC โมเนียร์', unit:'แผ่น', desc:'33×42 cm · สีเทา', price:42 },
-    ],
-  },
-];
+const RECEIVED_RFQS_FOR_PRICEDB = [];
 
 /* =================== List =================== */
 
@@ -91,11 +62,11 @@ export function ScreenPriceDB({ go }) {
         padding:'24px 0', marginBottom:32,
       }}>
         {[
-          { label:'รายการในระบบ',     value:'1,284', sub:'อัพเดทล่าสุด 17 พ.ค. 16:42' },
-          { label:'Supplier ใช้งาน',    value:'142',   sub:'38 รายส่งราคา 30 วันล่าสุด' },
-          { label:'เพิ่มเข้าระบบ 30 วัน', value:'218',   sub:'156 จาก RFQ · 62 Manual' },
-          { label:'ขาขึ้น (YoY)',       value:'64',    sub:'รายการที่ขึ้น > 10%' },
-          { label:'ค้างไม่อัพเดท',       value:'47',    sub:'รายการ > 6 เดือน' },
+          { label:'รายการในระบบ',     value:'0', sub:'ยังไม่มีข้อมูล' },
+          { label:'Supplier ใช้งาน',    value:'0',   sub:'ยังไม่มีข้อมูล' },
+          { label:'เพิ่มเข้าระบบ 30 วัน', value:'0',   sub:'ยังไม่มีข้อมูล' },
+          { label:'ขาขึ้น (YoY)',       value:'0',    sub:'ยังไม่มีข้อมูล' },
+          { label:'ค้างไม่อัพเดท',       value:'0',    sub:'ยังไม่มีข้อมูล' },
         ].map((s, i) => (
           <div key={i} style={{ paddingLeft: i === 0 ? 0 : 28, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
             <Stat {...s} />
@@ -154,7 +125,11 @@ export function ScreenPriceDB({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r, i) => (
+            {filtered.length === 0 ? (
+              <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล
+              </td></tr>
+            ) : filtered.map((r, i) => (
               <tr key={i} onClick={() => go('pricedb-detail')} style={{ cursor:'pointer' }} className={r.flag ? `row-flag-${r.flag}` : ''}>
                 <td style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'var(--ink-4)' }}>{r.code}</td>
                 <td>
@@ -195,7 +170,7 @@ export function ScreenPriceDB({ go }) {
 
         <div style={{ padding:'14px 24px', display:'flex', alignItems:'center', justifyContent:'space-between',
                       borderTop:'1px solid var(--rule)', fontSize:12, color:'var(--ink-3)' }}>
-          <span>แสดง 1–{filtered.length} จาก 248 รายการ</span>
+          <span>แสดง {filtered.length === 0 ? 0 : 1}–{filtered.length} จาก {filtered.length} รายการ</span>
           <div style={{ display:'flex', gap:6 }}>
             <button className="btn sm" disabled>ก่อนหน้า</button>
             <button className="btn sm">ถัดไป {Icons.chevronR}</button>
@@ -209,38 +184,7 @@ export function ScreenPriceDB({ go }) {
   );
 }
 
-const pdbRows = [
-  { code:'STR-STL-12', name:'เหล็กเส้น DB12',                spec:'มอก. 24-2559 · ข้ออ้อย ⌀12mm', cat:'งานโครงสร้าง', unit:'เส้น',
-    sup:'เอเชียสตีล', supkind:'aw', price:245, mom:'+18.4%', momDir:'up',  yoy:'+22.1%', yoyDir:'up',
-    spark:[140,148,151,150,165,172,180,195,210,228,240,245], date:'17 พ.ค.', age:1, source:'RFQ', sourceRef:'RFQ-2025-019', flag:'err' },
-  { code:'STR-CEM-01', name:'ปูนซีเมนต์ ตราช้าง',           spec:'ปอร์ตแลนด์ ประเภท 1', cat:'งานโครงสร้าง', unit:'ถุง 50 กก.',
-    sup:'SCG Distribution', supkind:'sc', price:165, mom:'+1.9%', momDir:'up', yoy:'+3.2%', yoyDir:'up',
-    spark:[155,158,159,160,160,161,162,162,163,164,164,165], date:'15 พ.ค.', age:3, source:'RFQ', sourceRef:'RFQ-2025-017' },
-  { code:'STR-STL-16', name:'เหล็กเส้น DB16',                spec:'มอก. 24-2559 · ข้ออ้อย ⌀16mm', cat:'งานโครงสร้าง', unit:'เส้น',
-    sup:'รุ่งเรืองสตีล', supkind:'rr', price:325, mom:'+12.0%', momDir:'up', yoy:'+18.6%', yoyDir:'up',
-    spark:[245,250,253,260,270,280,290,300,308,316,320,325], date:'15 พ.ค.', age:3, source:'RFQ', sourceRef:'RFQ-2025-018', flag:'warn' },
-  { code:'TIL-CER-66', name:'กระเบื้องเซรามิค 60×60 cm',     spec:'Grade A · ผิวด้าน', cat:'งานพื้น-ผนัง', unit:'ตร.ม.',
-    sup:'ไทยเซรามิค', supkind:'default', price:285, mom:'−4.2%', momDir:'down', yoy:'−1.1%', yoyDir:'down',
-    spark:[298,302,300,298,295,294,292,290,290,288,287,285], date:'14 พ.ค.', age:4, source:'Manual' },
-  { code:'BRK-QCN-75', name:'อิฐมวลเบา Q-CON',              spec:'7.5×20×60 cm · มอก. 1505', cat:'งานก่ออิฐ-ฉาบปูน', unit:'ก้อน',
-    sup:'Q-CON Direct', supkind:'default', price:28, mom:'0.0%', momDir:'flat', yoy:'+5.2%', yoyDir:'up',
-    spark:[26.6,26.8,27,27.2,27.5,27.8,28,28,28,28,28,28], date:'12 พ.ค.', age:6, source:'Manual' },
-  { code:'PNT-TOA-EX', name:'สีน้ำพลาสติก TOA SuperShield',  spec:'ภายนอก · กึ่งเงา', cat:'งานสี', unit:'แกลลอน',
-    sup:'TOA Distribution', supkind:'default', price:1180, mom:'+2.6%', momDir:'up', yoy:'+8.7%', yoyDir:'up',
-    spark:[1085,1100,1110,1115,1130,1140,1145,1150,1155,1165,1170,1180], date:'12 พ.ค.', age:6, source:'RFQ', sourceRef:'RFQ-2025-020' },
-  { code:'ROF-CPC-MN', name:'กระเบื้องหลังคา CPAC โมเนียร์',   spec:'33×42 cm · สีเทา', cat:'งานหลังคา', unit:'แผ่น',
-    sup:'CPAC Roof',  supkind:'sc', price:42, mom:'+0.5%', momDir:'up', yoy:'+2.1%', yoyDir:'up',
-    spark:[40.5,40.8,41,41.2,41.5,41.6,41.8,41.8,41.9,42,42,42], date:'9 ธ.ค. 67', age:218, source:'Manual' },
-  { code:'SAN-COT-01', name:'โถสุขภัณฑ์ COTTO Simply',       spec:'C13017 · 1 ชิ้น 4.5L', cat:'งานสุขภัณฑ์', unit:'ชุด',
-    sup:'COTTO Wholesale', supkind:'default', price:3850, mom:'+0.0%', momDir:'flat', yoy:'+1.6%', yoyDir:'up',
-    spark:[3790,3810,3820,3830,3840,3845,3850,3850,3850,3850,3850,3850], date:'8 พ.ค.', age:10, source:'RFQ', sourceRef:'RFQ-2025-022' },
-  { code:'ELE-THW-25', name:'สายไฟ THW 2.5 sq.mm.',         spec:'BCC ทองแดง · ม้วน 100 ม.', cat:'งานระบบไฟฟ้า', unit:'ม้วน',
-    sup:'BCC Electric', supkind:'default', price:1620, mom:'+3.8%', momDir:'up', yoy:'+11.2%', yoyDir:'up',
-    spark:[1440,1450,1470,1490,1510,1530,1545,1560,1570,1585,1605,1620], date:'7 พ.ค.', age:11, source:'RFQ', sourceRef:'RFQ-2025-015' },
-  { code:'BRK-QCN-10', name:'อิฐมวลเบา Q-CON 10 cm',         spec:'10×20×60 cm · มอก. 1505', cat:'งานก่ออิฐ-ฉาบปูน', unit:'ก้อน',
-    sup:'Q-CON Direct', supkind:'default', price:35, mom:'+1.4%', momDir:'up', yoy:'+4.8%', yoyDir:'up',
-    spark:[33,33.2,33.5,34,34.2,34.5,34.5,34.8,34.8,35,35,35], date:'24 ม.ค.', age:114, source:'Manual' },
-];
+const pdbRows = [];
 
 /* =================== Manual entry modal =================== */
 function ManualPriceModal({ onClose }) {
@@ -485,6 +429,9 @@ export function ScreenPriceDBDetail({ go }) {
   const tabs = ['ภาพรวม','ประวัติราคา','Supplier เปรียบเทียบ','RFQ ที่เกี่ยวข้อง'];
   const [tab, setTab] = useState('ภาพรวม');
 
+  const supplierRows = [];
+  const activities = [];
+
   return (
     <div className="page">
       <button className="btn ghost sm" onClick={() => go('pricedb')} style={{ marginBottom:20, marginLeft:-8 }}>
@@ -494,18 +441,16 @@ export function ScreenPriceDBDetail({ go }) {
       <div className="page-head" style={{ alignItems:'flex-start' }}>
         <div className="page-title">
           <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6 }}>
-            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>MAT-STR-00003</span>
-            <Chip kind="risk-high">ราคาผิดปกติ</Chip>
-            <Chip kind="ai">AI MONITORED</Chip>
+            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>—</span>
             <span style={{ fontSize:11, padding:'1px 8px', borderRadius:3, background:'var(--paper-2)', color:'var(--ink-3)' }}>
               ราคาทั้งหมดเป็น net · ไม่รวม VAT/Overhead
             </span>
           </div>
-          <h1 className="h-display">เหล็กเส้น DB12</h1>
+          <h1 className="h-display">ยังไม่มีข้อมูล</h1>
           <div style={{ display:'flex', gap:24, marginTop:12, fontSize:13, color:'var(--ink-3)' }}>
-            <span>หมวด: <strong style={{ color:'var(--ink-2)' }}>งานโครงสร้าง</strong></span>
-            <span>หน่วย: <strong style={{ color:'var(--ink-2)' }}>เส้น</strong></span>
-            <span>Spec: <strong style={{ color:'var(--ink-2)' }}>มอก. 24-2559 · ข้ออ้อย ⌀12mm × 10m</strong></span>
+            <span>หมวด: <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
+            <span>หน่วย: <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
+            <span>Spec: <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
           </div>
         </div>
         <div style={{ display:'flex', gap:8 }}>
@@ -526,22 +471,20 @@ export function ScreenPriceDBDetail({ go }) {
           <div style={{ display:'flex', alignItems:'flex-end', gap:48, marginBottom:8 }}>
             <div>
               <div className="eyebrow" style={{ marginBottom:8 }}>
-                ราคาล่าสุด · <span style={{ color:'var(--ink-2)' }}>17 พ.ค. 2568 (1 วันที่แล้ว)</span>
+                ราคาล่าสุด · <span style={{ color:'var(--ink-2)' }}>—</span>
               </div>
               <div style={{ fontFamily:'var(--font-serif)', fontSize:72, lineHeight:1, letterSpacing:'-0.02em' }}>
-                ฿245<span style={{ fontFamily:'var(--font-sans)', fontSize:18, color:'var(--ink-3)', marginLeft:8 }}>/ เส้น</span>
+                ฿0<span style={{ fontFamily:'var(--font-sans)', fontSize:18, color:'var(--ink-3)', marginLeft:8 }}>/ —</span>
               </div>
               <div style={{ marginTop:12, display:'flex', gap:16, alignItems:'center' }}>
-                <Delta pct="+18.4% MoM" dir="up" />
-                <Delta pct="+22.1% YoY" dir="up" />
-                <span style={{ fontSize:12, color:'var(--ink-3)' }}>เทียบ ฿207 (เม.ย.) · ฿201 (พ.ค. 67)</span>
+                <span style={{ fontSize:12, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</span>
               </div>
             </div>
             <div style={{ flex:1 }}>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:0, borderTop:'1px solid var(--rule)', borderBottom:'1px solid var(--rule)', padding:'14px 0' }}>
-                <Stat label="ต่ำสุด 90 วัน" value="฿207" sub="11 เม.ย." />
-                <Stat label="สูงสุด 90 วัน" value="฿248" sub="14 พ.ค." />
-                <Stat label="เฉลี่ย 90 วัน" value="฿224" sub="จาก 12 บันทึก" />
+                <Stat label="ต่ำสุด 90 วัน" value="—" sub="ยังไม่มีข้อมูล" />
+                <Stat label="สูงสุด 90 วัน" value="—" sub="ยังไม่มีข้อมูล" />
+                <Stat label="เฉลี่ย 90 วัน" value="—" sub="ยังไม่มีข้อมูล" />
               </div>
             </div>
           </div>
@@ -559,14 +502,8 @@ export function ScreenPriceDBDetail({ go }) {
                 ))}
               </div>
             </div>
-            <div style={{ padding:24 }}>
-              <PriceChart />
-              <div style={{ display:'flex', gap:20, marginTop:16, fontSize:12, color:'var(--ink-3)' }}>
-                <LegendDot color="#1F4D40" label="เอเชียสตีล" />
-                <LegendDot color="#B08938" label="รุ่งเรืองสตีล" />
-                <LegendDot color="#5B7A3A" label="SCG Distribution" />
-                <LegendDot color="#A29A88" dash label="AI Forecast" />
-              </div>
+            <div style={{ padding:40, textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
+              ยังไม่มีข้อมูล
             </div>
           </div>
 
@@ -586,11 +523,11 @@ export function ScreenPriceDBDetail({ go }) {
                 </tr>
               </thead>
               <tbody>
-                {[
-                  { sup:'เอเชียสตีล',       kind:'aw', last:245, lastDate:'17 พ.ค.', avg:228, n:8, source:'RFQ',    ct:'45 วัน' },
-                  { sup:'รุ่งเรืองสตีล',     kind:'rr', last:248, lastDate:'14 พ.ค.', avg:233, n:6, source:'RFQ',    ct:'30 วัน' },
-                  { sup:'SCG Distribution', kind:'sc', last:252, lastDate:'10 พ.ค.', avg:241, n:4, source:'Manual', ct:'60 วัน' },
-                ].map((r, i) => (
+                {supplierRows.length === 0 ? (
+                  <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                    ยังไม่มีข้อมูล
+                  </td></tr>
+                ) : supplierRows.map((r, i) => (
                   <tr key={i}>
                     <td>
                       <span style={{ display:'inline-flex', gap:10, alignItems:'center' }}>
@@ -627,34 +564,30 @@ export function ScreenPriceDBDetail({ go }) {
               <Chip kind="ai">3 เดือนข้างหน้า</Chip>
             </div>
             <div style={{ fontFamily:'var(--font-serif)', fontSize:26, letterSpacing:'-0.01em', lineHeight:1.2 }}>
-              ฿258 – ฿272
+              —
             </div>
-            <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:6 }}>ความเชื่อมั่น 72% · ขาขึ้นต่อเนื่อง</div>
-            <hr className="hr" style={{ margin:'16px 0' }} />
-            <p style={{ fontSize:12.5, color:'var(--ink-2)', lineHeight:1.6, margin:0 }}>
-              ราคาเหล็กเส้นมีแนวโน้มปรับขึ้นต่อเนื่อง จากต้นทุนวัตถุดิบและอุปสงค์ในประเทศ —
-              แนะนำให้ <strong>ล็อกราคา</strong> หรือ <strong>เร่งสั่งซื้อ</strong> ก่อนสิ้นเดือน มิ.ย.
-            </p>
+            <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:6 }}>ยังไม่มีข้อมูล</div>
           </div>
 
           <div className="card">
             <h3 className="h-card" style={{ marginBottom:12 }}>กิจกรรมล่าสุด</h3>
-            <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-              {[
-                { who:'นวพร', kind:'np', what:'ดึงราคา ฿245 จาก RFQ-2025-019', when:'17 พ.ค. · 14:22' },
-                { who:'System', kind:'default', what:'แจ้งเตือนราคาผิดปกติ (+18.4%)', when:'17 พ.ค. · 14:22' },
-                { who:'นวพร', kind:'np', what:'บันทึกราคา ฿207 (Manual)', when:'11 เม.ย. · 10:08' },
-                { who:'ภัทร', kind:'default', what:'อัพเดท Spec ใน Master', when:'2 เม.ย. · 16:55' },
-              ].map((a, i) => (
-                <div key={i} style={{ display:'flex', gap:10, fontSize:12.5 }}>
-                  <Av initials={a.who === 'System' ? 'IE' : a.who.slice(0,1)} kind={a.kind} />
-                  <div style={{ flex:1 }}>
-                    <div style={{ color:'var(--ink-2)' }}><strong style={{ color:'var(--ink)' }}>{a.who}</strong> {a.what}</div>
-                    <div style={{ color:'var(--ink-4)', fontSize:11, marginTop:2 }}>{a.when}</div>
+            {activities.length === 0 ? (
+              <div style={{ textAlign:'center', padding:20, color:'var(--ink-3)', fontSize:12.5 }}>
+                ยังไม่มีข้อมูล
+              </div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                {activities.map((a, i) => (
+                  <div key={i} style={{ display:'flex', gap:10, fontSize:12.5 }}>
+                    <Av initials={a.who === 'System' ? 'IE' : a.who.slice(0,1)} kind={a.kind} />
+                    <div style={{ flex:1 }}>
+                      <div style={{ color:'var(--ink-2)' }}><strong style={{ color:'var(--ink)' }}>{a.who}</strong> {a.what}</div>
+                      <div style={{ color:'var(--ink-4)', fontSize:11, marginTop:2 }}>{a.when}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -662,67 +595,3 @@ export function ScreenPriceDBDetail({ go }) {
   );
 }
 
-function LegendDot({ color, label, dash }) {
-  return (
-    <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-      <svg width="20" height="6">
-        <line x1="0" y1="3" x2="20" y2="3" stroke={color} strokeWidth="2" strokeDasharray={dash ? "3 3" : ""} />
-      </svg>
-      {label}
-    </span>
-  );
-}
-
-function PriceChart() {
-  const months = ['ธ.ค.66','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.67','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.68'];
-  const asia = [195,197,199,202,201,201,205,210,215,212,208,205,207,212,218,224,235,245];
-  const rung = [200,202,205,208,212,210,215,218,222,218,212,210,212,218,224,232,240,248];
-  const scg  = [210,210,212,215,218,216,220,225,230,225,220,218,222,228,234,240,246,252];
-  const forecastAsia = [245, 256, 264, 270];
-
-  const W = 760, H = 240, PT = 30, PB = 30, PL = 44, PR = 16;
-  const all = [...asia, ...rung, ...scg, ...forecastAsia];
-  const ymin = Math.floor(Math.min(...all) / 10) * 10 - 5;
-  const ymax = Math.ceil(Math.max(...all) / 10) * 10 + 5;
-
-  const x = i => PL + (i / (months.length + 2)) * (W - PL - PR);
-  const y = v => PT + (1 - (v - ymin) / (ymax - ymin)) * (H - PT - PB);
-
-  const path = (data, startIdx = 0) =>
-    data.map((v, i) => `${i === 0 ? 'M' : 'L'} ${x(i + startIdx).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
-
-  const ticks = [];
-  for (let v = Math.ceil(ymin / 20) * 20; v <= ymax; v += 20) ticks.push(v);
-
-  const forecastUpper = [245, 262, 272, 280];
-  const forecastLower = [245, 250, 256, 260];
-  const bandPath =
-    forecastUpper.map((v, i) => `${i === 0 ? 'M' : 'L'} ${x(i + asia.length - 1).toFixed(1)} ${y(v).toFixed(1)}`).join(' ') +
-    ' ' +
-    forecastLower.slice().reverse().map((v, i) => `L ${x(forecastLower.length - 1 - i + asia.length - 1).toFixed(1)} ${y(v).toFixed(1)}`).join(' ') +
-    ' Z';
-
-  return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block' }}>
-      {ticks.map((t, i) => (
-        <g key={i}>
-          <line x1={PL} x2={W - PR} y1={y(t)} y2={y(t)} stroke="var(--rule)" strokeWidth="1" />
-          <text x={PL - 8} y={y(t) + 3.5} textAnchor="end" fontSize="10" fill="var(--ink-3)" fontFamily="var(--font-mono)">{t}</text>
-        </g>
-      ))}
-      {months.map((m, i) => {
-        if (i % 3 !== 0 && i !== months.length - 1) return null;
-        return <text key={i} x={x(i)} y={H - 10} textAnchor="middle" fontSize="10" fill="var(--ink-3)">{m}</text>;
-      })}
-      <line x1={x(months.length - 1)} x2={x(months.length - 1)} y1={PT} y2={H - PB}
-            stroke="var(--ink-4)" strokeDasharray="3 3" strokeWidth="1" />
-      <text x={x(months.length - 1) + 6} y={PT + 12} fontSize="10" fill="var(--ink-3)">วันนี้</text>
-      <path d={bandPath} fill="var(--teal)" opacity="0.08" />
-      <path d={path(forecastAsia, asia.length - 1)} fill="none" stroke="#A29A88" strokeWidth="1.6" strokeDasharray="4 4" />
-      <path d={path(scg)}  fill="none" stroke="#5B7A3A" strokeWidth="1.8" />
-      <path d={path(rung)} fill="none" stroke="#B08938" strokeWidth="1.8" />
-      <path d={path(asia)} fill="none" stroke="#1F4D40" strokeWidth="2.2" />
-      <circle cx={x(asia.length - 1)} cy={y(asia[asia.length - 1])} r="3.5" fill="#1F4D40" />
-    </svg>
-  );
-}

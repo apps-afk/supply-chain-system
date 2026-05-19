@@ -47,11 +47,7 @@ function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
 
 function ensureMem() {
   if (!globalThis.__ieWorkspace) globalThis.__ieWorkspace = deepClone(DEFAULTS);
-  if (!globalThis.__ieDsar) {
-    globalThis.__ieDsar = [
-      { id: 'dsar_seed_1', applicantEmail: 'somchai@example.com', type: 'access', status: 'pending', createdAt: NOW(), resolvedAt: null, note: 'ขอดูข้อมูลส่วนตัวทั้งหมด' },
-    ];
-  }
+  if (!globalThis.__ieDsar) globalThis.__ieDsar = [];
   if (!globalThis.__ieAuditLog) globalThis.__ieAuditLog = [];
 }
 

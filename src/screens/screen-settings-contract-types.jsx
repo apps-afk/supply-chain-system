@@ -9,16 +9,7 @@ import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, Se
   Auto code: CT-NNN
 */
 
-const CONTRACT_TYPES = [
-  { code:'CT-001', name:'สัญญาก่อสร้างหลัก',           desc:'สัญญารับเหมาก่อสร้างทั้งโครงการ',                  active:true,  count:14, lastUsed:'15 พ.ค.' },
-  { code:'CT-002', name:'สัญญาว่าจ้างผู้รับเหมาช่วง',     desc:'งานเฉพาะส่วน — ฐานราก, โครงสร้าง, สถาปัตยกรรม',  active:true,  count:38, lastUsed:'17 พ.ค.' },
-  { code:'CT-003', name:'สัญญาซื้อขายวัสดุ',             desc:'สัญญาซื้อวัสดุก่อสร้างหลัก',                       active:true,  count:42, lastUsed:'16 พ.ค.' },
-  { code:'CT-004', name:'สัญญาเช่าอุปกรณ์',              desc:'เครื่องจักร นั่งร้าน เครื่องมือก่อสร้าง',          active:true,  count:8,  lastUsed:'10 พ.ค.' },
-  { code:'CT-005', name:'สัญญาบริการ',                   desc:'งานสำรวจ ออกแบบ ที่ปรึกษา',                       active:true,  count:6,  lastUsed:'2 พ.ค.' },
-  { code:'CT-006', name:'สัญญาว่าจ้างงานติดตั้ง',         desc:'ติดตั้งระบบไฟฟ้า ประปา ปรับอากาศ',               active:true,  count:18, lastUsed:'14 พ.ค.' },
-  { code:'CT-007', name:'บันทึกข้อตกลง (MOU)',            desc:'ข้อตกลงความร่วมมือเบื้องต้น',                     active:true,  count:4,  lastUsed:'28 เม.ย.' },
-  { code:'CT-008', name:'สัญญาจ้างเหมาช่วงรายวัน',        desc:'ค่าแรงเฉพาะกิจ',                                    active:false, count:2,  lastUsed:'15 ม.ค.' },
-];
+const CONTRACT_TYPES = [];
 
 export function ScreenSettingsContractTypes({ go }) {
   const [q, setQ] = useState('');
@@ -86,7 +77,11 @@ export function ScreenSettingsContractTypes({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(t => (
+            {filtered.length === 0 ? (
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล — คลิก "เพิ่มประเภท" เพื่อสร้างรายการแรก
+              </td></tr>
+            ) : filtered.map(t => (
               <tr key={t.code}>
                 <td className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{t.code}</td>
                 <td style={{ fontWeight:500 }}>{t.name}</td>

@@ -119,23 +119,23 @@ export function Sidebar({ current, onNav }) {
 
       <div className="side-group">
         <div className="side-group-label">งานหลัก</div>
-        <Item id="rfq"      icon="rfq"      label="ใบขอเสนอราคา (RFQ)" count="24" />
+        <Item id="rfq"      icon="rfq"      label="ใบขอเสนอราคา (RFQ)" />
         <Item id="compare"  icon="compare"  label="เปรียบเทียบราคา" />
-        <Item id="pricedb"  icon="pricedb"  label="ฐานข้อมูลราคา" count="1,284" />
-        <Item id="supplierdb" icon="truck"  label="ฐานข้อมูลผู้ขาย" count="12" />
-        <Item id="contract" icon="contract" label="สัญญา" count="47" />
+        <Item id="pricedb"  icon="pricedb"  label="ฐานข้อมูลราคา" />
+        <Item id="supplierdb" icon="truck"  label="ฐานข้อมูลผู้ขาย" />
+        <Item id="contract" icon="contract" label="สัญญา" />
       </div>
 
       <div className="side-group">
         <div className="side-group-label">ตั้งค่า · ข้อมูลหลัก</div>
-        <Item id="projects"       icon="folder"    label="โครงการ" count="8" />
-        <Item id="project-types"  icon="folder"    label="ประเภทโครงการ" count="6" />
-        <Item id="suppliers"      icon="truck"     label="ผู้ขาย/ผู้รับเหมา" count="13" />
-        <Item id="materials"      icon="box"       label="วัสดุก่อสร้าง" count="7" />
-        <Item id="subcontracts"   icon="hammer"    label="งานจ้างเหมา" count="7" />
-        <Item id="contract-types" icon="fileCheck" label="ประเภทสัญญา" count="8" />
-        <Item id="units"          icon="ruler"     label="หน่วยนับ" count="24" />
-        <Item id="approval-roles" icon="fileCheck" label="ตำแหน่งผู้อนุมัติ" count="5" />
+        <Item id="projects"       icon="folder"    label="โครงการ" />
+        <Item id="project-types"  icon="folder"    label="ประเภทโครงการ" />
+        <Item id="suppliers"      icon="truck"     label="ผู้ขาย/ผู้รับเหมา" />
+        <Item id="materials"      icon="box"       label="วัสดุก่อสร้าง" />
+        <Item id="subcontracts"   icon="hammer"    label="งานจ้างเหมา" />
+        <Item id="contract-types" icon="fileCheck" label="ประเภทสัญญา" />
+        <Item id="units"          icon="ruler"     label="หน่วยนับ" />
+        <Item id="approval-roles" icon="fileCheck" label="ตำแหน่งผู้อนุมัติ" />
       </div>
 
       {/* Bottom group: admin functions — pushed to bottom via marginTop:auto.

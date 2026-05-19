@@ -13,16 +13,7 @@ import { PROJECT_TYPES_DATA } from './screen-settings-project-types';
   - Bulk Excel template support
 */
 
-const PROJECT_DATA = [
-  { code:'IE-LV01', short:'LV01', name:'Initial Living บางนา',     type:'Townhome', status:'Active', units:48,  start:'2024-08-15', contracts:18 },
-  { code:'IE-LV04', short:'LV04', name:'Initial Living รังสิต',     type:'Townhome', status:'Active', units:64,  start:'2024-10-01', contracts:22 },
-  { code:'IE-VL02', short:'VL02', name:'Initial Villa',              type:'Villa',    status:'Active', units:18,  start:'2024-12-20', contracts:8 },
-  { code:'IE-TH03', short:'TH03', name:'Initial Town',               type:'Townhome', status:'Active', units:32,  start:'2025-01-10', contracts:14 },
-  { code:'IE-LV02', short:'LV02', name:'Initial Living ลาดพร้าว',    type:'Townhome', status:'Active', units:42,  start:'2025-06-01', contracts:0 },
-  { code:'IE-CD05', short:'CD05', name:'Initial Condo อ่อนนุช',      type:'Condo',    status:'Active', units:124, start:'2025-09-01', contracts:0 },
-  { code:'IE-VL01', short:'VL01', name:'Initial Villa หัวหิน',       type:'Villa',    status:'Closed', units:8,   start:'2023-05-10', contracts:38 },
-  { code:'IE-LV03', short:'LV03', name:'Initial Living ปทุมวัน',     type:'Townhome', status:'Closed', units:24,  start:'2022-11-05', contracts:32 },
-];
+const PROJECT_DATA = [];
 
 const SAMPLE_PROJECT_ROWS = [
   { short:'LV05', name:'Initial Living สาทร',   type:'Townhome', units:36, start:'2025-08-01', status:'Active' },
@@ -168,7 +159,11 @@ export function ScreenSettingsProjects({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(p => (
+            {filtered.length === 0 ? (
+              <tr><td colSpan={9} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล — คลิก "เพิ่มโครงการ" เพื่อสร้างรายการแรก
+              </td></tr>
+            ) : filtered.map(p => (
               <tr key={p.code}>
                 <td>
                   <span style={{

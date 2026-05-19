@@ -8,14 +8,7 @@ import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, Se
   Single-level master — used by Projects page to pick type
 */
 
-export const PROJECT_TYPES_DATA = [
-  { code:'PT-001', name:'Townhome',         desc:'ทาวน์โฮม / ทาวน์เฮ้าส์',          status:'Active',     projects:3 },
-  { code:'PT-002', name:'Villa',            desc:'บ้านเดี่ยวระดับพรีเมียม',          status:'Active',     projects:2 },
-  { code:'PT-003', name:'Condo',            desc:'อาคารชุดพักอาศัย',                status:'Active',     projects:1 },
-  { code:'PT-004', name:'Detached House',   desc:'บ้านเดี่ยว',                       status:'Active',     projects:0 },
-  { code:'PT-005', name:'Mixed-use',        desc:'พักอาศัยและพาณิชย์',              status:'Active',     projects:0 },
-  { code:'PT-006', name:'Home Office',      desc:'บ้านพร้อมพื้นที่สำนักงาน',         status:'Non-Active', projects:0 },
-];
+export const PROJECT_TYPES_DATA = [];
 
 export function ScreenSettingsProjectTypes({ go }) {
   const [q, setQ] = useState('');
@@ -76,7 +69,11 @@ export function ScreenSettingsProjectTypes({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(p => (
+            {filtered.length === 0 ? (
+              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล — คลิก "เพิ่มประเภท" เพื่อสร้างรายการแรก
+              </td></tr>
+            ) : filtered.map(p => (
               <tr key={p.code}>
                 <td className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{p.code}</td>
                 <td style={{ fontWeight:500 }}>{p.name}</td>

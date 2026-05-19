@@ -1,14 +1,22 @@
 'use client';
 import React from 'react';
-import { Icons, Chip, Stat, Delta, Spark, Av, money, InitialEstateLogo } from '../lib/shell';
+import { useSession } from 'next-auth/react';
+import { Icons, Stat, InitialEstateLogo } from '../lib/shell';
+
+const MONTHS_TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
 export function ScreenDashboard({ go }) {
+  const { data: session } = useSession();
+  const userName = session?.user?.name || session?.user?.email?.split('@')[0] || 'ผู้ใช้งาน';
+  const now = new Date();
+  const monthLabel = `${MONTHS_TH[now.getMonth()]} ${now.getFullYear() + 543}`;
+
   return (
     <div className="page">
       <div className="page-head">
         <div className="page-title">
-          <div className="eyebrow">ภาพรวม · พฤษภาคม 2568</div>
-          <h1 className="h-display">สวัสดี นวพร —<br/>มีงานที่ต้องดูวันนี้ <span style={{color:'var(--ink-3)'}}>4 รายการ</span></h1>
+          <div className="eyebrow">ภาพรวม · {monthLabel}</div>
+          <h1 className="h-display">สวัสดี {userName} —<br/>ยินดีต้อนรับสู่ระบบจัดซื้อ ซัพพลายเชน</h1>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
           <InitialEstateLogo width={120} style={{ opacity: 0.82 }} />
@@ -21,10 +29,10 @@ export function ScreenDashboard({ go }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0, borderTop: '1px solid var(--rule)', borderBottom: '1px solid var(--rule)', padding: '28px 0' }}>
         {[
-          { label: 'ราคาในระบบทั้งหมด', value: '1,284', unit: 'รายการ', sub: '+38 รายการ ในสัปดาห์นี้' },
-          { label: 'ใบขอราคาที่กำลังดำเนินการ', value: '12', unit: '/ 24 ใบ', sub: '6 ใบรอผู้ขายตอบกลับ' },
-          { label: 'สัญญาที่ใช้งานอยู่', value: '47', unit: 'ฉบับ', sub: 'มูลค่ารวม ฿284.6 ล้าน' },
-          { label: 'เงินประกันคงเหลือ', value: '14.2', unit: 'ล้านบาท', sub: 'จะคืน 8 ฉบับใน 90 วัน' },
+          { label: 'ราคาในระบบทั้งหมด',            value: '0', unit: 'รายการ', sub: 'ยังไม่มีข้อมูล' },
+          { label: 'ใบขอราคาที่กำลังดำเนินการ',     value: '0', unit: 'ใบ',     sub: 'ยังไม่มีรายการ' },
+          { label: 'สัญญาที่ใช้งานอยู่',             value: '0', unit: 'ฉบับ',    sub: 'ยังไม่มีรายการ' },
+          { label: 'เงินประกันคงเหลือ',              value: '0', unit: 'บาท',    sub: 'ยังไม่มีรายการ' },
         ].map((s, i) => (
           <div key={i} style={{ paddingLeft: i === 0 ? 0 : 32, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
             <Stat {...s} />
@@ -33,135 +41,39 @@ export function ScreenDashboard({ go }) {
       </div>
 
       <section style={{ marginTop: 56 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 20 }}>
-          <h2 className="h-section">ต้องดูวันนี้</h2>
-          <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>เรียงตามความเร่งด่วน</span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          <AttentionItem tag="สัญญาใกล้หมดอายุ" tone="warn" title="CT-2024-018 · งานติดตั้งระบบไฟฟ้า บางนา เฟส 2" meta="หจก. รุ่งเรืองไฟฟ้า · หมดอายุ 14 มิ.ย. 2568" right="28 วัน" onClick={() => go('contract-detail')} />
-          <AttentionItem tag="ราคาผิดปกติ" tone="err" title="เหล็กเส้น DB12 สูงขึ้น +18.4% จากเดือนก่อน" meta="ดึงจาก RFQ-2025-019 · บริษัท เอเชียสตีล จำกัด" right="ตรวจสอบ" onClick={() => go('pricedb-detail')} />
-          <AttentionItem tag="ใบขอราคารออัปโหลด" tone="info" title="RFQ-2025-021 · งานก่อสร้างฐานราก ลาดพร้าว" meta="ผู้ขายส่งใบเสนอราคาแล้ว 2 วัน — รอบันทึกเข้าระบบ" right="อัปโหลด" onClick={() => go('rfq-confirm')} />
-          <AttentionItem tag="ราคาไม่ได้อัปเดต" tone="info" title="กระเบื้องหลังคา CPAC โมเนียร์" meta="อัปเดตล่าสุด 9 ธ.ค. 2567 — เกิน 6 เดือน" right="ขอใบเสนอราคา" onClick={() => go('rfq-create')} />
+        <h2 className="h-section">ต้องดูวันนี้</h2>
+        <div className="card" style={{ marginTop: 16, padding: '60px 24px', textAlign: 'center', color: 'var(--ink-3)' }}>
+          <div style={{ fontSize: 14 }}>ยังไม่มีรายการที่ต้องดำเนินการ</div>
+          <div style={{ fontSize: 12, marginTop: 6 }}>ระบบจะแจ้งเตือนเมื่อมีสัญญาใกล้หมดอายุ, ราคาผิดปกติ, หรือใบขอราคารอการอนุมัติ</div>
         </div>
       </section>
 
-      <section style={{ marginTop: 64 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 20 }}>
+      <section style={{ marginTop: 56 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>
             <h2 className="h-section">การเคลื่อนไหวของราคา</h2>
             <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>วัสดุที่ราคาเปลี่ยนแปลงมากที่สุดในรอบ 30 วัน</p>
           </div>
           <button className="btn ghost" onClick={() => go('pricedb')}>ดูฐานข้อมูลราคาทั้งหมด {Icons.chevronR}</button>
         </div>
-        <div className="card" style={{ padding: 0 }}>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th style={{ width: '32%' }}>วัสดุ</th>
-                <th>หมวด</th>
-                <th>ผู้ขายราคาต่ำสุด</th>
-                <th className="num-col">ราคาปัจจุบัน</th>
-                <th className="num-col">เทียบเดือน</th>
-                <th className="num-col">เทียบปี</th>
-                <th>แนวโน้ม 6 เดือน</th>
-              </tr>
-            </thead>
-            <tbody>
-              <PriceRow name="เหล็กเส้น DB12" spec="มอก. 24-2559 · เส้น" cat="งานโครงสร้าง" supplier="เอเชียสตีล" supkind="aw" price={245} mom="+18.4%" momDir="up" yoy="+22.1%" yoyDir="up" spark={[140,148,151,150,165,172,180,195,210,228,240,245]} flag="err" onClick={() => go('pricedb-detail')} />
-              <PriceRow name="ปูนซีเมนต์ ตราช้าง" spec="ปอร์ตแลนด์ · ถุง 50 กก." cat="งานโครงสร้าง" supplier="SCG Distribution" supkind="sc" price={165} mom="+1.9%" momDir="up" yoy="+3.2%" yoyDir="up" spark={[155,158,159,160,160,161,162,162,163,164,164,165]} />
-              <PriceRow name="กระเบื้องเซรามิค 60×60" spec="Grade A · ตร.ม." cat="งานพื้น-ผนัง" supplier="ไทยเซรามิค" supkind="default" price={285} mom="−4.2%" momDir="down" yoy="−1.1%" yoyDir="down" spark={[298,302,300,298,295,294,292,290,290,288,287,285]} />
-              <PriceRow name="อิฐมวลเบา Q-CON" spec="7.5×20×60 cm · ก้อน" cat="งานก่ออิฐ-ฉาบปูน" supplier="Q-CON Direct" supkind="default" price={28} mom="0.0%" momDir="flat" yoy="+5.2%" yoyDir="up" spark={[26.6,26.8,27,27.2,27.5,27.8,28,28,28,28,28,28]} />
-              <PriceRow name="สีน้ำพลาสติก TOA SuperShield" spec="ภายนอก · แกลลอน" cat="งานสี" supplier="TOA Distribution" supkind="default" price={1180} mom="+2.6%" momDir="up" yoy="+8.7%" yoyDir="up" spark={[1085,1100,1110,1115,1130,1140,1145,1150,1155,1165,1170,1180]} />
-            </tbody>
-          </table>
+        <div className="card" style={{ padding: '60px 24px', textAlign: 'center', color: 'var(--ink-3)' }}>
+          <div style={{ fontSize: 14 }}>ยังไม่มีข้อมูลราคา</div>
+          <div style={{ fontSize: 12, marginTop: 6 }}>เพิ่มราคาใน "ฐานข้อมูลราคา" หรือสร้างใบขอราคาเพื่อเริ่มเก็บข้อมูล</div>
         </div>
       </section>
 
-      <section style={{ marginTop: 64, display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 24 }}>
-        <div className="card" style={{ padding: 0 }}>
-          <div style={{ padding: '20px 24px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', borderBottom: '1px solid var(--rule)' }}>
-            <h3 className="h-card">ใบขอราคาล่าสุด</h3>
-            <button className="btn ghost sm" onClick={() => go('rfq')}>ดูทั้งหมด {Icons.chevronR}</button>
-          </div>
-          <table className="tbl">
-            <tbody>
-              {[
-                { no: 'RFQ-2025-024', title: 'งานปูกระเบื้องชั้น 2', sup: 'หจก. กระเบื้องช่าง', kind: 'default', state: 'sent', stateLabel: 'ส่งแล้ว', date: '17 พ.ค.' },
-                { no: 'RFQ-2025-023', title: 'เหล็กรูปพรรณ H-Beam', sup: 'เอเชียสตีล', kind: 'aw', state: 'recv', stateLabel: 'รับใบเสนอราคา', date: '16 พ.ค.' },
-                { no: 'RFQ-2025-022', title: 'สุขภัณฑ์ COTTO', sup: 'COTTO Wholesale', kind: 'default', state: 'closed', stateLabel: 'ปิดงาน', date: '15 พ.ค.' },
-                { no: 'RFQ-2025-021', title: 'งานฐานราก ลาดพร้าว', sup: 'พี.ที. คอนสตรัคชั่น', kind: 'default', state: 'recv', stateLabel: 'รับใบเสนอราคา', date: '14 พ.ค.' },
-              ].map((r, i) => (
-                <tr key={i}>
-                  <td style={{ width: '24%' }}><div className="font-mono" style={{ fontSize: 12, color: 'var(--ink-2)' }}>{r.no}</div></td>
-                  <td>{r.title}</td>
-                  <td><span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}><Av initials={r.sup.slice(0, 2)} kind={r.kind} /><span style={{ fontSize: 12.5 }}>{r.sup}</span></span></td>
-                  <td><Chip kind={r.state}>{r.stateLabel}</Chip></td>
-                  <td style={{ fontSize: 12, color: 'var(--ink-3)' }}>{r.date}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <section style={{ marginTop: 56 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
+          <h2 className="h-section">ใบขอราคาล่าสุด</h2>
+          <button className="btn ghost sm" onClick={() => go('rfq')}>ดูทั้งหมด {Icons.chevronR}</button>
         </div>
-
-        <div className="card">
-          <h3 className="h-card" style={{ marginBottom: 16 }}>ความเร็วในการจัดซื้อ</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <VelocityRow label="เวลาเฉลี่ยที่ผู้ขายตอบใบขอราคา" value="3.2 วัน" bar={0.42} hint="เป้าหมาย: 5 วัน" />
-            <VelocityRow label="ใบขอราคาที่ปิดภายใน 14 วัน" value="78%" bar={0.78} hint="ดีขึ้น +6% เทียบเดือนก่อน" />
-            <VelocityRow label="ราคาเข้าฐานข้อมูลอัตโนมัติ" value="92%" bar={0.92} hint="จากใบขอราคาที่ปิดงาน" />
-            <VelocityRow label="สัญญาส่งให้ AI ก่อนฝ่ายกฎหมาย" value="64%" bar={0.64} hint="เป้าหมาย: 90%" />
-          </div>
-          <hr className="hr" style={{ margin: '20px 0' }} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div className="eyebrow" style={{ marginBottom: 4 }}>AI พยากรณ์ — ไตรมาสหน้า</div>
-              <div style={{ fontSize: 13, color: 'var(--ink-2)' }}>คาดราคาเหล็กยังขาขึ้น 8–12% — แนะนำล็อกราคาไว้ก่อน</div>
-            </div>
-            <Chip kind="ai">AI</Chip>
-          </div>
+        <div className="card" style={{ padding: '60px 24px', textAlign: 'center', color: 'var(--ink-3)' }}>
+          <div style={{ fontSize: 14 }}>ยังไม่มีใบขอราคา</div>
+          <button className="btn primary sm" style={{ marginTop: 14 }} onClick={() => go('rfq-create')}>
+            {Icons.plus} สร้างใบขอราคาแรก
+          </button>
         </div>
       </section>
-    </div>
-  );
-}
-
-function AttentionItem({ tag, tone, title, meta, right, onClick }) {
-  const tones = { warn: 'var(--ochre)', err: 'var(--clay)', info: 'var(--teal)' };
-  return (
-    <div onClick={onClick} style={{ background: 'var(--surface)', border: '1px solid var(--rule)', borderLeft: `3px solid ${tones[tone]}`, borderRadius: 6, padding: '18px 20px', cursor: 'pointer', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-      <div style={{ flex: 1 }}>
-        <div className="eyebrow" style={{ color: tones[tone], marginBottom: 6 }}>{tag}</div>
-        <div style={{ fontSize: 14, fontWeight: 500, lineHeight: 1.4, marginBottom: 4 }}>{title}</div>
-        <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>{meta}</div>
-      </div>
-      <div style={{ fontSize: 12, color: 'var(--ink-2)', display: 'flex', alignItems: 'center', gap: 4 }}>{right} {Icons.chevronR}</div>
-    </div>
-  );
-}
-
-function PriceRow({ name, spec, cat, supplier, supkind, price, mom, momDir, yoy, yoyDir, spark, flag, onClick }) {
-  return (
-    <tr onClick={onClick} style={{ cursor: 'pointer' }} className={flag ? `row-flag-${flag}` : ''}>
-      <td><div style={{ fontWeight: 500 }}>{name}</div><div style={{ fontSize: 11.5, color: 'var(--ink-3)', marginTop: 2 }}>{spec}</div></td>
-      <td style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{cat}</td>
-      <td><span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}><Av initials={supplier.slice(0, 2)} kind={supkind} /><span style={{ fontSize: 12.5 }}>{supplier}</span></span></td>
-      <td className="num-col num" style={{ fontWeight: 500 }}>{money(price)}</td>
-      <td className="num-col"><Delta pct={mom} dir={momDir} /></td>
-      <td className="num-col"><Delta pct={yoy} dir={yoyDir} /></td>
-      <td><Spark data={spark} w={110} h={28} color={momDir === 'down' ? 'var(--moss)' : momDir === 'up' ? 'var(--clay)' : 'var(--ink-4)'} /></td>
-    </tr>
-  );
-}
-
-function VelocityRow({ label, value, bar, hint }) {
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-        <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{label}</span>
-        <span className="num" style={{ fontSize: 14, fontWeight: 500 }}>{value}</span>
-      </div>
-      <div className="bar"><i style={{ width: `${bar*100}%` }} /></div>
-      <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 4 }}>{hint}</div>
     </div>
   );
 }
