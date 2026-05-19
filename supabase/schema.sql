@@ -217,6 +217,22 @@ create table if not exists contracts (
 create index if not exists contracts_status_idx on contracts (status);
 create index if not exists contracts_supplier_idx on contracts (supplier_id);
 
+create table if not exists comparisons (
+  id          text  primary key,
+  no          text  unique not null,
+  title       text  not null,
+  project_id  text  references projects(id) on delete set null,
+  status      text  default 'draft' check (status in ('draft','finalized','archived')),
+  items_json  jsonb default '[]'::jsonb,
+  suppliers_json jsonb default '[]'::jsonb,
+  total_low   numeric default 0,
+  total_high  numeric default 0,
+  notes       text  default '',
+  created_by  text,
+  created_at  timestamptz default now()
+);
+create index if not exists comparisons_status_idx on comparisons (status);
+
 -- ============================================================
 -- File attachments (Google Drive metadata)
 -- Actual files live in Google Drive; this table maps them to entities.
