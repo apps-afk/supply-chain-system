@@ -1,67 +1,67 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icons, Av } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, MultiSelectChips, BulkExcelButton } from '../lib/settings-shared';
-import { MATERIAL_CATEGORIES } from './screen-settings-materials';
-import { SUBCONTRACT_CATEGORIES } from './screen-settings-subcontracts';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
 
 /*
   Settings → Supplier List
-  - Multi-select Category (sourced from Material + SubContract category masters)
-  - No rating (removed)
-  - Status: Active / Blacklist
-  - Summary card: supplier count only
-  - Bulk Excel
-  - Categories hidden in list — visible in expanded "ดูเพิ่มเติม" row
+  Data is now stored in DB and fetched from /api/suppliers.
+  Whitelisted fields:
+    code, name, type, contact_name, email, phone,
+    address, tax_id, payment_terms, rating, notes, active
 */
 
-const SUPPLIER_DATA = [];
-
-const SAMPLE_SUPPLIER_ROWS = [
-  { name:'บจก. ทรัพย์ก่อสร้าง',  tax:'0105560123456', address:'…กรุงเทพฯ', categories:'งานโครงสร้าง',          contactName:'คุณสมศักดิ์', contactPhone:'081-111-2222', contactEmail:'somsak@example.com', credit:'30 วัน' },
-  { name:'หจก. วัสดุไทย',         tax:'0103559876543', address:'…นนทบุรี',  categories:'งานพื้น-ผนัง,งานสี',  contactName:'คุณวิภา',     contactPhone:'089-333-4444', contactEmail:'wipha@example.com',  credit:'45 วัน' },
-  { name:'หจก. ช่างไฟทอง',        tax:'0103562444555', address:'…นครปฐม',   categories:'งานระบบไฟฟ้า',          contactName:'ช่างทอง',     contactPhone:'081-555-6666', contactEmail:'-',                  credit:'งวด'    },
-];
-
-const SUPPLIER_BULK_COLUMNS = [
-  { key:'name',          name:'ชื่อบริษัท',     required:true },
-  { key:'tax',           name:'Tax ID',         required:true },
-  { key:'address',       name:'ที่อยู่',         required:true },
-  { key:'categories',    name:'หมวด (คั่นด้วย ,)', required:true },
-  { key:'contactName',   name:'ชื่อผู้ติดต่อ',    required:true },
-  { key:'contactPhone',  name:'โทรศัพท์',        required:true },
-  { key:'contactEmail',  name:'อีเมล',           required:false },
-  { key:'credit',        name:'เครดิตเทอม',      required:false },
-];
-
-// Composite category list — pulled from Material + SubContract category masters
-function getCategoryOptions() {
-  const matCats = (MATERIAL_CATEGORIES || []).map(c => c.name);
-  const subCats = (SUBCONTRACT_CATEGORIES || []).map(c => c.name);
-  // Merge & dedupe, preserving order
-  const seen = new Set();
-  const merged = [];
-  [...matCats, ...subCats].forEach(c => {
-    if (!seen.has(c)) { seen.add(c); merged.push(c); }
-  });
-  return merged.length ? merged : ['งานโครงสร้าง','งานก่ออิฐ-ฉาบปูน','งานหลังคา','งานพื้น-ผนัง','งานสุขภัณฑ์','งานสี','งานระบบไฟฟ้า'];
-}
-
 export function ScreenSettingsSuppliers({ go }) {
-  const [q, setQ] = useState('');
-  const [filter, setFilter] = useState('ทั้งหมด');
-  const [addOpen, setAddOpen] = useState(false);
+  const [items, setItems]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr]         = useState('');
+  const [q, setQ]             = useState('');
+  const [filter, setFilter]   = useState('ทั้งหมด');
+  const [editing, setEditing] = useState(null); // null | 'new' | object
   const [expanded, setExpanded] = useState(null);
 
-  const filtered = SUPPLIER_DATA.filter(s => {
-    if (filter !== 'ทั้งหมด' && s.status !== filter) return false;
+  async function load() {
+    setLoading(true); setErr('');
+    try {
+      const res = await fetch('/api/suppliers');
+      const data = await res.json();
+      if (!res.ok) setErr(data.error || 'โหลดข้อมูลไม่สำเร็จ');
+      else setItems(data.items || []);
+    } catch {
+      setErr('เครือข่ายขัดข้อง');
+    }
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function remove(s) {
+    if (!confirm(`ลบ Supplier "${s.name}"?`)) return;
+    const res = await fetch('/api/suppliers', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: s.id }),
+    });
+    if (!res.ok) { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
+    load();
+  }
+
+  const filtered = items.filter(s => {
+    const status = s.active ? 'Active' : 'Non-Active';
+    if (filter !== 'ทั้งหมด' && status !== filter) return false;
     if (q) {
       const v = q.toLowerCase();
-      const hit = s.name.toLowerCase().includes(v) || s.code.toLowerCase().includes(v) || s.tax.includes(q) || s.contact.name.toLowerCase().includes(v);
+      const hit =
+        s.name?.toLowerCase().includes(v) ||
+        s.code?.toLowerCase().includes(v) ||
+        s.tax_id?.includes(q) ||
+        s.contact_name?.toLowerCase().includes(v);
       if (!hit) return false;
     }
     return true;
   });
+
+  const activeCount   = items.filter(s => s.active).length;
+  const inactiveCount = items.length - activeCount;
 
   return (
     <div className="page">
@@ -70,31 +70,28 @@ export function ScreenSettingsSuppliers({ go }) {
           <div className="eyebrow">Settings · Master Data</div>
           <h1 className="h-display">Supplier List</h1>
           <p style={{ fontSize:14, color:'var(--ink-3)', margin:'6px 0 0', maxWidth:640 }}>
-            ทะเบียนคู่ค้าและผู้รับเหมา · Auto-Run รหัส <span className="font-mono" style={{ color:'var(--ink-2)' }}>SUP-NNNNN</span> ·
-            หมวดดึงจาก Material และ SubContract
+            ทะเบียนคู่ค้าและผู้รับเหมา
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <BulkExcelButton entity="Supplier" columns={SUPPLIER_BULK_COLUMNS} sampleRows={SAMPLE_SUPPLIER_ROWS} />
-          <button className="btn">{Icons.download} Export</button>
-          <button className="btn primary" onClick={() => setAddOpen(true)}>{Icons.plus} เพิ่ม Supplier</button>
+          <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่ม Supplier</button>
         </div>
       </div>
 
       <SettingsStatStrip stats={[
         {
           label:'Supplier ทั้งหมด',
-          value: SUPPLIER_DATA.length,
+          value: items.length,
           sub: <span style={{ display:'inline-flex', gap:14, fontSize:12 }}>
             <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
               <span style={{ width:6, height:6, borderRadius:999, background:'var(--moss)' }} />
               <span style={{ color:'var(--ink-3)' }}>Active</span>
-              <strong style={{ color:'var(--ink)' }}>{SUPPLIER_DATA.filter(s=>s.status==='Active').length}</strong>
+              <strong style={{ color:'var(--ink)' }}>{activeCount}</strong>
             </span>
             <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-              <span style={{ width:6, height:6, borderRadius:999, background:'var(--clay)' }} />
-              <span style={{ color:'var(--ink-3)' }}>Blacklist</span>
-              <strong style={{ color:'var(--ink)' }}>{SUPPLIER_DATA.filter(s=>s.status==='Blacklist').length}</strong>
+              <span style={{ width:6, height:6, borderRadius:999, background:'var(--ink-4)' }} />
+              <span style={{ color:'var(--ink-3)' }}>Non-Active</span>
+              <strong style={{ color:'var(--ink)' }}>{inactiveCount}</strong>
             </span>
           </span>,
         },
@@ -102,7 +99,7 @@ export function ScreenSettingsSuppliers({ go }) {
 
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16 }}>
         <div style={{ display:'flex', gap:4 }}>
-          {['ทั้งหมด','Active','Blacklist'].map(f => (
+          {['ทั้งหมด','Active','Non-Active'].map(f => (
             <button key={f} onClick={() => setFilter(f)} className="btn sm" style={{
               background: filter === f ? 'var(--ink)' : 'transparent',
               color: filter === f ? 'var(--paper)' : 'var(--ink-2)',
@@ -119,6 +116,10 @@ export function ScreenSettingsSuppliers({ go }) {
         </div>
       </div>
 
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
+
       <div className="card" style={{ padding:0 }}>
         <table className="tbl">
           <thead>
@@ -129,78 +130,71 @@ export function ScreenSettingsSuppliers({ go }) {
               <th>ผู้ติดต่อหลัก</th>
               <th>เครดิต</th>
               <th>สถานะ</th>
-              <th style={{ width:120, textAlign:'right' }}></th>
+              <th style={{ width:160, textAlign:'right' }}></th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 && (
+            {loading ? (
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+            ) : filtered.length === 0 ? (
               <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล — คลิก "เพิ่ม Supplier" เพื่อสร้างรายการแรก
               </td></tr>
-            )}
-            {filtered.map(s => (
-              <React.Fragment key={s.code}>
+            ) : filtered.map(s => (
+              <React.Fragment key={s.id}>
                 <tr>
                   <td className="font-mono" style={{ fontSize:11.5, color:'var(--ink-2)', fontWeight:500 }}>{s.code}</td>
                   <td>
                     <div style={{ display:'inline-flex', gap:10, alignItems:'center' }}>
-                      <Av initials={s.name.slice(0,2)} kind={s.kind} />
+                      <Av initials={(s.name || '').slice(0,2)} kind={s.type} />
                       <span style={{ fontWeight:500 }}>{s.name}</span>
                     </div>
                   </td>
-                  <td className="font-mono" style={{ fontSize:11.5, color:'var(--ink-3)' }}>{s.tax}</td>
+                  <td className="font-mono" style={{ fontSize:11.5, color:'var(--ink-3)' }}>{s.tax_id || '—'}</td>
                   <td>
-                    <div style={{ fontSize:12.5 }}>{s.contact.name}</div>
-                    <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>{s.contact.phone}</div>
+                    <div style={{ fontSize:12.5 }}>{s.contact_name || '—'}</div>
+                    <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>{s.phone || ''}</div>
                   </td>
-                  <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{s.credit}</td>
-                  <td><StatusPill status={s.status} /></td>
+                  <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{s.payment_terms || '—'}</td>
+                  <td><StatusPill status={s.active ? 'Active' : 'Non-Active'} /></td>
                   <td style={{ textAlign:'right' }}>
                     <button
                       className="btn ghost sm"
-                      onClick={() => setExpanded(expanded === s.code ? null : s.code)}
+                      onClick={() => setExpanded(expanded === s.id ? null : s.id)}
                       style={{ padding:'4px 10px', color:'var(--ink-2)', fontSize:11.5 }}
                     >
-                      {expanded === s.code ? 'ซ่อน' : 'ดูเพิ่มเติม'}
-                      <span style={{ display:'inline-block', marginLeft:4, transform: expanded === s.code ? 'rotate(180deg)':'rotate(0)', transition:'transform 0.15s' }}>
+                      {expanded === s.id ? 'ซ่อน' : 'ดูเพิ่มเติม'}
+                      <span style={{ display:'inline-block', marginLeft:4, transform: expanded === s.id ? 'rotate(180deg)':'rotate(0)', transition:'transform 0.15s' }}>
                         {Icons.chevronD}
                       </span>
                     </button>
+                    <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(s)} title="แก้ไข">{Icons.edit}</button>
+                    <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(s)} title="ลบ">×</button>
                   </td>
                 </tr>
-                {expanded === s.code && (
+                {expanded === s.id && (
                   <tr>
                     <td colSpan={7} style={{ background:'var(--surface-2)', padding:'20px 24px' }}>
                       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1.2fr', gap:32 }}>
                         <div>
                           <div className="eyebrow" style={{ marginBottom:8 }}>ที่อยู่</div>
-                          <div style={{ fontSize:12.5, color:'var(--ink-2)', lineHeight:1.6 }}>{s.address}</div>
+                          <div style={{ fontSize:12.5, color:'var(--ink-2)', lineHeight:1.6 }}>{s.address || '—'}</div>
+                          <div className="eyebrow" style={{ margin:'14px 0 6px' }}>ประเภท</div>
+                          <div style={{ fontSize:12, color:'var(--ink-2)' }}>{s.type || '—'}</div>
                         </div>
                         <div>
                           <div className="eyebrow" style={{ marginBottom:8 }}>ผู้ติดต่อหลัก</div>
                           <div style={{ fontSize:12.5, lineHeight:1.7 }}>
-                            <div style={{ fontWeight:500 }}>{s.contact.name}</div>
-                            <div style={{ color:'var(--ink-3)' }}>{s.contact.role}</div>
-                            <div style={{ color:'var(--ink-2)', marginTop:4 }}>{s.contact.phone}</div>
-                            <div style={{ color:'var(--ink-2)' }}>{s.contact.email}</div>
+                            <div style={{ fontWeight:500 }}>{s.contact_name || '—'}</div>
+                            <div style={{ color:'var(--ink-2)', marginTop:4 }}>{s.phone || ''}</div>
+                            <div style={{ color:'var(--ink-2)' }}>{s.email || ''}</div>
                           </div>
                         </div>
                         <div>
-                          <div className="eyebrow" style={{ marginBottom:8 }}>หมวด</div>
-                          <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-                            {s.categories.map(c => (
-                              <span key={c} style={{
-                                padding:'3px 10px', borderRadius:4,
-                                background:'var(--teal-soft)', color:'var(--teal-ink)',
-                                fontSize:11.5, fontWeight:500,
-                              }}>{c}</span>
-                            ))}
-                          </div>
-                          <div className="eyebrow" style={{ margin:'14px 0 6px' }}>เพิ่มในระบบ</div>
-                          <div style={{ fontSize:12, color:'var(--ink-2)' }}>{s.joined} · {s.rfqs} RFQ</div>
-                          <div style={{ marginTop:12, display:'flex', gap:6 }}>
-                            <button className="btn sm">{Icons.edit} แก้ไข</button>
-                          </div>
+                          <div className="eyebrow" style={{ marginBottom:8 }}>เรตติ้ง</div>
+                          <div style={{ fontSize:13, fontWeight:500 }}>{s.rating != null ? `${s.rating} / 5` : '—'}</div>
+                          <div className="eyebrow" style={{ margin:'14px 0 6px' }}>หมายเหตุ</div>
+                          <div style={{ fontSize:12, color:'var(--ink-2)' }}>{s.notes || '—'}</div>
                         </div>
                       </div>
                     </td>
@@ -212,101 +206,138 @@ export function ScreenSettingsSuppliers({ go }) {
         </table>
       </div>
 
-      {addOpen && <AddSupplierModal onClose={() => setAddOpen(false)} />}
+      {editing && (
+        <SupplierModal
+          item={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function AddSupplierModal({ onClose }) {
-  const catOptions = getCategoryOptions();
+function SupplierModal({ item, onClose, onSaved }) {
+  const isEdit = !!item;
   const [form, setForm] = useState({
-    name:'', tax:'', addressLine:'', district:'', province:'', zip:'',
-    contactName:'', contactRole:'', contactPhone:'', contactEmail:'',
-    categories:[], credit:'30 วัน', status:'Active',
+    code:          item?.code          || '',
+    name:          item?.name          || '',
+    type:          item?.type          || '',
+    contact_name:  item?.contact_name  || '',
+    email:         item?.email         || '',
+    phone:         item?.phone         || '',
+    address:       item?.address       || '',
+    tax_id:        item?.tax_id        || '',
+    payment_terms: item?.payment_terms || '30 วัน',
+    rating:        item?.rating        ?? '',
+    notes:         item?.notes         || '',
+    active:        item?.active !== false,
   });
-  const set = (k,v) => setForm({ ...form, [k]:v });
-  const nextCode = `SUP-${String(SUPPLIER_DATA.length + 1).padStart(5,'0')}`;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState('');
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function save() {
+    setErr('');
+    if (!form.code.trim() || !form.name.trim()) {
+      setErr('กรอกรหัสและชื่อให้ครบ'); return;
+    }
+    setBusy(true);
+    const payload = {
+      code:          form.code,
+      name:          form.name,
+      type:          form.type,
+      contact_name:  form.contact_name,
+      email:         form.email,
+      phone:         form.phone,
+      address:       form.address,
+      tax_id:        form.tax_id,
+      payment_terms: form.payment_terms,
+      rating:        form.rating === '' ? null : Number(form.rating),
+      notes:         form.notes,
+      active:        form.active,
+    };
+    if (isEdit) payload.id = item.id;
+    const res = await fetch('/api/suppliers', {
+      method: isEdit ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) { setErr(data.error || 'บันทึกไม่สำเร็จ'); setBusy(false); return; }
+    setBusy(false);
+    onSaved();
+  }
 
   return (
-    <SettingsModal eyebrow="เพิ่ม Supplier ใหม่" title="ข้อมูล Supplier" onClose={onClose} width={720}>
-      <div style={{
-        padding:'14px 16px', background:'var(--surface-2)',
-        border:'1px solid var(--rule)', borderRadius:6, marginBottom:24,
-        display:'flex', alignItems:'center', gap:16,
-      }}>
-        <div style={{ flex:1 }}>
-          <div className="eyebrow" style={{ marginBottom:4 }}>รหัส Supplier (auto-generate)</div>
-          <div className="font-mono" style={{ fontSize:18, color:'var(--teal)' }}>{nextCode}</div>
-        </div>
-        <div style={{ fontSize:11, color:'var(--ink-3)', textAlign:'right' }}>
-          รูปแบบ <strong>SUP-NNNNN</strong>
-        </div>
-      </div>
+    <SettingsModal eyebrow={isEdit ? 'แก้ไข Supplier' : 'เพิ่ม Supplier ใหม่'} title={isEdit ? item.name : 'Supplier ใหม่'} onClose={onClose} width={720}>
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{err}</div>
+      )}
 
       <div className="eyebrow" style={{ marginBottom:12 }}>ข้อมูลบริษัท</div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:24 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'140px 1fr 1fr', gap:14, marginBottom:24 }}>
+        <SettingsField label="รหัส" required hint="เช่น SUP-00001">
+          <input value={form.code} onChange={e=>set('code', e.target.value)} placeholder="SUP-00001" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
+        </SettingsField>
         <SettingsField label="ชื่อบริษัท" required>
           <input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="เช่น บจก. ทรัพย์ก่อสร้าง" style={settingsInputStyle} />
         </SettingsField>
-        <SettingsField label="Tax ID" required hint="13 หลัก">
-          <input value={form.tax} onChange={e=>set('tax',e.target.value.replace(/\D/g,'').slice(0,13))} placeholder="0105556012345" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
+        <SettingsField label="ประเภท" hint="เช่น Material / SubContract">
+          <input value={form.type} onChange={e=>set('type',e.target.value)} placeholder="Material" style={settingsInputStyle} />
         </SettingsField>
+        <SettingsField label="Tax ID" hint="13 หลัก">
+          <input value={form.tax_id} onChange={e=>set('tax_id',e.target.value.replace(/\D/g,'').slice(0,13))} placeholder="0105556012345" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
+        </SettingsField>
+        <div style={{ gridColumn:'2 / -1' }}>
+          <SettingsField label="ที่อยู่">
+            <input value={form.address} onChange={e=>set('address',e.target.value)} placeholder="เลขที่ / หมู่ / ถนน / ตำบล / อำเภอ / จังหวัด" style={settingsInputStyle} />
+          </SettingsField>
+        </div>
       </div>
 
-      <div className="eyebrow" style={{ marginBottom:12 }}>ที่อยู่</div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:14, marginBottom:14 }}>
-        <SettingsField label="ที่อยู่" required>
-          <input value={form.addressLine} onChange={e=>set('addressLine',e.target.value)} placeholder="เลขที่ / หมู่ / ถนน / ตำบล / อำเภอ" style={settingsInputStyle} />
-        </SettingsField>
-      </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 120px', gap:14, marginBottom:24 }}>
-        <SettingsField label="เขต/อำเภอ">
-          <input value={form.district} onChange={e=>set('district',e.target.value)} style={settingsInputStyle} />
-        </SettingsField>
-        <SettingsField label="จังหวัด">
-          <input value={form.province} onChange={e=>set('province',e.target.value)} style={settingsInputStyle} />
-        </SettingsField>
-        <SettingsField label="รหัสไปรษณีย์">
-          <input value={form.zip} onChange={e=>set('zip',e.target.value.replace(/\D/g,'').slice(0,5))} style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
-        </SettingsField>
-      </div>
-
-      <div className="eyebrow" style={{ marginBottom:12 }}>ผู้ติดต่อหลัก (Primary Contact)</div>
+      <div className="eyebrow" style={{ marginBottom:12 }}>ผู้ติดต่อหลัก</div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:24 }}>
-        <SettingsField label="ชื่อ-นามสกุล" required>
-          <input value={form.contactName} onChange={e=>set('contactName',e.target.value)} placeholder="คุณ…" style={settingsInputStyle} />
+        <SettingsField label="ชื่อ-นามสกุล">
+          <input value={form.contact_name} onChange={e=>set('contact_name',e.target.value)} placeholder="คุณ…" style={settingsInputStyle} />
         </SettingsField>
-        <SettingsField label="ตำแหน่ง">
-          <input value={form.contactRole} onChange={e=>set('contactRole',e.target.value)} placeholder="เช่น Sales Manager" style={settingsInputStyle} />
-        </SettingsField>
-        <SettingsField label="โทรศัพท์" required>
-          <input value={form.contactPhone} onChange={e=>set('contactPhone',e.target.value)} placeholder="08X-XXX-XXXX" style={settingsInputStyle} />
+        <SettingsField label="โทรศัพท์">
+          <input value={form.phone} onChange={e=>set('phone',e.target.value)} placeholder="08X-XXX-XXXX" style={settingsInputStyle} />
         </SettingsField>
         <SettingsField label="อีเมล">
-          <input type="email" value={form.contactEmail} onChange={e=>set('contactEmail',e.target.value)} placeholder="contact@company.com" style={settingsInputStyle} />
+          <input type="email" value={form.email} onChange={e=>set('email',e.target.value)} placeholder="contact@company.com" style={settingsInputStyle} />
         </SettingsField>
-      </div>
-
-      <div className="eyebrow" style={{ marginBottom:12 }}>ข้อมูลการค้า</div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:14, marginBottom:14 }}>
-        <SettingsField label="หมวด (เลือกได้หลายหมวด)" required hint={`ดึงจาก Material และ SubContract · ${catOptions.length} หมวด`}>
-          <MultiSelectChips
-            options={catOptions}
-            value={form.categories}
-            onChange={v => set('categories', v)}
-            placeholder="คลิกหมวดด้านล่างเพื่อเพิ่ม…"
-          />
-        </SettingsField>
-      </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
         <SettingsField label="เครดิตเทอม">
-          <select value={form.credit} onChange={e=>set('credit',e.target.value)} style={settingsInputStyle}>
+          <select value={form.payment_terms} onChange={e=>set('payment_terms',e.target.value)} style={settingsInputStyle}>
             <option>เงินสด</option><option>15 วัน</option><option>30 วัน</option><option>45 วัน</option><option>60 วัน</option><option>งวด</option>
           </select>
         </SettingsField>
-        <SettingsField label="สถานะ">
-          <StatusToggle options={['Active','Blacklist']} value={form.status} onChange={v => set('status', v)} />
+      </div>
+
+      <div className="eyebrow" style={{ marginBottom:12 }}>อื่นๆ</div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+        <SettingsField label="เรตติ้ง" hint="0–5">
+          <input type="number" min={0} max={5} step={0.1} value={form.rating}
+                 onChange={e=>set('rating', e.target.value)} placeholder="เช่น 4.5"
+                 style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
         </SettingsField>
+        <SettingsField label="สถานะ">
+          <StatusToggle options={['Active','Non-Active']} value={form.active ? 'Active' : 'Non-Active'} onChange={v => set('active', v === 'Active')} />
+        </SettingsField>
+        <div style={{ gridColumn:'1 / -1' }}>
+          <SettingsField label="หมายเหตุ">
+            <textarea value={form.notes} onChange={e=>set('notes', e.target.value)}
+                      placeholder="(ไม่บังคับ)"
+                      style={{ ...settingsInputStyle, minHeight:60, resize:'vertical', fontFamily:'inherit' }} />
+          </SettingsField>
+        </div>
+      </div>
+
+      <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:20 }}>
+        <button className="btn" onClick={onClose}>ยกเลิก</button>
+        <button className="btn primary" onClick={save} disabled={busy}>
+          {busy ? 'กำลังบันทึก…' : (isEdit ? 'บันทึก' : 'เพิ่ม')}
+        </button>
       </div>
     </SettingsModal>
   );

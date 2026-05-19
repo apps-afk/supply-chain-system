@@ -1,35 +1,69 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icons } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
 
 /*
   Settings → ตำแหน่งผู้อนุมัติ (Approval Roles)
   Master data driving the sign-off slots on Compare PDFs (and other approval docs).
-  - Auto code AR-NNN
-  - Each role has a display order so PDFs lay them out left→right consistently
+  - Each role has a level (int) so PDFs lay them out left→right consistently
   - Status: Active / Non-Active
   - Minimum recommendation: ≥4 active roles before generating a Compare PDF
+  - Data is now stored in DB and fetched from /api/approval-roles.
 */
 
+// NOTE: stubs kept for backwards compatibility.
+// APPROVAL_ROLES_DATA is now stored in the DB; consumers should migrate to
+// fetching from `/api/approval-roles` directly instead of importing this constant.
 export const APPROVAL_ROLES_DATA = [];
-
-export const getActiveApprovalRoles = () => APPROVAL_ROLES_DATA
-  .filter(r => r.status === 'Active')
-  .sort((a,b) => a.order - b.order);
+export const getActiveApprovalRoles = () => [];
 
 export function ScreenSettingsApprovalRoles({ go }) {
-  const [q, setQ] = useState('');
-  const [filter, setFilter] = useState('ทั้งหมด');
-  const [addOpen, setAddOpen] = useState(false);
+  const [items, setItems]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr]         = useState('');
+  const [q, setQ]             = useState('');
+  const [filter, setFilter]   = useState('ทั้งหมด');
+  const [editing, setEditing] = useState(null); // null | 'new' | object
 
-  const filtered = APPROVAL_ROLES_DATA.filter(r => {
-    if (filter !== 'ทั้งหมด' && r.status !== filter) return false;
-    if (q && !(r.name.includes(q) || r.code.toLowerCase().includes(q.toLowerCase()))) return false;
+  async function load() {
+    setLoading(true); setErr('');
+    try {
+      const res = await fetch('/api/approval-roles');
+      const data = await res.json();
+      if (!res.ok) setErr(data.error || 'โหลดข้อมูลไม่สำเร็จ');
+      else setItems(data.items || []);
+    } catch {
+      setErr('เครือข่ายขัดข้อง');
+    }
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function remove(r) {
+    if (!confirm(`ลบตำแหน่ง "${r.name}"?`)) return;
+    const res = await fetch('/api/approval-roles', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: r.id }),
+    });
+    if (!res.ok) { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
+    load();
+  }
+
+  const filtered = items.filter(r => {
+    const status = r.active ? 'Active' : 'Non-Active';
+    if (filter !== 'ทั้งหมด' && status !== filter) return false;
+    if (q) {
+      const s = q.toLowerCase();
+      if (!(r.name?.toLowerCase().includes(s) || r.code?.toLowerCase().includes(s))) return false;
+    }
     return true;
   });
-  const active = APPROVAL_ROLES_DATA.filter(r => r.status === 'Active').length;
-  const meetsMin = active >= 4;
+  const activeRoles = items.filter(r => r.active);
+  const activeCount = activeRoles.length;
+  const meetsMin = activeCount >= 4;
+  const activeSorted = [...activeRoles].sort((a,b) => (a.level||0) - (b.level||0));
 
   return (
     <div className="page">
@@ -39,17 +73,17 @@ export function ScreenSettingsApprovalRoles({ go }) {
           <h1 className="h-display">ตำแหน่งผู้อนุมัติ (Approval Roles)</h1>
           <p style={{ fontSize:14, color:'var(--ink-3)', margin:'6px 0 0', maxWidth:640 }}>
             กำหนดตำแหน่ง/หน่วยงานที่ต้องเซ็นในเอกสาร — เช่น <strong style={{ color:'var(--ink-2)' }}>ใบเปรียบเทียบราคา (Compare PDF)</strong> ·
-            ขั้นต่ำ <strong style={{ color:'var(--ink-2)' }}>4 ตำแหน่ง</strong> · Auto-run รหัส <span className="font-mono" style={{ color:'var(--ink-2)' }}>AR-NNN</span>
+            ขั้นต่ำ <strong style={{ color:'var(--ink-2)' }}>4 ตำแหน่ง</strong>
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn primary" onClick={() => setAddOpen(true)}>{Icons.plus} เพิ่มตำแหน่ง</button>
+          <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่มตำแหน่ง</button>
         </div>
       </div>
 
       <SettingsStatStrip stats={[
-        { label:'ตำแหน่งทั้งหมด',  value: APPROVAL_ROLES_DATA.length, sub:`${active} Active · ${APPROVAL_ROLES_DATA.length - active} Non-Active` },
-        { label:'ขั้นต่ำสำหรับ PDF', value:'4 ตำแหน่ง', sub: meetsMin ? `✓ ปัจจุบันมี ${active} ตำแหน่ง · เพียงพอ` : `⚠ ปัจจุบันมี ${active} ตำแหน่ง · ยังไม่ครบ` },
+        { label:'ตำแหน่งทั้งหมด',  value: items.length, sub:`${activeCount} Active · ${items.length - activeCount} Non-Active` },
+        { label:'ขั้นต่ำสำหรับ PDF', value:'4 ตำแหน่ง', sub: meetsMin ? `✓ ปัจจุบันมี ${activeCount} ตำแหน่ง · เพียงพอ` : `⚠ ปัจจุบันมี ${activeCount} ตำแหน่ง · ยังไม่ครบ` },
       ]} />
 
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16 }}>
@@ -68,25 +102,30 @@ export function ScreenSettingsApprovalRoles({ go }) {
         </div>
       </div>
 
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
+
       <div className="card" style={{ padding:0 }}>
         <table className="tbl">
           <thead>
             <tr>
               <th style={{ width:90 }}>รหัส</th>
               <th style={{ width:60 }} className="num-col">ลำดับ</th>
-              <th style={{ width:'24%' }}>ตำแหน่ง / หน่วยงาน</th>
-              <th>คำอธิบาย</th>
+              <th>ตำแหน่ง / หน่วยงาน</th>
               <th style={{ width:120 }}>สถานะ</th>
-              <th style={{ width:48 }}></th>
+              <th style={{ width:80 }}></th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+            {loading ? (
+              <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล — คลิก "เพิ่มตำแหน่ง" เพื่อสร้างรายการแรก
               </td></tr>
-            ) : filtered.sort((a,b) => a.order - b.order).map(r => (
-              <tr key={r.code}>
+            ) : [...filtered].sort((a,b) => (a.level||0) - (b.level||0)).map(r => (
+              <tr key={r.id}>
                 <td className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{r.code}</td>
                 <td className="num-col">
                   <span style={{
@@ -94,13 +133,13 @@ export function ScreenSettingsApprovalRoles({ go }) {
                     background:'var(--paper-2)', color:'var(--ink-2)',
                     lineHeight:'26px', textAlign:'center',
                     fontFamily:'var(--font-mono)', fontSize:11.5, fontWeight:500,
-                  }}>{r.order}</span>
+                  }}>{r.level}</span>
                 </td>
                 <td style={{ fontWeight:500 }}>{r.name}</td>
-                <td style={{ fontSize:12.5, color:'var(--ink-3)' }}>{r.desc}</td>
-                <td><StatusPill status={r.status} /></td>
+                <td><StatusPill status={r.active ? 'Active' : 'Non-Active'} /></td>
                 <td style={{ textAlign:'right' }}>
-                  <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }}>{Icons.edit}</button>
+                  <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(r)} title="แก้ไข">{Icons.edit}</button>
+                  <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(r)} title="ลบ">×</button>
                 </td>
               </tr>
             ))}
@@ -116,17 +155,17 @@ export function ScreenSettingsApprovalRoles({ go }) {
             <h3 className="h-card">ช่องลงนาม · ใบเปรียบเทียบราคา</h3>
           </div>
           <span style={{ fontSize:11.5, color: meetsMin ? 'var(--moss)' : 'var(--clay)', fontWeight:500 }}>
-            {meetsMin ? `✓ ${active} ตำแหน่ง — ครบขั้นต่ำ` : `⚠ ${active} ตำแหน่ง — ยังไม่ครบ 4 ตำแหน่ง`}
+            {meetsMin ? `✓ ${activeCount} ตำแหน่ง — ครบขั้นต่ำ` : `⚠ ${activeCount} ตำแหน่ง — ยังไม่ครบ 4 ตำแหน่ง`}
           </span>
         </div>
         <div style={{ padding:'36px 24px 24px', background:'#FCFAF5' }}>
           <div style={{
             display:'grid',
-            gridTemplateColumns: `repeat(${Math.max(active, 4)}, 1fr)`,
+            gridTemplateColumns: `repeat(${Math.max(activeCount, 4)}, 1fr)`,
             gap:24,
           }}>
-            {getActiveApprovalRoles().map(r => (
-              <div key={r.code} style={{
+            {activeSorted.map(r => (
+              <div key={r.id} style={{
                 borderTop:'1px solid var(--ink-3)',
                 paddingTop:8, fontSize:11, color:'var(--ink-3)', textAlign:'center',
               }}>
@@ -134,7 +173,7 @@ export function ScreenSettingsApprovalRoles({ go }) {
                 <span style={{ color:'var(--ink-4)' }}>ลงนาม / วันที่</span>
               </div>
             ))}
-            {[...Array(Math.max(0, 4 - active))].map((_,i) => (
+            {[...Array(Math.max(0, 4 - activeCount))].map((_,i) => (
               <div key={'ph'+i} style={{
                 borderTop:'1px dashed var(--rule-2)',
                 paddingTop:8, fontSize:11, color:'var(--ink-4)', textAlign:'center', fontStyle:'italic',
@@ -147,44 +186,83 @@ export function ScreenSettingsApprovalRoles({ go }) {
         </div>
       </div>
 
-      {addOpen && <AddApprovalRoleModal onClose={() => setAddOpen(false)} />}
+      {editing && (
+        <ApprovalRoleModal
+          item={editing === 'new' ? null : editing}
+          nextLevel={items.length + 1}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function AddApprovalRoleModal({ onClose }) {
-  const [form, setForm] = useState({ name:'', desc:'', order: APPROVAL_ROLES_DATA.length + 1, status:'Active' });
-  const set = (k,v) => setForm({ ...form, [k]:v });
-  const nextCode = `AR-${String(APPROVAL_ROLES_DATA.length + 1).padStart(3,'0')}`;
+function ApprovalRoleModal({ item, nextLevel, onClose, onSaved }) {
+  const isEdit = !!item;
+  const [form, setForm] = useState({
+    code:   item?.code   || '',
+    name:   item?.name   || '',
+    level:  item?.level ?? nextLevel,
+    active: item?.active !== false,
+  });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState('');
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function save() {
+    setErr('');
+    if (!form.code.trim() || !form.name.trim()) {
+      setErr('กรอกรหัสและชื่อให้ครบ'); return;
+    }
+    setBusy(true);
+    const payload = {
+      code:   form.code,
+      name:   form.name,
+      level:  Number(form.level) || 0,
+      active: form.active,
+    };
+    if (isEdit) payload.id = item.id;
+    const res = await fetch('/api/approval-roles', {
+      method: isEdit ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) { setErr(data.error || 'บันทึกไม่สำเร็จ'); setBusy(false); return; }
+    setBusy(false);
+    onSaved();
+  }
 
   return (
-    <SettingsModal eyebrow="เพิ่มตำแหน่งผู้อนุมัติ" title="ตำแหน่งใหม่" onClose={onClose} width={520}>
-      <div style={{
-        padding:'14px 16px', background:'var(--surface-2)',
-        border:'1px solid var(--rule)', borderRadius:6, marginBottom:20,
-      }}>
-        <div className="eyebrow" style={{ marginBottom:4 }}>รหัส (auto-generate)</div>
-        <div className="font-mono" style={{ fontSize:18, color:'var(--teal)' }}>{nextCode}</div>
-      </div>
-
+    <SettingsModal eyebrow={isEdit ? 'แก้ไขตำแหน่งผู้อนุมัติ' : 'เพิ่มตำแหน่งผู้อนุมัติ'} title={isEdit ? item.name : 'ตำแหน่งใหม่'} onClose={onClose} width={520}>
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{err}</div>
+      )}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 100px', gap:14 }}>
-        <SettingsField label="ตำแหน่ง / หน่วยงาน" required>
-          <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น ฝ่ายตรวจสอบภายใน" style={settingsInputStyle} />
+        <SettingsField label="รหัส" required hint="เช่น AR-001">
+          <input value={form.code} onChange={e=>set('code', e.target.value)} placeholder="AR-001" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
         </SettingsField>
         <SettingsField label="ลำดับ" hint="ในแถวเซ็น">
-          <input type="number" value={form.order} onChange={e=>set('order', Number(e.target.value))}
+          <input type="number" value={form.level} onChange={e=>set('level', e.target.value)}
             min={1} max={20} style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
         </SettingsField>
         <div style={{ gridColumn:'1 / -1' }}>
-          <SettingsField label="คำอธิบาย">
-            <input value={form.desc} onChange={e=>set('desc', e.target.value)} placeholder="หน้าที่/ขอบเขตในการอนุมัติ" style={settingsInputStyle} />
+          <SettingsField label="ตำแหน่ง / หน่วยงาน" required>
+            <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น ฝ่ายตรวจสอบภายใน" style={settingsInputStyle} />
           </SettingsField>
         </div>
         <div style={{ gridColumn:'1 / -1' }}>
           <SettingsField label="สถานะ">
-            <StatusToggle options={['Active','Non-Active']} value={form.status} onChange={v => set('status', v)} />
+            <StatusToggle options={['Active','Non-Active']} value={form.active ? 'Active' : 'Non-Active'} onChange={v => set('active', v === 'Active')} />
           </SettingsField>
         </div>
+      </div>
+      <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:20 }}>
+        <button className="btn" onClick={onClose}>ยกเลิก</button>
+        <button className="btn primary" onClick={save} disabled={busy}>
+          {busy ? 'กำลังบันทึก…' : (isEdit ? 'บันทึก' : 'เพิ่ม')}
+        </button>
       </div>
     </SettingsModal>
   );

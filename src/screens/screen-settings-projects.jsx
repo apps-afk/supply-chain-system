@@ -1,53 +1,79 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Icons } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox, StatusPill, StatusToggle, BulkExcelButton } from '../lib/settings-shared';
-import { PROJECT_TYPES_DATA } from './screen-settings-project-types';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
 
 /*
   Settings → Project List
-  - Removed RFQ count column
-  - Type pulled from Project Types master (managed separately)
-  - Status: Active / Closed
-  - Summary splits units & contracts by Active / Closed
-  - Bulk Excel template support
+  Data is now stored in DB and fetched from /api/projects.
+  type_id is a FK to project_types (fetched from /api/project-types).
+  Whitelisted fields:
+    code, name, type_id, status, location, budget,
+    start_date, end_date, notes, active
 */
 
-const PROJECT_DATA = [];
-
-const SAMPLE_PROJECT_ROWS = [
-  { short:'LV05', name:'Initial Living สาทร',   type:'Townhome', units:36, start:'2025-08-01', status:'Active' },
-  { short:'VL03', name:'Initial Villa ภูเก็ต',   type:'Villa',    units:12, start:'2025-10-15', status:'Active' },
-  { short:'TH04', name:'Initial Town ราชพฤกษ์', type:'Townhome', units:48, start:'2025-12-01', status:'Active' },
-];
-
-const PROJECT_BULK_COLUMNS = [
-  { key:'short',  name:'Short Code',  required:true },
-  { key:'name',   name:'ชื่อโครงการ', required:true },
-  { key:'type',   name:'ประเภท',      required:true },
-  { key:'units',  name:'จำนวนยูนิต',   required:false },
-  { key:'start',  name:'วันเริ่มงาน',    required:false },
-  { key:'status', name:'สถานะ',         required:false },
-];
+const STATUS_OPTIONS = ['Planning', 'Active', 'Closed'];
 
 export function ScreenSettingsProjects({ go }) {
-  const [q, setQ] = useState('');
-  const [filter, setFilter] = useState('ทั้งหมด');
-  const [addOpen, setAddOpen] = useState(false);
+  const [items, setItems]         = useState([]);
+  const [projectTypes, setTypes]  = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [err, setErr]             = useState('');
+  const [q, setQ]                 = useState('');
+  const [filter, setFilter]       = useState('ทั้งหมด');
+  const [editing, setEditing]     = useState(null); // null | 'new' | object
 
-  const filtered = PROJECT_DATA.filter(p => {
-    if (filter !== 'ทั้งหมด' && p.status !== filter) return false;
-    if (q && !(p.name.includes(q) || p.code.toLowerCase().includes(q.toLowerCase()) || p.short.toLowerCase().includes(q.toLowerCase()))) return false;
+  async function load() {
+    setLoading(true); setErr('');
+    try {
+      const [pRes, tRes] = await Promise.all([
+        fetch('/api/projects'),
+        fetch('/api/project-types'),
+      ]);
+      const p = await pRes.json();
+      const t = await tRes.json();
+      if (!pRes.ok) setErr(p.error || 'โหลดข้อมูลไม่สำเร็จ');
+      else setItems(p.items || []);
+      if (tRes.ok) setTypes(t.items || []);
+    } catch {
+      setErr('เครือข่ายขัดข้อง');
+    }
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function remove(it) {
+    if (!confirm(`ลบโครงการ "${it.name}"?`)) return;
+    const res = await fetch('/api/projects', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: it.id }),
+    });
+    if (!res.ok) { const d = await res.json(); alert(d.error || 'เกิดข้อผิดพลาด'); }
+    load();
+  }
+
+  const typesById = Object.fromEntries(projectTypes.map(t => [t.id, t]));
+
+  const filtered = items.filter(p => {
+    if (filter !== 'ทั้งหมด') {
+      if (filter === 'Active'   && !(p.status === 'Active'   || (!p.status && p.active))) return false;
+      if (filter === 'Planning' && p.status !== 'Planning') return false;
+      if (filter === 'Closed'   && p.status !== 'Closed') return false;
+    }
+    if (q) {
+      const s = q.toLowerCase();
+      if (!(p.name?.toLowerCase().includes(s) || p.code?.toLowerCase().includes(s))) return false;
+    }
     return true;
   });
 
   // Compute split stats
-  const active   = PROJECT_DATA.filter(p => p.status === 'Active');
-  const closed   = PROJECT_DATA.filter(p => p.status === 'Closed');
-  const activeUnits     = active.reduce((s,p)=>s+p.units,0);
-  const closedUnits     = closed.reduce((s,p)=>s+p.units,0);
-  const activeContracts = active.reduce((s,p)=>s+p.contracts,0);
-  const closedContracts = closed.reduce((s,p)=>s+p.contracts,0);
+  const active   = items.filter(p => p.status === 'Active' || (!p.status && p.active));
+  const closed   = items.filter(p => p.status === 'Closed');
+  const planning = items.filter(p => p.status === 'Planning');
+  const totalBudget  = items.reduce((s,p) => s + (Number(p.budget) || 0), 0);
+  const activeBudget = active.reduce((s,p) => s + (Number(p.budget) || 0), 0);
 
   return (
     <div className="page">
@@ -56,17 +82,15 @@ export function ScreenSettingsProjects({ go }) {
           <div className="eyebrow">Settings · Master Data</div>
           <h1 className="h-display">โครงการ (Project List)</h1>
           <p style={{ fontSize:14, color:'var(--ink-3)', margin:'6px 0 0', maxWidth:620 }}>
-            ทะเบียนโครงการทั้งหมด — Short Code ใช้สร้างรหัส <span className="font-mono" style={{ color:'var(--ink-2)' }}>IE-[Short Code]</span> · ประเภทโครงการ <button onClick={() => go('settings-project-types')} style={{ background:'none', border:0, padding:0, color:'var(--teal)', textDecoration:'underline', cursor:'pointer', fontFamily:'inherit', fontSize:14 }}>ตั้งค่าใน Project Type</button>
+            ทะเบียนโครงการทั้งหมด · ประเภทโครงการ <button onClick={() => go('settings-project-types')} style={{ background:'none', border:0, padding:0, color:'var(--teal)', textDecoration:'underline', cursor:'pointer', fontFamily:'inherit', fontSize:14 }}>ตั้งค่าใน Project Type</button>
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <BulkExcelButton entity="โครงการ" columns={PROJECT_BULK_COLUMNS} sampleRows={SAMPLE_PROJECT_ROWS} />
-          <button className="btn">{Icons.download} Export</button>
-          <button className="btn primary" onClick={() => setAddOpen(true)}>{Icons.plus} เพิ่มโครงการ</button>
+          <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่มโครงการ</button>
         </div>
       </div>
 
-      {/* Summary with Active/Closed splits */}
+      {/* Summary */}
       <div style={{
         display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:0,
         borderTop:'1px solid var(--rule)', borderBottom:'1px solid var(--rule)',
@@ -74,12 +98,17 @@ export function ScreenSettingsProjects({ go }) {
       }}>
         <div>
           <div className="stat-label">โครงการทั้งหมด</div>
-          <div className="stat-value">{PROJECT_DATA.length}</div>
-          <div style={{ display:'flex', gap:14, marginTop:8, fontSize:12 }}>
+          <div className="stat-value">{items.length}</div>
+          <div style={{ display:'flex', gap:14, marginTop:8, fontSize:12, flexWrap:'wrap' }}>
             <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
               <span style={{ width:6, height:6, borderRadius:999, background:'var(--moss)' }} />
               <span style={{ color:'var(--ink-3)' }}>Active</span>
               <strong style={{ color:'var(--ink)' }}>{active.length}</strong>
+            </span>
+            <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+              <span style={{ width:6, height:6, borderRadius:999, background:'var(--ochre)' }} />
+              <span style={{ color:'var(--ink-3)' }}>Planning</span>
+              <strong style={{ color:'var(--ink)' }}>{planning.length}</strong>
             </span>
             <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
               <span style={{ width:6, height:6, borderRadius:999, background:'var(--ink-4)' }} />
@@ -90,43 +119,23 @@ export function ScreenSettingsProjects({ go }) {
         </div>
 
         <div style={{ paddingLeft:28, borderLeft:'1px solid var(--rule)' }}>
-          <div className="stat-label">หน่วยรวม (ยูนิต)</div>
-          <div className="stat-value">{(activeUnits + closedUnits).toLocaleString()}</div>
-          <div style={{ display:'flex', gap:14, marginTop:8, fontSize:12 }}>
-            <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-              <span style={{ width:6, height:6, borderRadius:999, background:'var(--moss)' }} />
-              <span style={{ color:'var(--ink-3)' }}>Active</span>
-              <strong style={{ color:'var(--ink)' }}>{activeUnits} หลัง</strong>
-            </span>
-            <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-              <span style={{ width:6, height:6, borderRadius:999, background:'var(--ink-4)' }} />
-              <span style={{ color:'var(--ink-3)' }}>Closed</span>
-              <strong style={{ color:'var(--ink)' }}>{closedUnits} หลัง</strong>
-            </span>
+          <div className="stat-label">งบประมาณรวม</div>
+          <div className="stat-value">{totalBudget.toLocaleString()}</div>
+          <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:8 }}>
+            Active <strong style={{ color:'var(--ink)' }}>{activeBudget.toLocaleString()}</strong>
           </div>
         </div>
 
         <div style={{ paddingLeft:28, borderLeft:'1px solid var(--rule)' }}>
-          <div className="stat-label">สัญญาที่ผูก</div>
-          <div className="stat-value">{activeContracts + closedContracts}</div>
-          <div style={{ display:'flex', gap:14, marginTop:8, fontSize:12 }}>
-            <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-              <span style={{ width:6, height:6, borderRadius:999, background:'var(--moss)' }} />
-              <span style={{ color:'var(--ink-3)' }}>Active</span>
-              <strong style={{ color:'var(--ink)' }}>{activeContracts} ฉบับ</strong>
-            </span>
-            <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-              <span style={{ width:6, height:6, borderRadius:999, background:'var(--ink-4)' }} />
-              <span style={{ color:'var(--ink-3)' }}>Closed</span>
-              <strong style={{ color:'var(--ink)' }}>{closedContracts} ฉบับ</strong>
-            </span>
-          </div>
+          <div className="stat-label">ประเภทโครงการ</div>
+          <div className="stat-value">{projectTypes.filter(t => t.active).length}</div>
+          <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:8 }}>Active types</div>
         </div>
       </div>
 
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16, flexWrap:'wrap' }}>
         <div style={{ display:'flex', gap:4 }}>
-          {['ทั้งหมด','Active','Closed'].map(f => (
+          {['ทั้งหมด','Planning','Active','Closed'].map(f => (
             <button key={f} onClick={() => setFilter(f)} className="btn sm" style={{
               background: filter === f ? 'var(--ink)' : 'transparent',
               color: filter === f ? 'var(--paper)' : 'var(--ink-2)',
@@ -143,107 +152,175 @@ export function ScreenSettingsProjects({ go }) {
         </div>
       </div>
 
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
+
       <div className="card" style={{ padding:0 }}>
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width:90 }}>Short Code</th>
-              <th style={{ width:110 }}>รหัส</th>
+              <th style={{ width:120 }}>รหัส</th>
               <th>ชื่อโครงการ</th>
               <th>ประเภท</th>
-              <th className="num-col">ยูนิต</th>
+              <th>สถานที่</th>
+              <th className="num-col">งบประมาณ</th>
               <th>เริ่มงาน</th>
-              <th className="num-col">สัญญา</th>
               <th>สถานะ</th>
-              <th style={{ width:48 }}></th>
+              <th style={{ width:80 }}></th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={9} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+            {loading ? (
+              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล — คลิก "เพิ่มโครงการ" เพื่อสร้างรายการแรก
               </td></tr>
-            ) : filtered.map(p => (
-              <tr key={p.code}>
-                <td>
-                  <span style={{
-                    display:'inline-block', padding:'3px 10px', borderRadius:4,
-                    background:'var(--teal-soft)', color:'var(--teal-ink)',
-                    fontFamily:'var(--font-mono)', fontSize:11.5, fontWeight:600, letterSpacing:0.02,
-                  }}>{p.short}</span>
-                </td>
-                <td className="font-mono" style={{ fontSize:12, color:'var(--ink-2)' }}>{p.code}</td>
-                <td style={{ fontWeight:500 }}>{p.name}</td>
-                <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{p.type}</td>
-                <td className="num-col num" style={{ color:'var(--ink-2)' }}>{p.units}</td>
-                <td style={{ fontSize:12, color:'var(--ink-3)' }}>{p.start}</td>
-                <td className="num-col num" style={{ color:'var(--ink-2)' }}>{p.contracts}</td>
-                <td><StatusPill status={p.status} /></td>
-                <td style={{ textAlign:'right' }}>
-                  <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }}>{Icons.edit}</button>
-                </td>
-              </tr>
-            ))}
+            ) : filtered.map(p => {
+              const type = typesById[p.type_id];
+              const statusLabel = p.status || (p.active ? 'Active' : 'Non-Active');
+              return (
+                <tr key={p.id}>
+                  <td className="font-mono" style={{ fontSize:12, color:'var(--ink-2)' }}>{p.code}</td>
+                  <td style={{ fontWeight:500 }}>{p.name}</td>
+                  <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{type ? type.name : (p.type_id || '—')}</td>
+                  <td style={{ fontSize:12.5, color:'var(--ink-3)' }}>{p.location || '—'}</td>
+                  <td className="num-col num" style={{ color:'var(--ink-2)' }}>{p.budget != null ? Number(p.budget).toLocaleString() : '—'}</td>
+                  <td style={{ fontSize:12, color:'var(--ink-3)' }}>{p.start_date || '—'}</td>
+                  <td><StatusPill status={statusLabel} /></td>
+                  <td style={{ textAlign:'right' }}>
+                    <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(p)} title="แก้ไข">{Icons.edit}</button>
+                    <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(p)} title="ลบ">×</button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
-      {addOpen && <AddProjectModal go={go} onClose={() => setAddOpen(false)} />}
+      {editing && (
+        <ProjectModal
+          go={go}
+          item={editing === 'new' ? null : editing}
+          projectTypes={projectTypes}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function AddProjectModal({ go, onClose }) {
-  const activeTypes = (PROJECT_TYPES_DATA || []).filter(t => t.status === 'Active');
+function ProjectModal({ go, item, projectTypes, onClose, onSaved }) {
+  const isEdit = !!item;
+  const activeTypes = (projectTypes || []).filter(t => t.active);
   const [form, setForm] = useState({
-    short: '',
-    name: '',
-    type: activeTypes[0]?.name || '',
-    units: '',
-    start: '',
-    status: 'Active',
+    code:       item?.code        || '',
+    name:       item?.name        || '',
+    type_id:    item?.type_id     || (activeTypes[0]?.id || ''),
+    status:     item?.status      || 'Planning',
+    location:   item?.location    || '',
+    budget:     item?.budget      ?? '',
+    start_date: item?.start_date  || '',
+    end_date:   item?.end_date    || '',
+    notes:      item?.notes       || '',
+    active:     item?.active !== false,
   });
-  const set = (k,v) => setForm({ ...form, [k]:v });
-  const previewCode = form.short ? `IE-${form.short.toUpperCase()}` : 'IE-—';
+  const [busy, setBusy] = useState(false);
+  const [err, setErr]   = useState('');
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  async function save() {
+    setErr('');
+    if (!form.code.trim() || !form.name.trim()) {
+      setErr('กรอกรหัสและชื่อให้ครบ'); return;
+    }
+    setBusy(true);
+    const payload = {
+      code:       form.code,
+      name:       form.name,
+      type_id:    form.type_id || null,
+      status:     form.status,
+      location:   form.location,
+      budget:     form.budget === '' ? null : Number(form.budget),
+      start_date: form.start_date || null,
+      end_date:   form.end_date   || null,
+      notes:      form.notes,
+      active:     form.active,
+    };
+    if (isEdit) payload.id = item.id;
+    const res = await fetch('/api/projects', {
+      method: isEdit ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) { setErr(data.error || 'บันทึกไม่สำเร็จ'); setBusy(false); return; }
+    setBusy(false);
+    onSaved();
+  }
 
   return (
-    <SettingsModal eyebrow="เพิ่มโครงการ" title="โครงการใหม่" onClose={onClose}>
-      <div style={{
-        padding:'14px 16px', background:'var(--surface-2)',
-        border:'1px solid var(--rule)', borderRadius:6, marginBottom:20,
-        display:'flex', alignItems:'center', gap:16,
-      }}>
-        <div style={{ flex:1 }}>
-          <div className="eyebrow" style={{ marginBottom:4 }}>รหัสโครงการ (auto-generate)</div>
-          <div className="font-mono" style={{ fontSize:18, color: form.short ? 'var(--teal)' : 'var(--ink-4)' }}>{previewCode}</div>
-        </div>
-        <div style={{ fontSize:11, color:'var(--ink-3)', maxWidth:200, textAlign:'right' }}>
-          รหัสจะสร้างจาก <strong>IE-</strong> + Short Code
-        </div>
-      </div>
-
-      <div style={{ display:'grid', gridTemplateColumns:'140px 1fr', gap:16 }}>
-        <SettingsField label="Short Code" required hint="2–4 ตัวอักษร · ใช้ในรหัส">
-          <input value={form.short} onChange={e=>set('short', e.target.value.toUpperCase())} placeholder="เช่น LV05"
-                 style={{ ...settingsInputStyle, textTransform:'uppercase', fontFamily:'var(--font-mono)' }} maxLength={6} />
+    <SettingsModal eyebrow={isEdit ? 'แก้ไขโครงการ' : 'เพิ่มโครงการ'} title={isEdit ? item.name : 'โครงการใหม่'} onClose={onClose} width={680}>
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{err}</div>
+      )}
+      <div style={{ display:'grid', gridTemplateColumns:'140px 1fr 1fr', gap:14 }}>
+        <SettingsField label="รหัส" required hint="เช่น IE-LV05">
+          <input value={form.code} onChange={e=>set('code', e.target.value)} placeholder="IE-LV05" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
         </SettingsField>
-        <SettingsField label="ชื่อโครงการ" required>
-          <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น Initial Living สาทร" style={settingsInputStyle} />
-        </SettingsField>
-        <SettingsField label="ประเภท" hint={<span>เพิ่ม/แก้ไขได้ที่ <button onClick={()=>go('settings-project-types')} style={{ background:'none', border:0, padding:0, color:'var(--teal)', textDecoration:'underline', cursor:'pointer' }}>Project Type</button></span>}>
-          <select value={form.type} onChange={e=>set('type', e.target.value)} style={settingsInputStyle}>
-            {activeTypes.map(t => <option key={t.code} value={t.name}>{t.name}</option>)}
+        <div style={{ gridColumn:'2 / -1' }}>
+          <SettingsField label="ชื่อโครงการ" required>
+            <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น Initial Living สาทร" style={settingsInputStyle} />
+          </SettingsField>
+        </div>
+        <SettingsField label="ประเภท" hint={<span>เพิ่มได้ที่ <button type="button" onClick={()=>go('settings-project-types')} style={{ background:'none', border:0, padding:0, color:'var(--teal)', textDecoration:'underline', cursor:'pointer' }}>Project Type</button></span>}>
+          <select value={form.type_id} onChange={e=>set('type_id', e.target.value)} style={settingsInputStyle}>
+            <option value="">— เลือกประเภท —</option>
+            {activeTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </SettingsField>
-        <SettingsField label="จำนวนยูนิต">
-          <input type="number" value={form.units} onChange={e=>set('units', e.target.value)} placeholder="0" style={settingsInputStyle} />
-        </SettingsField>
-        <SettingsField label="วันเริ่มงาน">
-          <input type="date" value={form.start} onChange={e=>set('start', e.target.value)} style={settingsInputStyle} />
-        </SettingsField>
         <SettingsField label="สถานะ">
-          <StatusToggle options={['Active','Closed']} value={form.status} onChange={v => set('status', v)} />
+          <select value={form.status} onChange={e=>set('status', e.target.value)} style={settingsInputStyle}>
+            {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
         </SettingsField>
+        <SettingsField label="สถานที่">
+          <input value={form.location} onChange={e=>set('location', e.target.value)} placeholder="เช่น กรุงเทพฯ" style={settingsInputStyle} />
+        </SettingsField>
+        <div style={{ gridColumn:'1 / -1' }}>
+          <SettingsField label="งบประมาณ" hint="หน่วย: บาท">
+            <input type="number" min={0} step={1} value={form.budget}
+                   onChange={e=>set('budget', e.target.value)} placeholder="0"
+                   style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
+          </SettingsField>
+        </div>
+        <SettingsField label="วันเริ่มงาน">
+          <input type="date" value={form.start_date} onChange={e=>set('start_date', e.target.value)} style={settingsInputStyle} />
+        </SettingsField>
+        <SettingsField label="วันสิ้นสุด">
+          <input type="date" value={form.end_date} onChange={e=>set('end_date', e.target.value)} style={settingsInputStyle} />
+        </SettingsField>
+        <div style={{ gridColumn:'1 / -1' }}>
+          <SettingsField label="หมายเหตุ">
+            <textarea value={form.notes} onChange={e=>set('notes', e.target.value)}
+                      placeholder="(ไม่บังคับ)"
+                      style={{ ...settingsInputStyle, minHeight:60, resize:'vertical', fontFamily:'inherit' }} />
+          </SettingsField>
+        </div>
+        <div style={{ gridColumn:'1 / -1' }}>
+          <SettingsField label="ใช้งาน">
+            <StatusToggle options={['Active','Non-Active']} value={form.active ? 'Active' : 'Non-Active'} onChange={v => set('active', v === 'Active')} />
+          </SettingsField>
+        </div>
+      </div>
+      <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:20 }}>
+        <button className="btn" onClick={onClose}>ยกเลิก</button>
+        <button className="btn primary" onClick={save} disabled={busy}>
+          {busy ? 'กำลังบันทึก…' : (isEdit ? 'บันทึก' : 'เพิ่ม')}
+        </button>
       </div>
     </SettingsModal>
   );
