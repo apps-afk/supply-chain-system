@@ -9,6 +9,7 @@ const MAX_MB = 25;
 const ALLOWED_MIME = ['application/pdf'];
 
 export const runtime = 'nodejs';  // googleapis isn't Edge-safe
+export const maxDuration = 60;    // PDFs can take a bit on slow links
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
@@ -93,9 +94,20 @@ export async function POST(request) {
       attachment: attachmentRow,
     });
   } catch (e) {
-    console.error('upload failed:', e);
+    // Surface the most helpful detail to the client + log full stack server-side
+    console.error('upload failed:', e?.stack || e);
+    const inner = e?.cause?.response?.data?.error?.message
+              || e?.cause?.errors?.[0]?.message
+              || null;
     return NextResponse.json(
-      { error: e.message || 'อัปโหลดไม่สำเร็จ' },
+      {
+        error: e.message || 'อัปโหลดไม่สำเร็จ',
+        detail: inner,
+        // helpful hint if it's a body-size issue
+        hint: file && file.size > 4.4 * 1024 * 1024
+          ? 'ไฟล์อาจใหญ่เกินขีดจำกัดของ Vercel Hobby plan (4.5MB) — ลองไฟล์เล็กกว่านี้ หรืออัปเกรด plan'
+          : undefined,
+      },
       { status: 500 }
     );
   }

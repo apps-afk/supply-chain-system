@@ -356,7 +356,12 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
       const rUp = await fetch('/api/upload', { method:'POST', body: fd });
       const dUp = await rUp.json();
       if (!rUp.ok) {
-        setErr(dUp.error || 'อัปโหลดไฟล์ไม่สำเร็จ — สัญญาถูกสร้างแล้ว แต่ยังไม่ได้แนบไฟล์');
+        const parts = [
+          dUp.error || 'อัปโหลดไฟล์ไม่สำเร็จ — สัญญาถูกสร้างแล้ว แต่ยังไม่ได้แนบไฟล์',
+          dUp.detail && `รายละเอียด: ${dUp.detail}`,
+          dUp.hint,
+        ].filter(Boolean);
+        setErr(parts.join(' · '));
         setBusy(false);
         // contract is created — still call onSaved so list refreshes
         if (onSaved) onSaved(created.id);

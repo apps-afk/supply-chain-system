@@ -11,6 +11,7 @@
  * every API call.
  */
 import { google } from 'googleapis';
+import { Readable } from 'stream';
 
 export const isGDriveConfigured = !!(
   process.env.GOOGLE_SERVICE_ACCOUNT_JSON &&
@@ -100,22 +101,27 @@ export async function uploadToCategory({ categoryKey, filename, mimeType, body, 
                        `${Date.now()}_${filename}`.replace(/[\/\\?%*:|"<>]/g, '_');
 
   // Buffer → stream (Drive media body expects a Readable or string path)
-  let stream = body;
-  if (Buffer.isBuffer(body)) {
-    const { Readable } = await import('stream');
-    stream = Readable.from(body);
-  }
+  const stream = Buffer.isBuffer(body) ? Readable.from(body) : body;
 
-  const res = await drive.files.create({
-    requestBody: {
-      name: safeFilename,
-      parents: [folderId],
-    },
-    media: { mimeType, body: stream },
-    fields: 'id, name, webViewLink, webContentLink, size',
-    supportsAllDrives: true,
-  });
-  return res.data;
+  try {
+    const res = await drive.files.create({
+      requestBody: {
+        name: safeFilename,
+        parents: [folderId],
+      },
+      media: { mimeType, body: stream },
+      fields: 'id, name, webViewLink, webContentLink, size, parents',
+      supportsAllDrives: true,
+    });
+    return res.data;
+  } catch (e) {
+    // Surface Google's actual error (rate-limit, permission, etc.) instead of
+    // a generic "upload failed" — the upload route returns this back to the UI
+    const detail = e?.response?.data?.error?.message || e?.errors?.[0]?.message || e.message;
+    const err = new Error(`Drive upload failed: ${detail}`);
+    err.cause = e;
+    throw err;
+  }
 }
 
 /**
