@@ -290,6 +290,9 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
   const [contractTypes, setContractTypes] = useState([]);
 
   const [file, setFile]         = useState(null);
+  // 'ai'   = ส่งให้ AI ตรวจสอบเข้า workflow 5 ขั้น (status เริ่ม='draft')
+  // 'skip' = ไฟล์ผ่านการตรวจสอบมาแล้ว / ไม่ต้องตรวจ → บันทึก + active ทันที
+  const [reviewMode, setReviewMode] = useState('ai');
   const [form, setForm] = useState({
     title:       '',
     supplier_id: '',
@@ -324,7 +327,8 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
     setBusy(true);
     try {
       const no = generateContractNo();
-      // 1) Create the contract row
+      // 1) Create the contract row — status depends on the chosen review mode
+      const today = new Date().toISOString().slice(0, 10);
       const payload = {
         no,
         title:       form.title.trim(),
@@ -333,7 +337,8 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
         type_id:     form.type_id     || null,
         amount:      form.amount === '' ? null : Number(form.amount),
         currency:    form.currency || 'THB',
-        status:      'draft',
+        status:      reviewMode === 'skip' ? 'active' : 'draft',
+        signed_at:   reviewMode === 'skip' ? today : null,
         start_date:  form.start_date || null,
         end_date:    form.end_date   || null,
       };
@@ -395,6 +400,40 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
           {err && (
             <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{err}</div>
           )}
+
+          {/* Review mode — user chooses BEFORE filling the form */}
+          <div style={{ marginBottom:18 }}>
+            <div style={{ fontSize:11.5, color:'var(--ink-3)', fontWeight:500, marginBottom:8 }}>ประเภทการดำเนินการ</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              {[
+                { value:'ai',   label:'ส่งให้ AI ตรวจสอบ',        sub:'เข้า workflow 5 ขั้น (AI → ฝ่ายกฎหมาย → Final)' },
+                { value:'skip', label:'ผ่านการตรวจสอบแล้ว', sub:'ข้ามขั้นตอน — บันทึกไฟล์เข้า Drive ทันที' },
+              ].map(o => {
+                const active = reviewMode === o.value;
+                return (
+                  <button key={o.value} type="button"
+                    onClick={() => setReviewMode(o.value)}
+                    style={{
+                      textAlign:'left', cursor:'pointer',
+                      padding:'12px 14px', borderRadius:8,
+                      border: active ? '1.5px solid var(--teal)' : '1px solid var(--rule-2)',
+                      background: active ? 'var(--teal-soft)' : 'var(--surface)',
+                      transition: 'all 0.12s',
+                    }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                      <span style={{
+                        width:14, height:14, borderRadius:999,
+                        border: active ? '4px solid var(--teal)' : '1.5px solid var(--rule-2)',
+                        background: active ? 'var(--surface)' : 'transparent',
+                      }} />
+                      <span style={{ fontSize:13, fontWeight:600, color: active ? 'var(--teal-ink)' : 'var(--ink)' }}>{o.label}</span>
+                    </div>
+                    <div style={{ fontSize:11.5, color:'var(--ink-3)', paddingLeft:22 }}>{o.sub}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           {/* Form fields */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:14 }}>
@@ -624,6 +663,31 @@ export function ScreenContract({ go }) {
         </div>
       </div>
 
+      {/* If contract is already 'active' (skipped review or workflow done),
+          show a simple archive view instead of the AI workflow stepper. */}
+      {contract && contract.status === 'active' && (
+        <ActiveContractView
+          contract={contract}
+          attachments={attachments}
+          onUploadAddon={async (file) => {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('category', 'contract');
+            fd.append('entity_type', 'contract');
+            fd.append('entity_id', contract.id);
+            fd.append('entity_ref', contract.no);
+            const r = await fetch('/api/upload', { method:'POST', body: fd });
+            const d = await r.json();
+            if (!r.ok) return { ok:false, error: [d.error, d.detail].filter(Boolean).join(' · ') };
+            await loadAttachments(contract.id);
+            return { ok:true };
+          }}
+        />
+      )}
+
+      {/* AI workflow only shown when status is still 'draft' */}
+      {contract && contract.status !== 'active' && (
+      <>
       {/* Workflow stepper — horizontal */}
       <div style={{ marginBottom:32, padding:'18px 22px', background:'var(--surface-2)', border:'1px solid var(--rule)', borderRadius:8 }}>
         <div className="eyebrow" style={{ marginBottom:14 }}>ขั้นตอนตรวจสอบสัญญา</div>
@@ -796,6 +860,8 @@ export function ScreenContract({ go }) {
           </div>
         </aside>
       </div>
+      </>
+      )}
 
       {confirmOpen && (
         <ConfirmAIModal
@@ -818,6 +884,116 @@ export function ScreenContract({ go }) {
 }
 
 /* =================== AI Report panel =================== */
+/* ----------------------------------------------------------
+   ActiveContractView — shown when contract.status === 'active'
+   (either skipped AI review at upload, or completed full workflow).
+   Clean archive view: file list + simple actions. No phase stepper.
+   ---------------------------------------------------------- */
+function ActiveContractView({ contract, attachments, onUploadAddon }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const inputRef = React.useRef(null);
+
+  async function handleFile(f) {
+    if (!f) return;
+    setErr(''); setBusy(true);
+    const r = await onUploadAddon(f);
+    if (!r.ok) setErr(r.error || 'อัปโหลดไม่สำเร็จ');
+    setBusy(false);
+    if (inputRef.current) inputRef.current.value = '';
+  }
+
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:32 }}>
+      <div>
+        <div className="card" style={{ padding:28, marginBottom:24 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:18 }}>
+            <div style={{
+              width:36, height:36, borderRadius:999,
+              background:'var(--teal-soft)', color:'var(--teal-ink)',
+              display:'grid', placeItems:'center', fontSize:18, fontWeight:600,
+            }}>✓</div>
+            <div>
+              <div style={{ fontFamily:'var(--font-serif)', fontSize:18, fontWeight:500 }}>
+                เก็บไว้เรียบร้อยแล้ว
+              </div>
+              <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:2 }}>
+                สัญญาอยู่ใน Google Drive · folder "สัญญา (Contracts)"
+              </div>
+            </div>
+          </div>
+
+          <div className="eyebrow" style={{ marginBottom:8 }}>ไฟล์แนบ ({attachments.length})</div>
+          {attachments.length === 0 ? (
+            <div style={{ padding:20, textAlign:'center', fontSize:13, color:'var(--ink-3)', background:'var(--surface-2)', borderRadius:6 }}>
+              ยังไม่มีไฟล์
+            </div>
+          ) : (
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {attachments.map(a => (
+                <div key={a.id} style={{
+                  display:'flex', alignItems:'center', gap:12,
+                  padding:'10px 14px', background:'var(--surface-2)',
+                  border:'1px solid var(--rule)', borderRadius:6,
+                }}>
+                  <div style={{
+                    width:32, height:40, background:'var(--clay)', color:'#fff',
+                    borderRadius:3, display:'grid', placeItems:'center',
+                    fontSize:9, fontWeight:600, flexShrink:0,
+                  }}>PDF</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{a.filename}</div>
+                    <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>
+                      {new Date(a.uploaded_at).toLocaleString('th-TH', { dateStyle:'short', timeStyle:'short' })}
+                      {a.uploaded_by && ` · ${a.uploaded_by}`}
+                    </div>
+                  </div>
+                  {a.drive_view_link && (
+                    <a href={a.drive_view_link} target="_blank" rel="noopener noreferrer" className="btn ghost sm">
+                      เปิดใน Drive ↗
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <hr className="hr" style={{ margin:'22px 0 18px' }} />
+
+          <div className="eyebrow" style={{ marginBottom:8 }}>เพิ่มไฟล์ใหม่ (Addendum / Amendment)</div>
+          <p style={{ fontSize:12.5, color:'var(--ink-3)', margin:'0 0 12px' }}>
+            อัปโหลดไฟล์เพิ่มเติม เช่น สัญญาแก้ไข, แนบเอกสารประกอบ — จะถูกเก็บใน folder เดียวกัน
+          </p>
+          {err && (
+            <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:12 }}>{err}</div>
+          )}
+          <input ref={inputRef} type="file" accept=".pdf"
+            onChange={e => handleFile(e.target.files?.[0])}
+            disabled={busy}
+            style={{ fontSize:13 }} />
+          {busy && <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:8 }}>กำลังอัปโหลด…</div>}
+        </div>
+      </div>
+
+      <aside>
+        <div className="card" style={{ padding:24 }}>
+          <div className="eyebrow" style={{ marginBottom:10 }}>ข้อมูลสัญญา</div>
+          <KV label="เลขที่สัญญา" value={contract.no} mono />
+          <KV label="สถานะ" value={
+            <span style={{ display:'inline-block', padding:'2px 10px', borderRadius:999,
+              background:'#DEE7E3', color:'#1F4D40', fontSize:11, fontWeight:500 }}>
+              ใช้งานอยู่
+            </span>
+          } />
+          <KV label="วันเซ็น" value={contract.signed_at ? fmtDate(contract.signed_at) : '—'} />
+          <KV label="เริ่มสัญญา" value={contract.start_date ? fmtDate(contract.start_date) : '—'} />
+          <KV label="สิ้นสุดสัญญา" value={contract.end_date ? fmtDate(contract.end_date) : '—'} />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 function AIReportPanel({ phase, onSendToLegal, onUploadFinal }) {
   const findings = [];
 
