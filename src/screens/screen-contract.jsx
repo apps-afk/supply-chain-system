@@ -882,17 +882,86 @@ export function ScreenContract({ go }) {
               </div>
               <div style={{ fontSize:14, fontWeight:500, marginBottom:6 }}>{attachments[0]?.filename || contract?.title || '—'}</div>
               <div style={{ fontSize:11.5, color:'var(--ink-3)', marginBottom:24 }}>{attachments.length} ไฟล์แนบ</div>
-              <h2 className="h-section" style={{ marginBottom:8 }}>คอนเฟิร์มให้ AI ตรวจสอบสัญญานี้?</h2>
-              <p style={{ fontSize:13.5, color:'var(--ink-2)', lineHeight:1.7, margin:'0 auto 24px', maxWidth:480 }}>
-                ระบบจะใช้ AI วิเคราะห์ข้อความในสัญญาเทียบกับ Template มาตรฐานของบริษัท
-                และออก Report รายการประเด็นที่ต้องแก้ไข ใช้เวลาประมาณ <strong>1–2 นาที</strong>
+              <h2 className="h-section" style={{ marginBottom:8 }}>เลือกการดำเนินการต่อ</h2>
+              <p style={{ fontSize:13.5, color:'var(--ink-2)', lineHeight:1.7, margin:'0 auto 24px', maxWidth:520 }}>
+                สัญญานี้อัปโหลดเข้าระบบและ Drive แล้ว ขั้นถัดไปเลือกได้ระหว่าง
+                <strong> ส่งให้ AI ตรวจสอบ </strong>(วิเคราะห์เทียบ Template มาตรฐาน)
+                หรือ <strong>ข้ามไป Final</strong> ถ้าเอกสารผ่านการตรวจจากภายนอกแล้ว
               </p>
-              <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
-                <button className="btn ghost">ยกเลิก / ลบไฟล์</button>
-                <button className="btn primary" onClick={() => setConfirmOpen(true)} style={{ padding:'10px 24px' }} disabled={!contract}>
-                  {Icons.sparkles} คอนเฟิร์มให้ AI ตรวจสอบ
-                </button>
+
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, maxWidth:640, margin:'0 auto' }}>
+                {/* Option A — AI review */}
+                <div style={{
+                  padding:'20px 18px', borderRadius:10,
+                  border:'1.5px solid var(--rule-2)', background:'var(--surface)',
+                  textAlign:'left', display:'flex', flexDirection:'column', gap:10,
+                }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <span style={{
+                      width:30, height:30, borderRadius:999, background:'var(--teal-soft)',
+                      color:'var(--teal-ink)', display:'grid', placeItems:'center', fontSize:13, fontWeight:600,
+                    }}>AI</span>
+                    <span style={{ fontSize:14, fontWeight:600 }}>ส่งให้ AI ตรวจสอบ</span>
+                  </div>
+                  <div style={{ fontSize:12, color:'var(--ink-3)', lineHeight:1.55, flex:1 }}>
+                    วิเคราะห์เทียบ Template + ออก Report ประเด็นที่ต้องแก้ ใช้เวลา 1–2 นาที
+                  </div>
+                  <button className="btn primary" onClick={() => setConfirmOpen(true)} disabled={!contract}>
+                    {Icons.sparkles} เริ่ม AI ตรวจ
+                  </button>
+                </div>
+
+                {/* Option B — skip AI, mark active directly */}
+                <div style={{
+                  padding:'20px 18px', borderRadius:10,
+                  border:'1.5px solid var(--rule-2)', background:'var(--surface)',
+                  textAlign:'left', display:'flex', flexDirection:'column', gap:10,
+                }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <span style={{
+                      width:30, height:30, borderRadius:999, background:'#DEE7E3',
+                      color:'#1F4D40', display:'grid', placeItems:'center', fontSize:16, fontWeight:600,
+                    }}>✓</span>
+                    <span style={{ fontSize:14, fontWeight:600 }}>ข้ามไป Final</span>
+                  </div>
+                  <div style={{ fontSize:12, color:'var(--ink-3)', lineHeight:1.55, flex:1 }}>
+                    สัญญาผ่านการตรวจจากภายนอกแล้ว — บันทึกเป็น "ใช้งานอยู่" ทันที, ไฟล์อยู่ใน Drive ตามเดิม
+                  </div>
+                  <button
+                    className="btn"
+                    disabled={!contract}
+                    onClick={async () => {
+                      if (!confirm('ยืนยันข้ามขั้นตอน AI/ฝ่ายกฎหมาย และบันทึกสัญญาเป็น "ใช้งานอยู่"?')) return;
+                      try {
+                        const r = await fetch('/api/contracts', {
+                          method: 'PATCH',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            id: contract.id,
+                            status: 'active',
+                            signed_at: new Date().toISOString().slice(0,10),
+                          }),
+                        });
+                        const d = await r.json();
+                        if (!r.ok) { alert(`บันทึกไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`); return; }
+                        setContract(d.item || { ...contract, status:'active', signed_at: new Date().toISOString().slice(0,10) });
+                        setPhase('Final');
+                      } catch (e) {
+                        alert(`เครือข่ายขัดข้อง: ${e.message}`);
+                      }
+                    }}
+                  >
+                    บันทึกและข้าม
+                  </button>
+                </div>
               </div>
+
+              <button
+                className="btn ghost"
+                onClick={() => deleteCurrentContract()}
+                style={{ marginTop:18, color:'var(--clay)' }}>
+                ยกเลิก / ลบสัญญานี้
+              </button>
             </div>
           )}
 
