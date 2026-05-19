@@ -1,0 +1,191 @@
+name: Auto-Bootstrap Supabase
+
+on:
+  workflow_dispatch:
+    inputs:
+      pat:
+        description: 'Optional: Supabase Personal Access Token (sbp_...) — leave blank to try service_role first'
+        required: false
+        type: string
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      - name: Detect SQL execution mode
+        id: mode
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          URL: ${{ secrets.SUPABASE_URL }}
+          PAT: ${{ inputs.pat }}
+        run: |
+          PROJECT_REF=$(echo "$URL" | sed -E 's|https://([^.]+)\..*|\1|')
+          echo "project_ref=$PROJECT_REF" >> $GITHUB_OUTPUT
+          echo "Project ref: $PROJECT_REF"
+
+          # Approach A: PAT via Management API (most reliable when provided)
+          if [ -n "$PAT" ]; then
+            echo "Testing PAT via Management API..."
+            CODE=$(curl -sS -o /tmp/r.txt -w "%{http_code}" \
+              "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" \
+              -X POST -H "Authorization: Bearer $PAT" \
+              -H "Content-Type: application/json" \
+              -d '{"query":"select 1 as ok"}')
+            echo "PAT test HTTP $CODE:"; cat /tmp/r.txt; echo
+            if [ "$CODE" = "200" ] || [ "$CODE" = "201" ]; then
+              echo "mode=pat" >> $GITHUB_OUTPUT
+              echo "✓ PAT works — will use Management API"
+              exit 0
+            else
+              echo "::error::PAT รับมาแต่ Management API คืน $CODE"
+              exit 1
+            fi
+          fi
+
+          # Approach B: try service_role on Management API (rare, but worth trying)
+          echo "Testing service_role on Management API..."
+          CODE=$(curl -sS -o /tmp/r.txt -w "%{http_code}" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/database/query" \
+            -X POST -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"select 1 as ok"}')
+          echo "service_role+Mgmt HTTP $CODE:"; cat /tmp/r.txt; echo
+          if [ "$CODE" = "200" ] || [ "$CODE" = "201" ]; then
+            echo "mode=service_mgmt" >> $GITHUB_OUTPUT
+            echo "✓ service_role works on Management API"
+            exit 0
+          fi
+
+          # Approach C: try pg-meta on project URL (some setups expose this)
+          echo "Testing pg-meta endpoint on project URL..."
+          CODE=$(curl -sS -o /tmp/r.txt -w "%{http_code}" \
+            "$URL/pg/meta/query" \
+            -X POST -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"query":"select 1 as ok"}')
+          echo "pg-meta HTTP $CODE:"; cat /tmp/r.txt; echo
+          if [ "$CODE" = "200" ]; then
+            echo "mode=pg_meta" >> $GITHUB_OUTPUT
+            echo "✓ pg-meta accepts service_role"
+            exit 0
+          fi
+
+          echo ""
+          echo "::error::No automatic SQL execution path works. Need a PAT (sbp_...) — create one at https://supabase.com/dashboard/account/tokens"
+          exit 1
+
+      - name: Run schema SQL
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          URL: ${{ secrets.SUPABASE_URL }}
+          PAT: ${{ inputs.pat }}
+          MODE: ${{ steps.mode.outputs.mode }}
+          REF:  ${{ steps.mode.outputs.project_ref }}
+        run: |
+          # Pack schema.sql as a single-line JSON-escaped string
+          SQL_JSON=$(python3 -c "
+          import json
+          with open('supabase/schema.sql') as f:
+              print(json.dumps({'query': f.read()}))
+          ")
+
+          if [ "$MODE" = "pat" ]; then
+            ENDPOINT="https://api.supabase.com/v1/projects/$REF/database/query"
+            AUTH="Authorization: Bearer $PAT"
+          elif [ "$MODE" = "service_mgmt" ]; then
+            ENDPOINT="https://api.supabase.com/v1/projects/$REF/database/query"
+            AUTH="Authorization: Bearer $KEY"
+          elif [ "$MODE" = "pg_meta" ]; then
+            ENDPOINT="$URL/pg/meta/query"
+            AUTH="Authorization: Bearer $KEY"
+          fi
+
+          echo "Running schema against $ENDPOINT (mode=$MODE)..."
+          CODE=$(curl -sS -o /tmp/r.txt -w "%{http_code}" \
+            "$ENDPOINT" -X POST \
+            -H "$AUTH" \
+            ${MODE:+-H "apikey: $KEY"} \
+            -H "Content-Type: application/json" \
+            -d "$SQL_JSON")
+          echo "HTTP $CODE:"; cat /tmp/r.txt; echo
+          if [ "$CODE" -ge 400 ]; then
+            echo "::error::Schema run failed"; exit 1
+          fi
+          echo "✓ Schema applied"
+
+      - name: Verify tables
+        env:
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          URL: ${{ secrets.SUPABASE_URL }}
+        run: |
+          for t in users workspace_settings dsar_requests forgot_password_queue audit_log units project_types projects suppliers materials subcontracts contract_types approval_roles rfqs rfq_items price_points contracts; do
+            CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+              "$URL/rest/v1/$t?select=count" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+            echo "  $t → HTTP $CODE"
+            if [ "$CODE" -ge 400 ]; then echo "::error::table $t missing"; exit 1; fi
+          done
+          echo "✓ All tables present"
+
+      - name: Seed admin user pasit@initialestate.com
+        env:
+          URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          EMAIL="pasit@initialestate.com"
+          NAME="pasit suepaisal"
+          PASSWORD="Pasit.suepasial1"
+          SALT="ie_pasit_$(openssl rand -hex 8)"
+          HASH=$(printf "%s%s" "$SALT" "$PASSWORD" | sha256sum | awk '{print $1}')
+          USER_ID="user_pasit_$(date +%s)"
+
+          BODY=$(python3 -c "
+          import json
+          print(json.dumps({
+            'id': '$USER_ID', 'email': '$EMAIL', 'name': '$NAME',
+            'role': 'admin', 'salt': '$SALT', 'hash': '$HASH',
+            'verified': True, 'phone': ''
+          }))")
+
+          CODE=$(curl -sS -o /tmp/up.txt -w "%{http_code}" \
+            -X POST "$URL/rest/v1/users?on_conflict=email" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates,return=representation" \
+            -d "$BODY")
+          echo "Upsert HTTP $CODE:"; cat /tmp/up.txt; echo
+          if [ "$CODE" -ge 400 ]; then exit 1; fi
+
+      - name: Pull Vercel project config
+        run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Add Supabase env vars to Vercel
+        env:
+          URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          VTOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          add_env() {
+            local key="$1" val="$2"
+            echo "→ $key"
+            for tgt in production preview development; do
+              vercel env rm "$key" "$tgt" --yes --token="$VTOKEN" 2>/dev/null || true
+              echo -n "$val" | vercel env add "$key" "$tgt" --token="$VTOKEN" 2>&1 | tail -2
+            done
+          }
+          add_env "NEXT_PUBLIC_SUPABASE_URL" "$URL"
+          add_env "SUPABASE_SERVICE_KEY" "$KEY"
+          echo
+          echo "=== Final env vars ==="
+          vercel env ls --token="$VTOKEN" 2>&1 | grep -E "SUPABASE|NEXT_PUBLIC" || true
+
+      - name: Redeploy production
+        run: |
+          vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+          vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
