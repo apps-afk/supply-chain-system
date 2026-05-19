@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
+import { supabase, isSupabaseConfigured } from '../../../../lib/supabase';
 
 const DOMAIN = 'initialestate.com';
 
-// Forgot password — for the LOGIN page (user is not authenticated).
-// Real production: would send a reset link via email (Postmark).
-// For now: enqueue the request and tell the user an admin will contact them.
-// This keeps a record so admin can reset via the Team page (PATCH /api/users).
+// Forgot password from login page (user is NOT authenticated).
+// We enqueue the request and admin can action it from the workspace settings page.
 export async function POST(request) {
   try {
     const { email } = await request.json();
@@ -18,11 +17,26 @@ export async function POST(request) {
         { status: 403 }
       );
     }
-    if (!globalThis.__ieForgotQueue) globalThis.__ieForgotQueue = [];
-    globalThis.__ieForgotQueue.push({
-      email: email.toLowerCase(),
-      requestedAt: new Date().toISOString(),
-    });
+
+    if (isSupabaseConfigured) {
+      // Persist to DB so admin sees it across cold starts
+      const { error } = await supabase
+        .from('forgot_password_queue')
+        .insert({ email: email.toLowerCase() });
+      if (error) {
+        console.error('forgot queue insert failed:', error.message);
+        // Continue anyway — don't leak the error to the user
+      }
+    } else {
+      if (!globalThis.__ieForgotQueue) globalThis.__ieForgotQueue = [];
+      globalThis.__ieForgotQueue.push({
+        id: Date.now(),
+        email: email.toLowerCase(),
+        requested_at: new Date().toISOString(),
+        resolved_at: null,
+      });
+    }
+
     // Always return success to avoid leaking which emails exist (anti-enumeration)
     return NextResponse.json({
       ok: true,

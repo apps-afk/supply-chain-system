@@ -51,6 +51,8 @@ export function ScreenSettingsWorkspace({ go }) {
   const [saving, setSaving]       = useState(false);
   const [toast, setToast]         = useState(null);
   const [showDsar, setShowDsar]   = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -202,6 +204,14 @@ export function ScreenSettingsWorkspace({ go }) {
         <TeamMini members={team} />
       </Card>
 
+      {/* Row 6: Admin tools */}
+      <Card title="เครื่องมือสำหรับผู้ดูแลระบบ" subtitle="ดูบันทึกการใช้งานและคิวคำขอรีเซ็ตรหัสผ่าน" style={{ marginTop: 24 }}>
+        <AdminToolsSection
+          onShowForgot={() => setShowForgot(true)}
+          onShowAudit={() => setShowAudit(true)}
+        />
+      </Card>
+
       {showDsar && (
         <DsarModal
           dsar={dsar}
@@ -212,7 +222,185 @@ export function ScreenSettingsWorkspace({ go }) {
           }}
         />
       )}
+      {showForgot && <ForgotQueueModal onClose={() => setShowForgot(false)} />}
+      {showAudit  && <AuditLogModal   onClose={() => setShowAudit(false)} />}
     </div>
+  );
+}
+
+function AdminToolsSection({ onShowForgot, onShowAudit }) {
+  return (
+    <div>
+      <ToolRow
+        title="คิวคำขอลืมรหัสผ่าน"
+        desc="ผู้ใช้ที่กดปุ่ม 'ลืมรหัสผ่าน' ที่หน้าเข้าสู่ระบบ — กดดูเพื่อ reset password ให้ที่หน้า 'ทีมงานและสิทธิ์'"
+        action="ดูคิว"
+        onAction={onShowForgot}
+      />
+      <ToolRow
+        title="บันทึกการใช้งาน (Audit log)"
+        desc="ดูประวัติการเปลี่ยนแปลงข้อมูล: ใครแก้อะไร เมื่อไร (เก็บตาม retention ที่ตั้งไว้)"
+        action="ดู audit log"
+        onAction={onShowAudit}
+        last
+      />
+    </div>
+  );
+}
+
+function ToolRow({ title, desc, action, onAction, last }) {
+  return (
+    <div style={{
+      padding: '14px 0',
+      borderBottom: last ? 'none' : '1px solid var(--rule)',
+      display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16,
+    }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>{title}</div>
+        <div style={{ fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.55 }}>{desc}</div>
+      </div>
+      <button
+        onClick={onAction}
+        style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: 13, color: 'var(--teal)', fontWeight: 500,
+          fontFamily: 'var(--font-sans)', padding: '4px 8px', whiteSpace: 'nowrap',
+        }}
+      >{action}</button>
+    </div>
+  );
+}
+
+function ForgotQueueModal({ onClose }) {
+  const [items, setItems] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    const res = await fetch('/api/forgot-password');
+    const d = await res.json();
+    setItems(d.items || []);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function resolve(id) {
+    if (!confirm('ทำเครื่องหมายว่ารีเซ็ตรหัสผ่านให้ผู้ใช้นี้แล้ว?')) return;
+    setBusy(true);
+    await fetch('/api/forgot-password', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    await load();
+    setBusy(false);
+  }
+
+  const pending = items?.filter(x => !x.resolved_at) || [];
+  const resolved = items?.filter(x => x.resolved_at) || [];
+
+  return (
+    <ModalShell title="คิวคำขอลืมรหัสผ่าน" onClose={onClose} wide>
+      <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: -8, marginBottom: 16 }}>
+        Reset รหัสผ่านให้ผู้ใช้ผ่านหน้า "ทีมงานและสิทธิ์" (ปุ่ม 🔒 ในแถวของผู้ใช้นั้น) แล้วกดปุ่ม "ทำเครื่องหมายเสร็จ" ที่นี่
+      </p>
+      {!items ? (
+        <div style={{ padding: 30, textAlign: 'center', color: 'var(--ink-3)' }}>กำลังโหลด…</div>
+      ) : pending.length === 0 && resolved.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)' }}>ยังไม่มีคำขอ</div>
+      ) : (
+        <>
+          {pending.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--clay)', marginBottom: 6 }}>
+                ● รอดำเนินการ ({pending.length})
+              </div>
+              {pending.map(r => (
+                <QueueRow key={r.id} item={r} onResolve={() => resolve(r.id)} disabled={busy} />
+              ))}
+            </div>
+          )}
+          {resolved.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--moss)', marginBottom: 6 }}>
+                ✓ เสร็จแล้ว ({resolved.length})
+              </div>
+              {resolved.slice(0, 20).map(r => (
+                <QueueRow key={r.id} item={r} disabled />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </ModalShell>
+  );
+}
+
+function QueueRow({ item, onResolve, disabled }) {
+  const isResolved = !!item.resolved_at;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '10px 0', borderBottom: '1px solid var(--rule)',
+      opacity: isResolved ? 0.7 : 1,
+    }}>
+      <div style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 13 }}>{item.email}</div>
+      <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+        {new Date(item.requested_at).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}
+      </div>
+      {!isResolved && onResolve && (
+        <button className="btn sm" onClick={onResolve} disabled={disabled}>
+          ทำเครื่องหมายเสร็จ
+        </button>
+      )}
+      {isResolved && (
+        <span style={{ fontSize: 11, color: 'var(--moss)' }}>เสร็จโดย {item.resolved_by}</span>
+      )}
+    </div>
+  );
+}
+
+function AuditLogModal({ onClose }) {
+  const [entries, setEntries] = useState(null);
+  useEffect(() => {
+    fetch('/api/audit?limit=300').then(r => r.json()).then(d => setEntries(d.entries || []));
+  }, []);
+
+  return (
+    <ModalShell title="บันทึกการใช้งาน (Audit log)" onClose={onClose} wide>
+      {!entries ? (
+        <div style={{ padding: 30, textAlign: 'center', color: 'var(--ink-3)' }}>กำลังโหลด…</div>
+      ) : entries.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)' }}>ยังไม่มีบันทึก</div>
+      ) : (
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th style={{ width: '24%' }}>เวลา</th>
+              <th>ผู้ใช้</th>
+              <th>การกระทำ</th>
+              <th>เป้าหมาย</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((e, i) => (
+              <tr key={i}>
+                <td style={{ fontSize: 12, color: 'var(--ink-3)' }}>
+                  {new Date(e.timestamp).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'medium' })}
+                </td>
+                <td style={{ fontSize: 12.5, fontFamily: 'var(--font-mono)' }}>{e.actor}</td>
+                <td style={{ fontSize: 13 }}>
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 4,
+                    background: 'var(--paper-2)', fontSize: 11,
+                    fontFamily: 'var(--font-mono)',
+                  }}>{e.action}</span>
+                </td>
+                <td style={{ fontSize: 12, color: 'var(--ink-2)' }}>{e.target || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </ModalShell>
   );
 }
 
@@ -582,6 +770,28 @@ function TeamMini({ members }) {
       })}
       <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--rule)', fontSize: 12, color: 'var(--ink-3)' }}>
         เปลี่ยน role หรือลบสมาชิกได้ที่หน้า Users (เฉพาะ Admin)
+      </div>
+    </div>
+  );
+}
+
+function ModalShell({ title, children, onClose, wide }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(20,18,14,0.5)',
+      display: 'grid', placeItems: 'center', zIndex: 100, padding: 16,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'var(--surface)', padding: 28, borderRadius: 12,
+        width: '100%', maxWidth: wide ? 720 : 440,
+        maxHeight: '85vh', overflowY: 'auto',
+        boxShadow: '0 16px 48px -12px rgba(20,18,14,0.3)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 18 }}>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 500 }}>{title}</div>
+          <button className="btn ghost sm" onClick={onClose}>ปิด</button>
+        </div>
+        {children}
       </div>
     </div>
   );
