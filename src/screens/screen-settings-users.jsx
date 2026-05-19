@@ -10,18 +10,7 @@ import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, Se
   - Login: Username / Password (masked with reveal)
 */
 
-const USER_DATA = [
-  { code:'EMP-00001', name:'นวพร ศรีวัฒน์',     role:'Procurement Officer',  phone:'081-234-5678', username:'navaporn',  password:'Sup#2024@nav',   status:'Active',     lastLogin:'17 พ.ค. 14:22', kind:'np' },
-  { code:'EMP-00002', name:'ภัทรพล ทองดี',      role:'Procurement Manager',  phone:'089-111-2233', username:'pattarapol', password:'P@tt2024!nav',   status:'Active',     lastLogin:'17 พ.ค. 11:08', kind:'default' },
-  { code:'EMP-00003', name:'สุดารัตน์ ใจดี',      role:'Site Engineer',        phone:'085-555-7788', username:'sudarat',   password:'Sud@rat2024!',  status:'Active',     lastLogin:'17 พ.ค. 09:45', kind:'sc' },
-  { code:'EMP-00004', name:'กิตติพงศ์ วงศ์ทอง',  role:'Project Manager',      phone:'081-888-4422', username:'kittipong',  password:'K!ttipong2024',  status:'Active',     lastLogin:'16 พ.ค. 17:32', kind:'aw' },
-  { code:'EMP-00005', name:'จิราวรรณ พรหมา',     role:'Accountant',           phone:'087-654-3210', username:'jirawan',    password:'J!rawan2024@',   status:'Active',     lastLogin:'17 พ.ค. 13:50', kind:'rr' },
-  { code:'EMP-00006', name:'ธนากร เจริญสุข',    role:'Admin',                phone:'088-222-1199', username:'thanakorn',  password:'Th@n@2024nav',   status:'Active',     lastLogin:'17 พ.ค. 08:15', kind:'default' },
-  { code:'EMP-00007', name:'อรอุมา สุวรรณ',     role:'IT Admin',             phone:'081-456-7890', username:'orn-uma',    password:'IT@dmin2024!',   status:'Active',     lastLogin:'17 พ.ค. 14:55', kind:'default' },
-  { code:'EMP-00008', name:'มานพ ก่อสร้าง',     role:'Site Foreman',         phone:'089-333-4455', username:'manop',      password:'M@nop2024sit',   status:'Active',     lastLogin:'16 พ.ค. 16:08', kind:'default' },
-  { code:'EMP-00009', name:'รัชนีกร ทิพย์',       role:'Procurement Officer',  phone:'086-777-8899', username:'ratchanee',  password:'R@tch@nee24!',   status:'Active',     lastLogin:'15 พ.ค. 18:22', kind:'np' },
-  { code:'EMP-00010', name:'วิทยา ก้าวหน้า',     role:'Site Engineer',        phone:'080-444-3322', username:'witthaya',   password:'W!tthaya24!@',   status:'Non-Active', lastLogin:'12 ก.พ. 11:08', kind:'default' },
-];
+const USER_DATA = [];
 
 const ROLE_OPTIONS = [
   'Procurement Officer',
@@ -178,7 +167,9 @@ export function ScreenSettingsUsers({ go }) {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={8} style={{ padding:48, textAlign:'center', fontSize:13, color:'var(--ink-3)' }}>ไม่พบผู้ใช้งานที่ตรงกับเงื่อนไข</td></tr>
+              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล — คลิก "เพิ่มผู้ใช้งาน" เพื่อสร้างรายการแรก
+              </td></tr>
             )}
           </tbody>
         </table>

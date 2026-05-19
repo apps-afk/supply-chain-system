@@ -16,52 +16,7 @@ import {
 */
 
 // Synthetic RFQ data — only "received" RFQs are eligible
-const ELIGIBLE_RFQS = [
-  {
-    no:'RFQ-2025-020', supplierId:'SUP-00004', supName:'TOA Distribution',     supKind:'default',
-    category:'งานสี',           project:'IE-LV01', received:'15 พ.ค. 68', credit:'30 วัน',
-    items:[
-      { code:'MAT-PNT-00001', name:'สีน้ำพลาสติก TOA SuperShield', spec:'ภายนอก · กึ่งเงา', unit:'แกลลอน', qty:120, price:1180 },
-      { code:'MAT-PNT-00002', name:'สีน้ำพลาสติก TOA Beyond',      spec:'ภายใน · ด้าน',      unit:'แกลลอน', qty:80,  price:980 },
-      { code:'MAT-PNT-00003', name:'สีรองพื้นปูน',                  spec:'อะคริลิค',          unit:'แกลลอน', qty:40,  price:520 },
-    ],
-  },
-  {
-    no:'RFQ-2025-019', supplierId:'SUP-00001', supName:'เอเชียสตีล',           supKind:'aw',
-    category:'งานโครงสร้าง',    project:'IE-LV04', received:'14 พ.ค. 68', credit:'45 วัน',
-    items:[
-      { code:'MAT-STR-00003', name:'เหล็กเส้น DB12', spec:'มอก. · ⌀12mm × 10m', unit:'เส้น', qty:2000, price:245 },
-      { code:'MAT-STR-00004', name:'เหล็กเส้น DB16', spec:'มอก. · ⌀16mm × 10m', unit:'เส้น', qty:1500, price:325 },
-      { code:'MAT-STR-00005', name:'เหล็กเส้น DB20', spec:'มอก. · ⌀20mm × 10m', unit:'เส้น', qty:400,  price:512 },
-    ],
-  },
-  {
-    no:'RFQ-2025-018', supplierId:'SUP-00002', supName:'รุ่งเรืองสตีล',         supKind:'rr',
-    category:'งานโครงสร้าง',    project:'IE-LV04', received:'14 พ.ค. 68', credit:'30 วัน',
-    items:[
-      { code:'MAT-STR-00003', name:'เหล็กเส้น DB12', spec:'มอก. · ⌀12mm × 10m', unit:'เส้น', qty:2000, price:248 },
-      { code:'MAT-STR-00004', name:'เหล็กเส้น DB16', spec:'มอก. · ⌀16mm × 10m', unit:'เส้น', qty:1500, price:318 },
-      { code:'MAT-STR-00005', name:'เหล็กเส้น DB20', spec:'มอก. · ⌀20mm × 10m', unit:'เส้น', qty:400,  price:506 },
-    ],
-  },
-  {
-    no:'RFQ-2025-017', supplierId:'SUP-00003', supName:'SCG Distribution',     supKind:'sc',
-    category:'งานโครงสร้าง',    project:'IE-LV04', received:'15 พ.ค. 68', credit:'60 วัน',
-    items:[
-      { code:'MAT-STR-00003', name:'เหล็กเส้น DB12', spec:'มอก. · ⌀12mm × 10m', unit:'เส้น', qty:2000, price:252 },
-      { code:'MAT-STR-00004', name:'เหล็กเส้น DB16', spec:'มอก. · ⌀16mm × 10m', unit:'เส้น', qty:1500, price:330 },
-      { code:'MAT-STR-00005', name:'เหล็กเส้น DB20', spec:'มอก. · ⌀20mm × 10m', unit:'เส้น', qty:400,  price:520 },
-    ],
-  },
-  {
-    no:'RFQ-2025-016', supplierId:'SUP-00006', supName:'CPAC Roof',             supKind:'sc',
-    category:'งานหลังคา',       project:'IE-VL02', received:'10 พ.ค. 68', credit:'45 วัน',
-    items:[
-      { code:'MAT-ROF-00001', name:'กระเบื้องหลังคา CPAC โมเนียร์', spec:'33×42 cm · สีเทา', unit:'แผ่น', qty:1800, price:42 },
-      { code:'MAT-ROF-00002', name:'กระเบื้องหลังคา CPAC ExcellaPro', spec:'33×42 cm · สีแดง', unit:'แผ่น', qty:600, price:56 },
-    ],
-  },
-];
+const ELIGIBLE_RFQS = [];
 
 export function ScreenCompareCreateRFQ({ go }) {
   const [picked, setPicked] = useState([]); // RFQ no's
@@ -156,7 +111,9 @@ export function ScreenCompareCreateRFQ({ go }) {
           <SectionCard step="1" label="เลือก RFQ ที่จะเปรียบเทียบ"
             desc={`เลือก ≥ 2 ใบ (สถานะ Received) ที่อยู่ในหมวดเดียวกัน · พบ ${ELIGIBLE_RFQS.length} ใบ`}>
             <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              {ELIGIBLE_RFQS.map(r => {
+              {ELIGIBLE_RFQS.length === 0 ? (
+                <div style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</div>
+              ) : ELIGIBLE_RFQS.map(r => {
                 const on = picked.includes(r.no);
                 const conflict = on && categoryConflict;
                 return (

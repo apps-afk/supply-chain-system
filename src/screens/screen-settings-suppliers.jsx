@@ -133,6 +133,11 @@ export function ScreenSettingsSuppliers({ go }) {
             </tr>
           </thead>
           <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล — คลิก "เพิ่ม Supplier" เพื่อสร้างรายการแรก
+              </td></tr>
+            )}
             {filtered.map(s => (
               <React.Fragment key={s.code}>
                 <tr>

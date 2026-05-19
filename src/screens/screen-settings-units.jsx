@@ -9,37 +9,7 @@ import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, Se
   for unit fields in documents only. Kept intentionally minimal.
 */
 
-const UNIT_DATA = [
-  // SI base units
-  { code:'U-001', symbol:'m',    name:'เมตร',          si:'SI Base',    status:'Active' },
-  { code:'U-002', symbol:'kg',   name:'กิโลกรัม',      si:'SI Base',    status:'Active' },
-  { code:'U-003', symbol:'s',    name:'วินาที',        si:'SI Base',    status:'Active' },
-  // SI derived
-  { code:'U-004', symbol:'m²',   name:'ตารางเมตร',     si:'SI Derived', status:'Active' },
-  { code:'U-005', symbol:'m³',   name:'ลูกบาศก์เมตร',  si:'SI Derived', status:'Active' },
-  // Common prefixed
-  { code:'U-006', symbol:'mm',   name:'มิลลิเมตร',     si:'SI Prefix',  status:'Active' },
-  { code:'U-007', symbol:'cm',   name:'เซนติเมตร',     si:'SI Prefix',  status:'Active' },
-  { code:'U-008', symbol:'km',   name:'กิโลเมตร',      si:'SI Prefix',  status:'Active' },
-  { code:'U-009', symbol:'g',    name:'กรัม',          si:'SI Prefix',  status:'Active' },
-  { code:'U-010', symbol:'t',    name:'ตัน',           si:'SI Prefix',  status:'Active' },
-  // Accepted with SI
-  { code:'U-011', symbol:'L',    name:'ลิตร',          si:'Accepted',   status:'Active' },
-  { code:'U-012', symbol:'h',    name:'ชั่วโมง',       si:'Accepted',   status:'Active' },
-  { code:'U-013', symbol:'min',  name:'นาที',          si:'Accepted',   status:'Active' },
-  { code:'U-014', symbol:'d',    name:'วัน',           si:'Accepted',   status:'Active' },
-  // Construction trade units (non-SI but standard in industry)
-  { code:'U-015', symbol:'ถุง',  name:'ถุง',           si:'Trade',      status:'Active' },
-  { code:'U-016', symbol:'เส้น', name:'เส้น',          si:'Trade',      status:'Active' },
-  { code:'U-017', symbol:'ก้อน', name:'ก้อน',          si:'Trade',      status:'Active' },
-  { code:'U-018', symbol:'แผ่น', name:'แผ่น',          si:'Trade',      status:'Active' },
-  { code:'U-019', symbol:'ม้วน', name:'ม้วน',          si:'Trade',      status:'Active' },
-  { code:'U-020', symbol:'ชุด',  name:'ชุด',           si:'Trade',      status:'Active' },
-  { code:'U-021', symbol:'ชิ้น', name:'ชิ้น',          si:'Trade',      status:'Active' },
-  { code:'U-022', symbol:'ตัว',  name:'ตัว',           si:'Trade',      status:'Active' },
-  { code:'U-023', symbol:'จุด',  name:'จุด',           si:'Trade',      status:'Active' },
-  { code:'U-024', symbol:'งวด',  name:'งวด',           si:'Trade',      status:'Active' },
-];
+const UNIT_DATA = [];
 
 const SI_BADGE_COLOR = {
   'SI Base':    { bg:'var(--teal-soft)',  fg:'var(--teal-ink)' },
@@ -137,7 +107,9 @@ export function ScreenSettingsUnits({ go }) {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={6} style={{ padding:48, textAlign:'center', fontSize:13, color:'var(--ink-3)' }}>ไม่พบหน่วยที่ตรงกับเงื่อนไข</td></tr>
+              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล — คลิก "เพิ่มหน่วย" เพื่อสร้างรายการแรก
+              </td></tr>
             )}
           </tbody>
         </table>

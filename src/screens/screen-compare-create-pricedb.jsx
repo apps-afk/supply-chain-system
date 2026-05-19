@@ -11,7 +11,7 @@ import { getActiveApprovalRoles } from './screen-settings-approval-roles';
   Flow: Source (MAT/SUB) → pick Items → pick Suppliers (≥2) → live compare
 */
 
-export const NEXT_CMP_NO = 'CMP-2025-039';
+export const NEXT_CMP_NO = '';
 
 // Synthetic per-supplier price data — for demo, generated from base price
 export function pricesForItem(itemCode, basePrice, supplierIds) {
@@ -28,37 +28,10 @@ export function pricesForItem(itemCode, basePrice, supplierIds) {
   return out;
 }
 
-export const PRICEDB_SUPPLIERS = [
-  { id:'SUP-00001', name:'เอเชียสตีล',         kind:'aw',     cats:['งานโครงสร้าง'] },
-  { id:'SUP-00002', name:'รุ่งเรืองสตีล',         kind:'rr',     cats:['งานโครงสร้าง'] },
-  { id:'SUP-00003', name:'SCG Distribution',     kind:'sc',     cats:['งานโครงสร้าง','งานหลังคา'] },
-  { id:'SUP-00004', name:'TOA Distribution',     kind:'default',cats:['งานสี'] },
-  { id:'SUP-00005', name:'COTTO Wholesale',      kind:'default',cats:['งานสุขภัณฑ์'] },
-  { id:'SUP-00006', name:'CPAC Roof',            kind:'sc',     cats:['งานหลังคา'] },
-  { id:'SUP-00007', name:'Q-CON Direct',         kind:'default',cats:['งานก่ออิฐ-ฉาบปูน'] },
-  { id:'SUP-00008', name:'ไทยเซรามิค',          kind:'default',cats:['งานพื้น-ผนัง'] },
-  { id:'SUP-00009', name:'BCC Electric',         kind:'default',cats:['งานระบบไฟฟ้า'] },
-  { id:'SUP-00012', name:'พี.ที. คอนสตรัคชั่น', kind:'default',cats:['งานโครงสร้าง'] },
-];
+export const PRICEDB_SUPPLIERS = [];
 
 // Base reference prices used to generate per-supplier variations
-export const BASE_PRICES = {
-  'MAT-STR-00003': 245, 'MAT-STR-00004': 325, 'MAT-STR-00005': 512,
-  'MAT-STR-00001': 165, 'MAT-STR-00002': 158, 'MAT-STR-00007': 65,
-  'MAT-BRK-00001': 28,  'MAT-BRK-00002': 3.5, 'MAT-BRK-00003': 185,
-  'MAT-ROF-00001': 42,  'MAT-ROF-00002': 56,  'MAT-ROF-00003': 225,
-  'MAT-TIL-00001': 285, 'MAT-TIL-00002': 485, 'MAT-TIL-00003': 85,
-  'MAT-PNT-00001': 1180,'MAT-PNT-00002': 980, 'MAT-PNT-00003': 520,
-  'MAT-ELE-00001': 1620,'MAT-ELE-00002': 2480,'MAT-ELE-00003': 680,
-  'MAT-SAN-00001': 3850,'MAT-SAN-00002': 2680,
-  'SUB-STR-00001': 42000,'SUB-STR-00002': 3850,'SUB-STR-00003': 6200,
-  'SUB-BRK-00001': 285, 'SUB-BRK-00002': 265, 'SUB-BRK-00003': 120,
-  'SUB-ROF-00001': 280, 'SUB-ROF-00002': 320,
-  'SUB-TIL-00001': 180, 'SUB-TIL-00002': 220, 'SUB-TIL-00003': 280,
-  'SUB-PNT-00001': 65,  'SUB-PNT-00002': 85,
-  'SUB-ELE-00001': 48,  'SUB-ELE-00002': 180,
-  'SUB-SAN-00001': 850, 'SUB-SAN-00002': 95,
-};
+export const BASE_PRICES = {};
 
 export function ScreenCompareCreatePriceDB({ go }) {
   const [source, setSource] = useState('Material'); // Material | SubContract
@@ -944,7 +917,7 @@ export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mo
           </div>
           <div style={{ textAlign:'right', fontSize:11.5, lineHeight:1.7 }}>
             <div><span style={{ color:'var(--ink-3)' }}>เลขที่:</span> <span className="font-mono" style={{ fontWeight:500 }}>{NEXT_CMP_NO}</span></div>
-            <div><span style={{ color:'var(--ink-3)' }}>วันที่:</span> 17 พ.ค. 2568</div>
+            <div><span style={{ color:'var(--ink-3)' }}>วันที่:</span> —</div>
           </div>
         </div>
 

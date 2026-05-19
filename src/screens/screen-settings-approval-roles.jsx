@@ -12,13 +12,7 @@ import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, Se
   - Minimum recommendation: ≥4 active roles before generating a Compare PDF
 */
 
-export const APPROVAL_ROLES_DATA = [
-  { code:'AR-001', name:'ฝ่ายจัดซื้อ',           desc:'ผู้สร้างเอกสาร · ตรวจสอบความถูกต้อง',     order:1, status:'Active' },
-  { code:'AR-002', name:'ผู้จัดการโครงการ',      desc:'พิจารณาความสอดคล้องกับงบโครงการ',         order:2, status:'Active' },
-  { code:'AR-003', name:'ฝ่ายบัญชี',             desc:'ตรวจสอบเงื่อนไขเครดิตและภาษี',             order:3, status:'Active' },
-  { code:'AR-004', name:'ผู้บริหารอนุมัติ',       desc:'ลงนามอนุมัติขั้นสุดท้าย',                  order:4, status:'Active' },
-  { code:'AR-005', name:'ฝ่ายตรวจสอบภายใน',     desc:'ใช้เฉพาะมูลค่าเกิน ฿1M',                  order:5, status:'Non-Active' },
-];
+export const APPROVAL_ROLES_DATA = [];
 
 export const getActiveApprovalRoles = () => APPROVAL_ROLES_DATA
   .filter(r => r.status === 'Active')
@@ -87,7 +81,11 @@ export function ScreenSettingsApprovalRoles({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.sort((a,b) => a.order - b.order).map(r => (
+            {filtered.length === 0 ? (
+              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล — คลิก "เพิ่มตำแหน่ง" เพื่อสร้างรายการแรก
+              </td></tr>
+            ) : filtered.sort((a,b) => a.order - b.order).map(r => (
               <tr key={r.code}>
                 <td className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{r.code}</td>
                 <td className="num-col">

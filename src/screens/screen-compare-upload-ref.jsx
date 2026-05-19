@@ -29,7 +29,6 @@ export function ScreenCompareUploadRef({ go }) {
         <div className="page-head" style={{ alignItems:'flex-start' }}>
           <div className="page-title">
             <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:8 }}>
-              <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>CMP-2025-038</span>
               <span style={{
                 display:'inline-flex', alignItems:'center', gap:6,
                 fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
@@ -102,7 +101,6 @@ export function ScreenCompareUploadRef({ go }) {
       <div className="page-head" style={{ alignItems:'flex-start' }}>
         <div className="page-title">
           <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6 }}>
-            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>CMP-2025-038</span>
             <Chip kind="active">รอ Upload Ref</Chip>
           </div>
           <h1 className="h-display">Upload เอกสารอ้างอิงกลับ</h1>
@@ -140,15 +138,8 @@ export function ScreenCompareUploadRef({ go }) {
               </div>
               <div style={{ fontSize:11, color:'var(--ink-3)' }}>รองรับ .pdf .jpg .png · ไม่เกิน 10 MB</div>
               <input type="file" accept=".pdf,.jpg,.png" style={{ display:'none' }}
-                onChange={e => setFilename(e.target.files?.[0]?.name || 'CMP-2025-038_Signed.pdf')} />
+                onChange={e => setFilename(e.target.files?.[0]?.name || '')} />
             </label>
-
-            {!filename && (
-              <button className="btn ghost sm" onClick={() => setFilename('CMP-2025-038_Signed.pdf')}
-                style={{ marginTop:12 }}>
-                ใช้ไฟล์ตัวอย่าง (สำหรับ Demo)
-              </button>
-            )}
 
             {filename && (
               <div style={{
@@ -188,9 +179,6 @@ export function ScreenCompareUploadRef({ go }) {
               <SettingsField label="Supplier ที่เลือก" required>
                 <select value={selectedSupplier} onChange={e => setSelectedSupplier(e.target.value)} style={settingsInputStyle}>
                   <option value="">— เลือก —</option>
-                  <option>เอเชียสตีล</option>
-                  <option>รุ่งเรืองสตีล</option>
-                  <option>SCG Distribution</option>
                 </select>
               </SettingsField>
               <SettingsField label="วันที่อนุมัติ" required>
@@ -211,32 +199,8 @@ export function ScreenCompareUploadRef({ go }) {
         {/* Right: original compare summary */}
         <div className="card" style={{ padding:20 }}>
           <div className="eyebrow" style={{ marginBottom:12 }}>เอกสารเปรียบเทียบ</div>
-          <div style={{ fontSize:14, fontWeight:500, marginBottom:4 }}>เหล็กเส้น & ปูน ล็อต Q2</div>
-          <div className="font-mono" style={{ fontSize:11.5, color:'var(--ink-3)', marginBottom:14 }}>CMP-2025-038</div>
-
-          <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
-            {[
-              ['โหมด','จาก RFQ'],
-              ['โครงการ','IE-LV04 · Initial Living รังสิต'],
-              ['รายการ','5 รายการ'],
-              ['Supplier','3 ราย'],
-              ['สร้าง','17 พ.ค. 68'],
-            ].map(([k,v],i,a) => (
-              <div key={k} style={{
-                display:'flex', justifyContent:'space-between', gap:12,
-                padding:'8px 0', borderBottom: i < a.length-1 ? '1px solid var(--rule)' : 'none',
-              }}>
-                <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>{k}</span>
-                <span style={{ fontSize:12.5, color:'var(--ink)', textAlign:'right' }}>{v}</span>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ marginTop:16, padding:'12px 14px', background:'var(--teal-soft)', borderRadius:6 }}>
-            <div className="eyebrow" style={{ marginBottom:4, color:'var(--teal-ink)' }}>AI แนะนำ</div>
-            <div style={{ fontSize:13, color:'var(--teal-ink)' }}>
-              <strong>รุ่งเรืองสตีล</strong> · ประหยัด <span style={{ color:'var(--moss)' }}>฿37,000</span>
-            </div>
+          <div style={{ textAlign:'center', padding:24, color:'var(--ink-3)', fontSize:13 }}>
+            ยังไม่มีข้อมูล
           </div>
         </div>
       </div>

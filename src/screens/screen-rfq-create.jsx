@@ -21,31 +21,13 @@ import { getActiveApprovalRoles } from './screen-settings-approval-roles';
 
 /* =================== Reference data =================== */
 
-const ALL_SUPPLIERS = [
-  { id:'SUP-00001', name:'เอเชียสตีล จำกัด',         kind:'aw',      categories:['งานโครงสร้าง'],                    contact:'คุณวีระ 081-234-5678', email:'sales@asiasteel.co.th',   credit:'45 วัน', warranty:'ตามมาตรฐานผู้ผลิต' },
-  { id:'SUP-00002', name:'รุ่งเรืองสตีล',             kind:'rr',      categories:['งานโครงสร้าง'],                    contact:'คุณสมชาย 089-555-1212', email:'order@rungrueng.com',    credit:'30 วัน', warranty:'รับประกัน 1 ปี · มอก.' },
-  { id:'SUP-00003', name:'SCG Distribution',          kind:'sc',      categories:['งานโครงสร้าง','งานหลังคา'],        contact:'ฝ่ายขาย 02-586-3333',  email:'b2b@scg.co.th',          credit:'60 วัน', warranty:'รับประกัน 5 ปี ตามเงื่อนไข SCG' },
-  { id:'SUP-00004', name:'TOA Distribution',          kind:'default', categories:['งานสี'],                           contact:'คุณนิด 02-294-0999',   email:'order@toagroup.com',    credit:'30 วัน', warranty:'รับประกันสี 5 ปี' },
-  { id:'SUP-00005', name:'COTTO Wholesale',           kind:'default', categories:['งานสุขภัณฑ์'],                     contact:'คุณปูน 02-555-2000',   email:'wholesale@cotto.com',   credit:'45 วัน', warranty:'รับประกัน 5 ปี (Body) / 1 ปี (Parts)' },
-  { id:'SUP-00006', name:'CPAC Roof',                 kind:'sc',      categories:['งานหลังคา'],                       contact:'คุณบอย 02-586-2222',   email:'roof@cpac.co.th',       credit:'45 วัน', warranty:'รับประกัน 10 ปี ตามเงื่อนไข' },
-  { id:'SUP-00007', name:'Q-CON Direct',              kind:'default', categories:['งานก่ออิฐ-ฉาบปูน'],                contact:'คุณตั้ม 02-274-1234',  email:'direct@qcon.co.th',     credit:'30 วัน', warranty:'รับประกันคุณภาพตามมาตรฐาน มอก.' },
-  { id:'SUP-00008', name:'ไทยเซรามิค',                kind:'default', categories:['งานพื้น-ผนัง'],                    contact:'คุณป้อม 02-318-7777', email:'sales@thaicera.com',    credit:'30 วัน', warranty:'รับประกัน 1 ปี' },
-  { id:'SUP-00009', name:'BCC Electric',              kind:'default', categories:['งานระบบไฟฟ้า'],                    contact:'คุณตา 02-291-8888',    email:'b2b@bcc.co.th',         credit:'30 วัน', warranty:'รับประกัน 1 ปี' },
-  { id:'SUP-00010', name:'หจก. กระเบื้องช่าง',         kind:'default', categories:['งานพื้น-ผนัง'],                    contact:'ช่างเอก 081-789-4561', email:'-',                     credit:'งวด',   warranty:'รับประกันงาน 6 เดือน' },
-  { id:'SUP-00011', name:'หจก. ช่างไทย',              kind:'default', categories:['งานก่ออิฐ-ฉาบปูน'],                contact:'ช่างแดง 081-456-7890', email:'-',                     credit:'งวด',   warranty:'รับประกันงาน 6 เดือน' },
-  { id:'SUP-00012', name:'พี.ที. คอนสตรัคชั่น',       kind:'default', categories:['งานโครงสร้าง'],                    contact:'คุณพี 081-222-3333',   email:'pt.con@gmail.com',      credit:'งวด',   warranty:'รับประกันงาน 1 ปี' },
-];
+const ALL_SUPPLIERS = [];
 
-const PROJECTS = [
-  { id:'IE-LV01', name:'Initial Living บางนา' },
-  { id:'IE-LV04', name:'Initial Living รังสิต' },
-  { id:'IE-VL02', name:'Initial Villa' },
-  { id:'IE-TH03', name:'Initial Town' },
-];
+const PROJECTS = [];
 
 const ALL_UNITS = ['ถุง 50 กก.','เส้น','ก้อน','แผ่น','ตร.ม.','ลบ.ม.','ม.','กก.','ตัน','ลิตร','แกลลอน','ม้วน','ชุด','ชิ้น','ตัว','อัน','หลอด','คน·วัน','ชั่วโมง','งวด','ต้น','จุด'];
 
-const NEXT_RFQ_NO = 'RFQ-2025-025';
+const NEXT_RFQ_NO = '';
 
 /* =================== Helpers =================== */
 
@@ -81,8 +63,8 @@ function formatThaiDate(iso) {
 export function ScreenRFQCreate({ go }) {
   // Header form
   const [title, setTitle]   = useState('');
-  const [project, setProj]  = useState('IE-LV01');
-  const [due, setDue]       = useState('2025-05-30');
+  const [project, setProj]  = useState('');
+  const [due, setDue]       = useState('');
 
   // Supplier
   const [supplierId, setSupplierId] = useState(null);
@@ -167,6 +149,7 @@ export function ScreenRFQCreate({ go }) {
               </Field>
               <Field label="โครงการ" required>
                 <select value={project} onChange={e => setProj(e.target.value)} style={inputStyle}>
+                  <option value="">— เลือกโครงการ —</option>
                   {PROJECTS.map(p => <option key={p.id} value={p.id}>{p.id} · {p.name}</option>)}
                 </select>
               </Field>

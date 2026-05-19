@@ -28,15 +28,7 @@ const CT_STATUS = {
   Final:     { bg:'var(--moss-soft)',  fg:'#2F4A1A',         dot:'var(--moss)',   label:'Final · ใช้งานได้' },
 };
 
-const CONTRACT_LIST = [
-  { no:'CT-2024-018', title:'งานติดตั้งระบบไฟฟ้า บางนา เฟส 2', project:'IE-LV01', supplier:'หจก. รุ่งเรืองไฟฟ้า', supKind:'rr', value:8420000, status:'Reviewed', findings:5, lastAt:'14 ม.ค. 14:32' },
-  { no:'CT-2024-019', title:'งานก่ออิฐ-ฉาบ ลาดพร้าว A',         project:'IE-LV02', supplier:'หจก. ช่างไทย',         supKind:'default', value:2480000, status:'Uploaded',  findings:0, lastAt:'17 พ.ค. 09:12' },
-  { no:'CT-2024-020', title:'จัดซื้อเหล็ก H-Beam รังสิต',         project:'IE-LV04', supplier:'เอเชียสตีล',          supKind:'aw', value:6840000, status:'Reviewing', findings:0, lastAt:'17 พ.ค. 13:48' },
-  { no:'CT-2024-017', title:'งานหลังคา CPAC วิลล่า',              project:'IE-VL02', supplier:'CPAC Roof',           supKind:'sc', value:1240000, status:'Legal',     findings:3, lastAt:'12 พ.ค. 16:20' },
-  { no:'CT-2024-016', title:'งานทาสีภายนอก เฟส 1',               project:'IE-LV01', supplier:'TOA Distribution',    supKind:'default', value:484000,  status:'Final',     findings:2, lastAt:'8 พ.ค.' },
-  { no:'CT-2024-015', title:'งานสุขภัณฑ์ COTTO Town',            project:'IE-TH03', supplier:'COTTO Wholesale',     supKind:'default', value:684000,  status:'Final',     findings:1, lastAt:'2 พ.ค.' },
-  { no:'CT-2024-014', title:'งานปูพื้น-ผนัง รังสิต B',             project:'IE-LV04', supplier:'ไทยเซรามิค',           supKind:'default', value:1860000, status:'Final',     findings:4, lastAt:'24 เม.ย.' },
-];
+const CONTRACT_LIST = [];
 
 export function ScreenContractList({ go }) {
   const [q, setQ] = useState('');
@@ -144,7 +136,11 @@ export function ScreenContractList({ go }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(c => {
+            {filtered.length === 0 ? (
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+                ยังไม่มีข้อมูล
+              </td></tr>
+            ) : filtered.map(c => {
               const sp = CT_STATUS[c.status];
               return (
                 <tr key={c.no} onClick={() => go('contract-detail')} style={{ cursor:'pointer' }}>
@@ -283,7 +279,7 @@ export function ScreenContract({ go }) {
       <div className="page-head" style={{ alignItems:'flex-start' }}>
         <div className="page-title">
           <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6 }}>
-            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>CT-2024-018</span>
+            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>—</span>
             <span style={{
               display:'inline-flex', alignItems:'center', gap:6,
               fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
@@ -293,11 +289,11 @@ export function ScreenContract({ go }) {
               {sp.label}
             </span>
           </div>
-          <h1 className="h-display">งานติดตั้งระบบไฟฟ้า บางนา เฟส 2</h1>
+          <h1 className="h-display">ยังไม่มีข้อมูล</h1>
           <div style={{ display:'flex', gap:24, marginTop:12, fontSize:13, color:'var(--ink-3)', flexWrap:'wrap' }}>
-            <span>โครงการ <strong style={{ color:'var(--ink-2)' }}>IE-LV01 · Initial Living บางนา</strong></span>
-            <span>ผู้รับเหมา <strong style={{ color:'var(--ink-2)' }}>หจก. รุ่งเรืองไฟฟ้า</strong></span>
-            <span>มูลค่า <strong style={{ color:'var(--ink-2)' }}>฿8.42M</strong></span>
+            <span>โครงการ <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
+            <span>ผู้รับเหมา <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
+            <span>มูลค่า <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
           </div>
         </div>
       </div>
@@ -367,8 +363,8 @@ export function ScreenContract({ go }) {
                   fontSize:14, fontWeight:600, letterSpacing:0.5,
                 }}>PDF</div>
               </div>
-              <div style={{ fontSize:14, fontWeight:500, marginBottom:6 }}>Contract_v2_Draft.pdf</div>
-              <div style={{ fontSize:11.5, color:'var(--ink-3)', marginBottom:24 }}>4.2 MB · อัพโหลดเมื่อ 17 พ.ค. 09:12</div>
+              <div style={{ fontSize:14, fontWeight:500, marginBottom:6 }}>—</div>
+              <div style={{ fontSize:11.5, color:'var(--ink-3)', marginBottom:24 }}>ยังไม่มีข้อมูล</div>
               <h2 className="h-section" style={{ marginBottom:8 }}>คอนเฟิร์มให้ AI ตรวจสอบสัญญานี้?</h2>
               <p style={{ fontSize:13.5, color:'var(--ink-2)', lineHeight:1.7, margin:'0 auto 24px', maxWidth:480 }}>
                 ระบบจะใช้ AI วิเคราะห์ข้อความในสัญญาเทียบกับ Template มาตรฐานของบริษัท
@@ -421,26 +417,19 @@ export function ScreenContract({ go }) {
         <aside style={{ display:'flex', flexDirection:'column', gap:16 }}>
           <div className="card">
             <h3 className="h-card" style={{ marginBottom:14 }}>ข้อมูลสัญญา</h3>
-            <KV label="เลขที่สัญญา" value="CT-2024-018" mono />
-            <KV label="ประเภท" value="งานระบบไฟฟ้า" />
-            <KV label="RFQ อ้างอิง" value="RFQ-2024-118" mono />
-            <KV label="มูลค่ารวม" value="฿8.42M" />
-            <KV label="เซ็นเมื่อ" value="14 ม.ค. 2568" />
-            <KV label="ระยะเวลา" value="180 วัน" />
+            <KV label="เลขที่สัญญา" value="—" mono />
+            <KV label="ประเภท" value="—" />
+            <KV label="RFQ อ้างอิง" value="—" mono />
+            <KV label="มูลค่ารวม" value="—" />
+            <KV label="เซ็นเมื่อ" value="—" />
+            <KV label="ระยะเวลา" value="—" />
           </div>
 
           <div className="card">
             <h3 className="h-card" style={{ marginBottom:14 }}>ไฟล์</h3>
-            <FileItem name="Contract_v2_Draft.pdf" size="4.2 MB" tag={phase === 'Uploaded' ? 'รอ AI' : 'ฉบับร่าง'} primary />
-            {(phase === 'Reviewed' || phase === 'Legal' || phase === 'Final') && (
-              <FileItem name="AI_Risk_Report.pdf" size="284 KB" tag="AI Report" />
-            )}
-            {(phase === 'Legal' || phase === 'Final') && (
-              <FileItem name="Legal_Review_Notes.pdf" size="156 KB" tag="กฎหมาย" />
-            )}
-            {phase === 'Final' && (
-              <FileItem name="Contract_Final_Signed.pdf" size="4.5 MB" tag="Final" primary />
-            )}
+            <div style={{ textAlign:'center', padding:20, color:'var(--ink-3)', fontSize:12.5 }}>
+              ยังไม่มีข้อมูล
+            </div>
           </div>
 
           {/* Demo helper: jump to any phase */}
@@ -481,46 +470,22 @@ export function ScreenContract({ go }) {
 
 /* =================== AI Report panel =================== */
 function AIReportPanel({ phase, onSendToLegal, onUploadFinal }) {
+  const findings = [];
+
   return (
     <>
       <div className="card" style={{ padding:28, background:'var(--surface-2)', marginBottom:24 }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
           <div>
-            <div className="eyebrow" style={{ marginBottom:6 }}>AI Risk Report · 14 ม.ค. 14:32</div>
+            <div className="eyebrow" style={{ marginBottom:6 }}>AI Risk Report</div>
             <h2 className="h-section" style={{ margin:0 }}>สรุปประเด็นที่ต้องแก้</h2>
           </div>
           <Chip kind="ai">Claude Sonnet</Chip>
         </div>
 
-        <div style={{ display:'flex', alignItems:'center', gap:24, marginBottom:24 }}>
-          <div style={{ width:220, flexShrink:0 }}>
-            <div style={{ height:8, background:'var(--rule)', borderRadius:999, position:'relative', overflow:'hidden' }}>
-              <div style={{
-                position:'absolute', left:0, top:0, height:'100%',
-                width:'58%',
-                background:'linear-gradient(90deg, var(--moss) 0%, var(--ochre) 60%, var(--clay) 100%)',
-                borderRadius:999,
-              }} />
-              <div style={{
-                position:'absolute', left:'calc(58% - 1px)', top:-4, bottom:-4,
-                width:2, background:'var(--ink)',
-              }} />
-            </div>
-            <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'var(--ink-3)', marginTop:6 }}>
-              <span>ต่ำ</span><span>ปานกลาง</span><span>สูง</span>
-            </div>
-          </div>
-          <div>
-            <div style={{ fontFamily:'var(--font-serif)', fontSize:28, lineHeight:1 }}>ปานกลาง</div>
-            <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:4 }}>5 ประเด็นต้องดู · 2 หายไป</div>
-          </div>
+        <div style={{ padding:'24px 0', textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
+          ยังไม่มีข้อมูล
         </div>
-
-        <p style={{ fontSize:13.5, color:'var(--ink-2)', lineHeight:1.7, margin:0 }}>
-          สัญญาฉบับนี้มีโครงสร้างมาตรฐานครบถ้วน แต่ยังขาดความชัดเจนใน <strong>ค่าปรับล่าช้า</strong> และ <strong>คลอสเหตุสุดวิสัย</strong> —
-          แนะนำให้ระบุอัตราค่าปรับเป็น % ต่อวัน พร้อมเพดานสูงสุดก่อนส่งฝ่ายกฎหมาย รวมทั้งเพิ่มข้อกำหนด Force Majeure
-          ตามมาตรฐาน FIDIC ของบริษัท
-        </p>
 
         <div style={{ display:'flex', gap:8, marginTop:24, paddingTop:20, borderTop:'1px solid var(--rule)' }}>
           <button className="btn">{Icons.download} ดาวน์โหลด Report</button>
@@ -532,7 +497,7 @@ function AIReportPanel({ phase, onSendToLegal, onUploadFinal }) {
           {phase === 'Legal' && (
             <>
               <div style={{ flex:1, padding:'8px 14px', background:'var(--chip-recv-bg)', color:'var(--chip-recv-fg)', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:8 }}>
-                <span>{Icons.clock}</span> ส่งให้ฝ่ายกฎหมาย 15 พ.ค. · รอผลตรวจ
+                <span>{Icons.clock}</span> รอผลตรวจจากฝ่ายกฎหมาย
               </div>
               <button className="btn primary" onClick={onUploadFinal}>
                 {Icons.upload} Upload Final
@@ -548,27 +513,18 @@ function AIReportPanel({ phase, onSendToLegal, onUploadFinal }) {
         </div>
       </div>
 
-      <h3 className="h-section" style={{ marginBottom:16 }}>รายการที่ต้องแก้ ({6} ข้อ)</h3>
-      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-        <Finding tone="err"  title="ไม่มีคลอสเหตุสุดวิสัย (Force Majeure)"
-          clause="ขาดหายไป" category="Missing Clause"
-          body="สัญญามาตรฐานของบริษัทมีคลอส Force Majeure ครอบคลุมภัยพิบัติธรรมชาติ การประท้วง และโรคระบาด — สัญญานี้ไม่มี" />
-        <Finding tone="warn" title="ค่าปรับล่าช้ายังไม่ระบุเพดานสูงสุด"
-          clause="ข้อ 8.3" category="Penalty Clauses"
-          body="ระบุค่าปรับเป็น ฿5,000 ต่อวัน แต่ไม่มีเพดานสูงสุด — แนะนำเพิ่ม 'แต่ไม่เกิน 10% ของมูลค่าสัญญา'" />
-        <Finding tone="warn" title="ระยะเวลารับประกันสั้นกว่ามาตรฐาน"
-          clause="ข้อ 12.1" category="Warranty"
-          body="ระบุรับประกัน 12 เดือน — มาตรฐานบริษัทสำหรับงานระบบไฟฟ้าคือ 24 เดือน" />
-        <Finding tone="warn" title="เงินประกันผลงาน 5% ต่ำกว่าค่าเฉลี่ยตลาด"
-          clause="ข้อ 9.1" category="Retention"
-          body="ค่าเฉลี่ยตลาดสำหรับงานระบบไฟฟ้าโครงการบ้านจัดสรรอยู่ที่ 5–10% — พิจารณาเพิ่มเป็น 7%" />
-        <Finding tone="info" title="เงื่อนไขชำระเงิน Milestone ชัดเจน"
-          clause="ข้อ 5.2 – 5.5" category="Payment Terms"
-          body="แบ่ง Milestone 5 งวด ตามเปอร์เซ็นต์งานสำเร็จ — มีรายละเอียดเทียบเปอร์เซ็นต์งานชัดเจน ถือเป็นจุดที่ดี" isPositive />
-        <Finding tone="info" title="การยกเลิกสัญญาระบุไว้ครบถ้วน"
-          clause="ข้อ 14" category="Termination"
-          body="ครอบคลุมการยกเลิกทั้งสองฝ่าย, เงื่อนไข Notice 30 วัน, และผลกระทบทางการเงิน" isPositive />
-      </div>
+      <h3 className="h-section" style={{ marginBottom:16 }}>รายการที่ต้องแก้ ({findings.length} ข้อ)</h3>
+      {findings.length === 0 ? (
+        <div className="card" style={{ padding:40, textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
+          ยังไม่มีข้อมูล
+        </div>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          {findings.map((f, i) => (
+            <Finding key={i} {...f} />
+          ))}
+        </div>
+      )}
     </>
   );
 }
@@ -609,8 +565,8 @@ function ConfirmAIModal({ onConfirm, onClose }) {
 }
 
 function SendToLegalModal({ onSend, onClose }) {
-  const [to, setTo] = useState('legal@initialestate.com');
-  const [note, setNote] = useState('แนบ AI Report สำหรับ CT-2024-018 — โปรดตรวจสอบประเด็นที่ AI พบและส่งความเห็นกลับมา');
+  const [to, setTo] = useState('');
+  const [note, setNote] = useState('');
   return (
     <div onClick={onClose} style={{
       position:'fixed', inset:0, background:'rgba(20,18,14,0.32)',
@@ -641,7 +597,7 @@ function SendToLegalModal({ onSend, onClose }) {
               }} />
           </label>
           <div style={{ padding:'10px 14px', background:'var(--surface-2)', borderRadius:6, fontSize:11.5, color:'var(--ink-3)' }}>
-            📎 จะแนบ <strong style={{ color:'var(--ink-2)' }}>AI_Risk_Report.pdf</strong> และ <strong style={{ color:'var(--ink-2)' }}>Contract_v2_Draft.pdf</strong>
+            📎 จะแนบ AI Report และไฟล์สัญญาฉบับร่าง
           </div>
         </div>
         <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', background:'var(--surface-2)', display:'flex', justifyContent:'flex-end', gap:8 }}>
