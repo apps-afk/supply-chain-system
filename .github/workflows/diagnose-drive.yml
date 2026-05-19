@@ -1,0 +1,111 @@
+name: Diagnose Drive Uploads
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          npm install --no-save googleapis 2>&1 | tail -1
+
+      - name: List everything in the Drive parent folder
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          FOLDER: ${{ vars.GOOGLE_DRIVE_PARENT_FOLDER_ID || '0AH8osbMRD4plUk9PVA' }}
+        run: |
+          echo "$SA_JSON" > /tmp/sa.json
+          FOLDER_ID="0AH8osbMRD4plUk9PVA"
+          node -e "
+            const { google } = require('googleapis');
+            const fs = require('fs');
+            const credentials = JSON.parse(fs.readFileSync('/tmp/sa.json', 'utf8'));
+            const auth = new google.auth.GoogleAuth({ credentials, scopes: ['https://www.googleapis.com/auth/drive'] });
+            const drive = google.drive({ version: 'v3', auth });
+
+            (async () => {
+              console.log('=== 1) Parent folder details ===');
+              const parent = await drive.files.get({
+                fileId: '$FOLDER_ID',
+                supportsAllDrives: true,
+                fields: 'id, name, driveId, mimeType, parents'
+              });
+              console.log(JSON.stringify(parent.data, null, 2));
+
+              console.log('');
+              console.log('=== 2) All children of parent (depth 1) ===');
+              const children = await drive.files.list({
+                q: \`'$FOLDER_ID' in parents and trashed = false\`,
+                fields: 'files(id, name, mimeType, createdTime, size, webViewLink, parents)',
+                supportsAllDrives: true,
+                includeItemsFromAllDrives: true,
+                corpora: 'drive',
+                driveId: parent.data.driveId || '$FOLDER_ID',
+                pageSize: 100,
+              });
+              if (children.data.files.length === 0) {
+                console.log('(empty — no children)');
+              } else {
+                children.data.files.forEach(f => {
+                  const kind = f.mimeType === 'application/vnd.google-apps.folder' ? 'FOLDER' : 'FILE  ';
+                  console.log(\`  [\${kind}] \${f.name}  (\${f.id})  \${f.size || ''}\`);
+                });
+              }
+
+              console.log('');
+              console.log('=== 3) Look 2 levels deep (children of children) ===');
+              for (const f of children.data.files) {
+                if (f.mimeType !== 'application/vnd.google-apps.folder') continue;
+                const sub = await drive.files.list({
+                  q: \`'\${f.id}' in parents and trashed = false\`,
+                  fields: 'files(id, name, mimeType, size, createdTime, webViewLink)',
+                  supportsAllDrives: true,
+                  includeItemsFromAllDrives: true,
+                  corpora: 'drive',
+                  driveId: parent.data.driveId || '$FOLDER_ID',
+                  pageSize: 50,
+                });
+                console.log(\`  Folder \"\${f.name}\":\`);
+                if (sub.data.files.length === 0) console.log('    (empty)');
+                else sub.data.files.forEach(c => console.log(\`    - \${c.name}  (\${c.id})  \${c.webViewLink}\`));
+              }
+
+              console.log('');
+              console.log('=== 4) Search across ALL files owned/accessible by service account ===');
+              const all = await drive.files.list({
+                q: \"trashed = false and mimeType != 'application/vnd.google-apps.folder'\",
+                fields: 'files(id, name, parents, createdTime, webViewLink)',
+                supportsAllDrives: true,
+                includeItemsFromAllDrives: true,
+                corpora: 'allDrives',
+                pageSize: 20,
+              });
+              console.log(\`  Found \${all.data.files.length} non-folder files visible to service account:\`);
+              all.data.files.forEach(f => {
+                console.log(\`    - \${f.name}  parents=\${JSON.stringify(f.parents)}  link=\${f.webViewLink}\`);
+              });
+            })().catch(e => { console.error('ERROR:', e.message); process.exit(1); });
+          "
+
+      - name: List file_attachments rows in Supabase
+        env:
+          URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          echo "=== file_attachments rows ==="
+          curl -sS "$URL/rest/v1/file_attachments?select=*&order=uploaded_at.desc&limit=20" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | python3 -m json.tool
+
+          echo ""
+          echo "=== contracts table (latest 10) ==="
+          curl -sS "$URL/rest/v1/contracts?select=id,no,title,status,created_at&order=created_at.desc&limit=10" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | python3 -m json.tool
+
+          echo ""
+          echo "=== rfqs table (latest 10) ==="
+          curl -sS "$URL/rest/v1/rfqs?select=id,no,title,status,created_at&order=created_at.desc&limit=10" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" | python3 -m json.tool
