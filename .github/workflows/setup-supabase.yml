@@ -1,4 +1,4 @@
-name: Setup Supabase + Vercel
+name: Setup Supabase + Vercel + Seed Admin
 
 on:
   workflow_dispatch:
@@ -36,12 +36,9 @@ jobs:
             "$URL/rest/v1/users?select=count" \
             -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
           echo "users → HTTP $CODE"
-          if [ "$CODE" = "404" ] || grep -q "does not exist\|relation .* does not exist" /tmp/r.txt 2>/dev/null; then
+          if [ "$CODE" = "404" ] || grep -q "does not exist" /tmp/r.txt 2>/dev/null; then
             echo ""
-            echo "::error::Table 'users' does NOT exist yet."
-            echo "::error::Please open Supabase Dashboard → SQL Editor → paste contents of supabase/schema.sql → Run."
-            echo ""
-            echo "Schema file is at: supabase/schema.sql in this repo."
+            echo "::error::Table 'users' does NOT exist. Run supabase/schema.sql in Supabase SQL Editor first."
             exit 1
           fi
           if [ "$CODE" -ge 400 ]; then
@@ -49,6 +46,55 @@ jobs:
             exit 1
           fi
           echo "  Tables exist ✓"
+
+      - name: Seed admin user pasit@initialestate.com
+        env:
+          URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          # Hash matches the app's algorithm: sha256(salt + password)
+          EMAIL="pasit@initialestate.com"
+          NAME="pasit suepaisal"
+          PASSWORD="Pasit.suepasial1"
+          SALT="ie_pasit_$(openssl rand -hex 8)"
+          HASH=$(printf "%s%s" "$SALT" "$PASSWORD" | sha256sum | awk '{print $1}')
+          USER_ID="user_pasit_$(date +%s)"
+
+          BODY=$(python3 -c "
+          import json
+          print(json.dumps({
+            'id': '$USER_ID',
+            'email': '$EMAIL',
+            'name': '$NAME',
+            'role': 'admin',
+            'salt': '$SALT',
+            'hash': '$HASH',
+            'verified': True,
+            'phone': ''
+          }))
+          ")
+
+          echo "Upserting user $EMAIL with id=$USER_ID"
+          # Use upsert so re-running the workflow doesn't fail on duplicate email.
+          # on_conflict=email merges into the existing row.
+          CODE=$(curl -sS -o /tmp/up.txt -w "%{http_code}" \
+            -X POST "$URL/rest/v1/users?on_conflict=email" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates,return=representation" \
+            -d "$BODY")
+          echo "HTTP $CODE"
+          cat /tmp/up.txt
+          if [ "$CODE" -ge 400 ]; then
+            echo "::error::Failed to seed user"
+            exit 1
+          fi
+
+          echo ""
+          echo "=== Verify user exists ==="
+          curl -sS "$URL/rest/v1/users?email=eq.$EMAIL&select=id,email,name,role" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+          echo ""
 
       - name: Pull Vercel project config
         run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
@@ -62,22 +108,18 @@ jobs:
           add_env() {
             local key="$1"
             local val="$2"
-            echo "Adding $key to Vercel..."
-            # Use vercel CLI — it idempotently creates env vars for all targets
+            echo "Adding $key..."
             for tgt in production preview development; do
-              # Remove existing if present (ignore error if not), then add fresh
               vercel env rm "$key" "$tgt" --yes --token="$VTOKEN" 2>/dev/null || true
-              echo -n "$val" | vercel env add "$key" "$tgt" --token="$VTOKEN" >/dev/null 2>&1 || \
-                echo "  Note: $tgt target may have failed"
+              echo -n "$val" | vercel env add "$key" "$tgt" --token="$VTOKEN" 2>&1 \
+                | grep -v "^$" || true
             done
-            echo "  Done $key"
           }
-
           add_env "NEXT_PUBLIC_SUPABASE_URL" "$URL"
           add_env "SUPABASE_SERVICE_KEY" "$KEY"
 
           echo ""
-          echo "=== Verify env vars present ==="
+          echo "=== Env vars now set ==="
           vercel env ls --token="$VTOKEN" 2>&1 | grep -E "SUPABASE|NEXT_PUBLIC" || echo "(none matched)"
 
       - name: Redeploy to production
