@@ -80,6 +80,36 @@ export function ScreenContractList({ go }) {
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState('ทั้งหมด');
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function deleteContract(c, fileCount) {
+    const msg = `ลบสัญญา "${c.title || c.no}"?` +
+      (fileCount > 0
+        ? `\n\nไฟล์ ${fileCount} ไฟล์ใน Google Drive จะถูกลบไปด้วย (ไม่สามารถกู้คืนได้)`
+        : '\n\n(ไม่มีไฟล์แนบ)');
+    if (!confirm(msg)) return;
+    setDeleting(true);
+    try {
+      const r = await fetch('/api/contracts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: c.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        alert(`ลบไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`);
+      } else if (d.deleted?.drive_errors?.length) {
+        alert(
+          `ลบสัญญาสำเร็จ — แต่มี ${d.deleted.drive_errors.length} ไฟล์ใน Drive ที่ลบไม่ออก:\n` +
+          d.deleted.drive_errors.join('\n')
+        );
+      }
+      await load();
+    } catch (e) {
+      alert(`เครือข่ายขัดข้อง: ${e.message}`);
+    }
+    setDeleting(false);
+  }
 
   async function load() {
     setLoading(true); setErr('');
@@ -232,13 +262,14 @@ export function ScreenContractList({ go }) {
               <th>เซ็นเมื่อ</th>
               <th>สถานะ</th>
               <th style={{ width:120 }}>ไฟล์</th>
+              <th style={{ width:50 }}></th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล
               </td></tr>
             ) : filtered.map(c => {
@@ -287,6 +318,19 @@ export function ScreenContractList({ go }) {
                     ) : (
                       <span style={{ fontSize:11, color:'var(--ink-4)' }}>ยังไม่มีไฟล์</span>
                     )}
+                  </td>
+                  <td onClick={e => e.stopPropagation()} style={{ textAlign:'right' }}>
+                    <button
+                      onClick={() => deleteContract(c, atts.length)}
+                      title="ลบสัญญา"
+                      style={{
+                        background:'none', border:'none', cursor:'pointer',
+                        color:'var(--ink-4)', fontSize:16, padding:'4px 8px',
+                        borderRadius:4,
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#FDE8E4'; e.currentTarget.style.color = 'var(--clay)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink-4)'; }}
+                    >🗑</button>
                   </td>
                 </tr>
               );
@@ -598,6 +642,38 @@ export function ScreenContract({ go }) {
     } catch { /* ignore */ }
   }
 
+  async function deleteCurrentContract() {
+    if (!contract) return;
+    const fileCount = attachments.length;
+    const msg = `ลบสัญญา "${contract.title || contract.no}"?` +
+      (fileCount > 0
+        ? `\n\nไฟล์ ${fileCount} ไฟล์ใน Google Drive จะถูกลบไปด้วย (ไม่สามารถกู้คืนได้)`
+        : '\n\n(ไม่มีไฟล์แนบ)');
+    if (!confirm(msg)) return;
+    try {
+      const r = await fetch('/api/contracts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: contract.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        alert(`ลบไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`);
+        return;
+      }
+      if (d.deleted?.drive_errors?.length) {
+        alert(
+          `ลบสัญญาสำเร็จ — แต่มี ${d.deleted.drive_errors.length} ไฟล์ใน Drive ที่ลบไม่ออก:\n` +
+          d.deleted.drive_errors.join('\n')
+        );
+      }
+      try { window.localStorage.removeItem('contract.currentId'); } catch {}
+      go('contract');  // back to list
+    } catch (e) {
+      alert(`เครือข่ายขัดข้อง: ${e.message}`);
+    }
+  }
+
   useEffect(() => {
     (async () => {
       setLoading(true); setErr('');
@@ -700,6 +776,18 @@ export function ScreenContract({ go }) {
             <span>มูลค่า <strong style={{ color:'var(--ink-2)' }}>{contract?.amount != null ? money(contract.amount) : '—'}</strong></span>
           </div>
         </div>
+        {contract && (
+          <div>
+            <button
+              className="btn"
+              onClick={() => deleteCurrentContract()}
+              style={{ color:'var(--clay)', borderColor:'#F5C0B4' }}
+              title="ลบสัญญานี้และไฟล์ใน Drive"
+            >
+              🗑 ลบสัญญานี้
+            </button>
+          </div>
+        )}
       </div>
 
       {/* If contract is already 'active' (skipped review or workflow done),
