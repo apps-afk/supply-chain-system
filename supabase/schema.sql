@@ -211,9 +211,12 @@ create table if not exists contracts (
   start_date  date,
   end_date    date,
   signed_at   date,
+  warranty    text  default '',
   notes       text  default '',
   created_at  timestamptz default now()
 );
+-- Idempotent migration for existing tables that pre-date the warranty column
+alter table contracts add column if not exists warranty text default '';
 create index if not exists contracts_status_idx on contracts (status);
 create index if not exists contracts_supplier_idx on contracts (supplier_id);
 

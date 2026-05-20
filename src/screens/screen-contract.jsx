@@ -390,6 +390,7 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
     currency:    'THB',
     start_date:  '',
     end_date:    '',
+    warranty:    '',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr]   = useState('');
@@ -429,6 +430,7 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
         signed_at:   reviewMode === 'skip' ? today : null,
         start_date:  form.start_date || null,
         end_date:    form.end_date   || null,
+        warranty:    form.warranty?.trim() || '',
       };
       const rCreate = await fetch('/api/contracts', {
         method: 'POST',
@@ -576,6 +578,19 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
             <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
               <span style={{ fontSize:11.5, color:'var(--ink-3)', fontWeight:500 }}>สิ้นสุด</span>
               <input type="date" value={form.end_date} onChange={e=>set('end_date', e.target.value)} style={inputStyle} />
+            </label>
+
+            <label style={{ gridColumn:'1 / -1', display:'flex', flexDirection:'column', gap:6 }}>
+              <span style={{ fontSize:11.5, color:'var(--ink-3)', fontWeight:500 }}>
+                การรับประกันผลงาน
+                <span style={{ marginLeft:6, color:'var(--ink-4)', fontWeight:400 }}>(พิมพ์อิสระ)</span>
+              </span>
+              <input
+                type="text"
+                value={form.warranty}
+                onChange={e => set('warranty', e.target.value)}
+                placeholder="เช่น 1 ปี · 365 วัน · ตลอดอายุการใช้งาน · 6 เดือนหลังเซ็น"
+                style={inputStyle} />
             </label>
           </div>
 
@@ -1034,6 +1049,7 @@ export function ScreenContract({ go }) {
             <KV label="มูลค่ารวม" value={contract?.amount != null ? money(contract.amount) : '—'} />
             <KV label="เซ็นเมื่อ" value={fmtDate(contract?.signed_at)} />
             <KV label="ระยะเวลา" value={contract?.start_date ? `${fmtDate(contract.start_date)} – ${fmtDate(contract.end_date)}` : '—'} />
+            <KV label="รับประกันผลงาน" value={contract?.warranty || '—'} />
           </div>
 
           <div className="card">
@@ -1339,6 +1355,7 @@ function ActiveContractView({ contract, attachments, onUploadAddon }) {
           <KV label="วันเซ็น" value={contract.signed_at ? fmtDate(contract.signed_at) : '—'} />
           <KV label="เริ่มสัญญา" value={contract.start_date ? fmtDate(contract.start_date) : '—'} />
           <KV label="สิ้นสุดสัญญา" value={contract.end_date ? fmtDate(contract.end_date) : '—'} />
+          <KV label="รับประกันผลงาน" value={contract.warranty || '—'} />
         </div>
       </aside>
     </div>
