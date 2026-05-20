@@ -123,7 +123,7 @@ function SidebarImpl({ current, onNav }) {
         <Item id="compare"  icon="compare"  label="เปรียบเทียบราคา" />
         <Item id="pricedb"  icon="pricedb"  label="ฐานข้อมูลราคา" />
         <Item id="supplierdb" icon="truck"  label="ฐานข้อมูลผู้ขาย" />
-        <Item id="contract" icon="contract" label="สัญญา" />
+        <Item id="contract" icon="contract" label="เอกสาร" />
       </div>
 
       <div className="side-group">

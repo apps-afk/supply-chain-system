@@ -60,6 +60,45 @@ function generateContractNo() {
 }
 
 // Generate an RFQ-style number (used in upload modal preview)
+/**
+ * Parse a free-text warranty string into approximate days.
+ * Handles common Thai + English patterns like "1 ปี", "6 เดือน", "365 วัน",
+ * "2 years", or combined "1 ปี 6 เดือน". Returns null if nothing parseable.
+ */
+function parseWarrantyDays(text) {
+  if (!text) return null;
+  const t = String(text).toLowerCase();
+  let days = 0;
+  const yr = t.match(/(\d+)\s*(?:ปี|year)/);
+  const mo = t.match(/(\d+)\s*(?:เดือน|month)/);
+  const dy = t.match(/(\d+)\s*(?:วัน|day)/);
+  if (yr) days += parseInt(yr[1], 10) * 365;
+  if (mo) days += parseInt(mo[1], 10) * 30;
+  if (dy) days += parseInt(dy[1], 10);
+  return days > 0 ? days : null;
+}
+
+/**
+ * Compute retention release status for a contract: when can the supplier
+ * come back and reclaim their retention money?
+ * Base date = signed_at or end_date; release = base + warranty days.
+ * Returns { state: 'due' | 'soon' | 'pending' | 'unknown', releaseDate, daysLeft }
+ */
+function retentionStatus(contract) {
+  const warrantyDays = parseWarrantyDays(contract?.warranty);
+  const baseStr = contract?.signed_at || contract?.end_date;
+  if (!warrantyDays || !baseStr) return { state: 'unknown' };
+  const base = new Date(baseStr);
+  if (Number.isNaN(base.getTime())) return { state: 'unknown' };
+  const release = new Date(base.getTime() + warrantyDays * 86400000);
+  const now = new Date();
+  const daysLeft = Math.round((release - now) / 86400000);
+  let state = 'pending';
+  if (daysLeft <= 0) state = 'due';
+  else if (daysLeft <= 30) state = 'soon';
+  return { state, releaseDate: release, daysLeft };
+}
+
 function fmtDate(iso) {
   if (!iso) return '—';
   try {
@@ -75,15 +114,16 @@ export function ScreenContractList({ go }) {
   const [suppliers, setSuppliers] = useState([]);
   const [projects,  setProjects]  = useState([]);
   const [attachmentsByContract, setAttachmentsByContract] = useState({});  // id → [attachment, ...]
+  const [contractTypes, setContractTypes] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [err,       setErr]       = useState('');
   const [q, setQ] = useState('');
-  const [filter, setFilter] = useState('ทั้งหมด');
+  const [projectFilter, setProjectFilter] = useState('all');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   async function deleteContract(c, fileCount) {
-    const msg = `ลบสัญญา "${c.title || c.no}"?` +
+    const msg = `ลบเอกสาร "${c.title || c.no}"?` +
       (fileCount > 0
         ? `\n\nไฟล์ ${fileCount} ไฟล์ใน Google Drive จะถูกลบไปด้วย (ไม่สามารถกู้คืนได้)`
         : '\n\n(ไม่มีไฟล์แนบ)');
@@ -100,7 +140,7 @@ export function ScreenContractList({ go }) {
         alert(`ลบไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`);
       } else if (d.deleted?.drive_errors?.length) {
         alert(
-          `ลบสัญญาสำเร็จ — แต่มี ${d.deleted.drive_errors.length} ไฟล์ใน Drive ที่ลบไม่ออก:\n` +
+          `ลบเอกสารสำเร็จ — แต่มี ${d.deleted.drive_errors.length} ไฟล์ใน Drive ที่ลบไม่ออก:\n` +
           d.deleted.drive_errors.join('\n')
         );
       }
@@ -114,15 +154,17 @@ export function ScreenContractList({ go }) {
   async function load() {
     setLoading(true); setErr('');
     try {
-      const [rContracts, rSuppliers, rProjects, rAtt] = await Promise.all([
+      const [rContracts, rSuppliers, rProjects, rTypes, rAtt] = await Promise.all([
         fetch('/api/contracts'),
         fetch('/api/suppliers'),
         fetch('/api/projects'),
+        fetch('/api/contract-types'),
         fetch('/api/attachments?entity_type=contract&limit=500'),
       ]);
       const dContracts = await rContracts.json();
       const dSuppliers = await rSuppliers.json();
       const dProjects  = await rProjects.json();
+      const dTypes     = await rTypes.json();
       const dAtt       = await rAtt.ok ? await rAtt.json() : { items: [] };
 
       // Group attachments by contract id, keep most recent first
@@ -136,6 +178,7 @@ export function ScreenContractList({ go }) {
       setContracts(dContracts.items || []);
       setSuppliers(dSuppliers.items || []);
       setProjects(dProjects.items   || []);
+      setContractTypes(dTypes.items || []);
     } catch {
       setErr('เครือข่ายขัดข้อง');
     }
@@ -157,109 +200,69 @@ export function ScreenContractList({ go }) {
   const supName = (id) => supById.get(id)?.name || '—';
   const projName = (id) => projById.get(id)?.name || '—';
 
+  // Contract-type lookup map for O(1) name + retention_pct
+  const typeById = useMemo(
+    () => new Map(contractTypes.map(t => [t.id, t])),
+    [contractTypes],
+  );
+
   const filtered = useMemo(() => {
     const v = q.toLowerCase();
     return contracts.filter(c => {
-      if (filter !== 'ทั้งหมด') {
-        // filter can be either a UI bucket (Uploaded/Reviewing/...) or a DB status
-        if (CT_STATUS[filter]) {
-          if (DB_TO_BUCKET[c.status] !== filter) return false;
-        } else if (c.status !== filter) {
-          return false;
-        }
-      }
+      if (projectFilter !== 'all' && c.project_id !== projectFilter) return false;
       if (q) {
         const hit =
-          (c.no || '').toLowerCase().includes(v) ||
           (c.title || '').toLowerCase().includes(v) ||
+          (c.no || '').toLowerCase().includes(v) ||
           (supById.get(c.supplier_id)?.name || '').toLowerCase().includes(v) ||
-          (projById.get(c.project_id)?.name || '').toLowerCase().includes(v);
+          (projById.get(c.project_id)?.name || '').toLowerCase().includes(v) ||
+          (typeById.get(c.type_id)?.name || '').toLowerCase().includes(v);
         if (!hit) return false;
       }
       return true;
     });
-  }, [contracts, filter, q, supById, projById]);
-
-  // Pipeline counts — single pass instead of 5 filters
-  const stats = useMemo(() => {
-    const counts = { Uploaded:0, Reviewing:0, Reviewed:0, Legal:0, Final:0 };
-    for (const c of contracts) {
-      const b = DB_TO_BUCKET[c.status];
-      if (b && counts[b] !== undefined) counts[b]++;
-    }
-    return ['Uploaded','Reviewing','Reviewed','Legal','Final'].map(b => ({ s: b, count: counts[b] }));
-  }, [contracts]);
+  }, [contracts, projectFilter, q, supById, projById, typeById]);
 
   return (
     <div className="page">
       <div className="page-head">
         <div className="page-title">
-          <div className="eyebrow">Module 4 · สัญญา</div>
-          <h1 className="h-display">สัญญา (Contracts)</h1>
+          <div className="eyebrow">Module 4 · เอกสาร</div>
+          <h1 className="h-display">เอกสาร</h1>
           <p style={{ fontSize:14, color:'var(--ink-3)', margin:'6px 0 0', maxWidth:640 }}>
-            อัพโหลดสัญญาที่ทำแล้วภายนอก ระบบจะให้ AI ตรวจสอบและออก Report
-            · ทีมส่ง Report ให้กฎหมายตรวจ แล้ว Upload ไฟล์ Final กลับเข้าระบบ
+            เก็บเอกสารทั้งหมดของบริษัท — สัญญา, ใบเสนอราคา, บันทึกข้อตกลง ฯลฯ
+            แต่ละไฟล์อยู่ใน Google Drive และผูกกับโครงการ/คู่สัญญาในระบบ
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn primary" onClick={() => setUploadOpen(true)}>{Icons.upload} อัพโหลดสัญญา</button>
+          <button className="btn primary" onClick={() => setUploadOpen(true)}>{Icons.upload} อัพโหลดเอกสาร</button>
         </div>
       </div>
 
-      {/* 5-status pipeline */}
-      <div style={{
-        display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:12,
-        marginBottom:32,
-      }}>
-        {stats.map((s,i) => {
-          const sp = CT_STATUS[s.s];
-          const isMine = filter === s.s;
-          return (
-            <button key={s.s} onClick={() => setFilter(filter === s.s ? 'ทั้งหมด' : s.s)}
-              className="card" style={{
-                padding:'16px 18px', textAlign:'left',
-                border:'1px solid', cursor:'pointer',
-                borderColor: isMine ? sp.dot : 'var(--rule)',
-                background: 'var(--surface)',
-                boxShadow: isMine ? `inset 0 0 0 1px ${sp.dot}` : 'none',
-                fontFamily:'inherit',
-              }}>
-              <div className="eyebrow" style={{
-                display:'inline-flex', alignItems:'center', gap:6,
-                fontSize:10, color: sp.fg, marginBottom:6,
-              }}>
-                <span style={{ width:6, height:6, borderRadius:999, background:sp.dot }} />
-                {sp.label}
-              </div>
-              <div style={{ fontFamily:'var(--font-serif)', fontSize:32, lineHeight:1 }}>{s.count}</div>
-              <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:6 }}>
-                {i === 0 && 'ยังไม่กดคอนเฟิร์มให้ AI ตรวจ'}
-                {i === 1 && 'AI กำลังประมวลผล'}
-                {i === 2 && 'Report พร้อมส่งฝ่ายกฎหมาย'}
-                {i === 3 && 'อยู่ที่ทีมกฎหมาย'}
-                {i === 4 && 'ปิดงาน · ใช้งานในระบบ'}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* DB status filter pills */}
-      <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16, flexWrap:'wrap' }}>
-        <div style={{ display:'flex', gap:4 }}>
-          {['ทั้งหมด', ...Object.keys(DB_STATUS_LABEL)].map(f => (
-            <button key={f} onClick={() => setFilter(f)} className="btn sm" style={{
-              background: filter === f ? 'var(--ink)' : 'transparent',
-              color: filter === f ? 'var(--paper)' : 'var(--ink-2)',
-              borderColor: filter === f ? 'var(--ink)' : 'var(--rule)',
-              padding:'5px 12px',
-            }}>{f === 'ทั้งหมด' ? 'ทั้งหมด' : DB_STATUS_LABEL[f]}</button>
-          ))}
-        </div>
+      {/* Filter row — project + search */}
+      <div style={{ display:'flex', gap:12, alignItems:'center', marginBottom:16, flexWrap:'wrap' }}>
+        <label style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <span style={{ fontSize:12, color:'var(--ink-3)' }}>โครงการ</span>
+          <select
+            value={projectFilter}
+            onChange={e => setProjectFilter(e.target.value)}
+            style={{
+              padding:'6px 28px 6px 10px', borderRadius:6,
+              border:'1px solid var(--rule-2)', fontSize:12.5,
+              background:'var(--surface)', fontFamily:'var(--font-sans)',
+              appearance:'none',
+              backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%236E6859' stroke-width='1.4' stroke-linecap='round'><path d='m3 4.5 3 3 3-3'/></svg>")`,
+              backgroundRepeat:'no-repeat', backgroundPosition:'right 8px center',
+              minWidth:180,
+            }}>
+            <option value="all">— ทุกโครงการ —</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
         <div style={{ marginLeft:'auto', display:'flex', gap:12, alignItems:'center' }}>
-          <SettingsSearchBox value={q} onChange={setQ} placeholder="ค้นหา CT / โครงการ / ผู้รับเหมา…" />
+          <SettingsSearchBox value={q} onChange={setQ} placeholder="ค้นหาชื่อเอกสาร / คู่สัญญา / โครงการ…" />
           <span style={{ fontSize:12, color:'var(--ink-3)' }}>
-            <strong style={{ color:'var(--ink)' }}>{filtered.length}</strong> ฉบับ
+            <strong style={{ color:'var(--ink)' }}>{filtered.length}</strong> รายการ
           </span>
         </div>
       </div>
@@ -272,34 +275,48 @@ export function ScreenContractList({ go }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width:'12%' }}>เลขที่</th>
-              <th>หัวข้อ / โครงการ</th>
+              <th style={{ width:'12%' }}>ประเภทเอกสาร</th>
+              <th>ชื่อเอกสาร</th>
               <th>คู่สัญญา</th>
-              <th className="num-col">มูลค่า</th>
-              <th>เซ็นเมื่อ</th>
-              <th>สถานะ</th>
-              <th style={{ width:120 }}>ไฟล์</th>
-              <th style={{ width:50 }}></th>
+              <th className="num-col">มูลค่าสัญญา</th>
+              <th>วันเริ่มต้น</th>
+              <th>วันสิ้นสุด</th>
+              <th>ระยะเวลารับประกัน</th>
+              <th>Retention</th>
+              <th style={{ width:80 }}>ไฟล์</th>
+              <th style={{ width:40 }}></th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+              <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+              <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล
               </td></tr>
             ) : filtered.map(c => {
-              const bucket = DB_TO_BUCKET[c.status];
-              const sp = bucket ? CT_STATUS[bucket] : { bg:'var(--paper-2)', fg:'var(--ink-3)', dot:'var(--ink-4)', label: DB_STATUS_LABEL[c.status] || c.status };
               const supplierName = supName(c.supplier_id);
               const projectName  = projName(c.project_id);
+              const type         = typeById.get(c.type_id);
               const atts = attachmentsByContract[c.id] || [];
               const latest = atts[0];
+              const ret = retentionStatus(c);
+              const retColor = ret.state === 'due' ? '#8B2A1A'
+                             : ret.state === 'soon' ? '#6B5121'
+                             : ret.state === 'pending' ? 'var(--ink-3)'
+                             : 'var(--ink-4)';
+              const retLabel = ret.state === 'due'
+                  ? `🔔 ถึงกำหนดเก็บคืน${ret.releaseDate ? ` (${fmtDate(ret.releaseDate.toISOString())})` : ''}`
+                : ret.state === 'soon'
+                  ? `⚠ อีก ${ret.daysLeft} วัน · ${fmtDate(ret.releaseDate.toISOString())}`
+                : ret.state === 'pending'
+                  ? `อีก ${ret.daysLeft} วัน · ${fmtDate(ret.releaseDate.toISOString())}`
+                  : '—';
               return (
                 <tr key={c.id} onClick={() => { window.localStorage.setItem('contract.currentId', c.id); go('contract-detail'); }} style={{ cursor:'pointer' }}>
                   <td>
-                    <div className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{c.no}</div>
+                    <div style={{ fontSize:12.5, fontWeight:500 }}>{type?.name || '—'}</div>
+                    <div className="font-mono" style={{ fontSize:10.5, color:'var(--ink-4)', marginTop:2 }}>{c.no}</div>
                   </td>
                   <td>
                     <div style={{ fontWeight:500 }}>{c.title || '—'}</div>
@@ -313,36 +330,39 @@ export function ScreenContractList({ go }) {
                   </td>
                   <td className="num-col num" style={{ fontWeight:500 }}>{c.amount != null ? money(c.amount) : '—'}</td>
                   <td style={{ fontSize:12, color:'var(--ink-3)' }}>
-                    {c.signed_at ? fmtDate(c.signed_at) : <span style={{ color:'var(--ink-4)' }}>ยังไม่เซ็น</span>}
+                    {c.start_date ? fmtDate(c.start_date) : '—'}
                   </td>
-                  <td>
-                    <span style={{
-                      display:'inline-flex', alignItems:'center', gap:6,
-                      fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
-                      background: sp.bg, color: sp.fg,
-                    }}>
-                      <span style={{ width:6, height:6, borderRadius:999, background: sp.dot }} />
-                      {sp.label}
-                    </span>
+                  <td style={{ fontSize:12, color:'var(--ink-3)' }}>
+                    {c.end_date ? fmtDate(c.end_date) : '—'}
+                  </td>
+                  <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>
+                    {c.warranty || <span style={{ color:'var(--ink-4)' }}>—</span>}
+                  </td>
+                  <td style={{ fontSize:11.5 }}>
+                    <div style={{ color:'var(--ink-2)', fontWeight:500 }}>
+                      {type?.retention_pct != null ? `${Number(type.retention_pct)}%` : '—'}
+                    </div>
+                    {ret.state !== 'unknown' && (
+                      <div style={{ color: retColor, marginTop:2, fontSize:11 }}>{retLabel}</div>
+                    )}
                   </td>
                   <td onClick={e => e.stopPropagation()}>
                     {latest && latest.drive_view_link ? (
                       <a href={latest.drive_view_link} target="_blank" rel="noopener noreferrer"
-                         style={{ fontSize:11.5, color:'var(--teal)', textDecoration:'none', display:'inline-flex', alignItems:'center', gap:4 }}>
-                        📄 เปิดใน Drive
-                        {atts.length > 1 && <span style={{ fontSize:10, color:'var(--ink-4)' }}>({atts.length})</span>}
+                         style={{ fontSize:11.5, color:'var(--teal)', textDecoration:'none' }}>
+                        📄 Drive {atts.length > 1 && `(${atts.length})`}
                       </a>
                     ) : (
-                      <span style={{ fontSize:11, color:'var(--ink-4)' }}>ยังไม่มีไฟล์</span>
+                      <span style={{ fontSize:11, color:'var(--ink-4)' }}>—</span>
                     )}
                   </td>
                   <td onClick={e => e.stopPropagation()} style={{ textAlign:'right' }}>
                     <button
                       onClick={() => deleteContract(c, atts.length)}
-                      title="ลบสัญญา"
+                      title="ลบเอกสาร"
                       style={{
                         background:'none', border:'none', cursor:'pointer',
-                        color:'var(--ink-4)', fontSize:16, padding:'4px 8px',
+                        color:'var(--ink-4)', fontSize:16, padding:'4px 6px',
                         borderRadius:4,
                       }}
                       onMouseEnter={e => { e.currentTarget.style.background = '#FDE8E4'; e.currentTarget.style.color = 'var(--clay)'; }}
@@ -482,7 +502,7 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
       <div onClick={e=>e.stopPropagation()} className="card"
            style={{ width:620, padding:0, boxShadow:'var(--sh-pop)', maxHeight:'90vh', display:'flex', flexDirection:'column' }}>
         <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
-          <div className="eyebrow" style={{ marginBottom:4 }}>อัพโหลดสัญญาใหม่</div>
+          <div className="eyebrow" style={{ marginBottom:4 }}>อัพโหลดเอกสารใหม่</div>
           <h3 className="h-section">ข้อมูลสัญญา + ไฟล์ PDF</h3>
         </div>
         <div style={{ padding:24, overflowY:'auto' }}>
@@ -677,7 +697,7 @@ export function ScreenContract({ go }) {
   async function deleteCurrentContract() {
     if (!contract) return;
     const fileCount = attachments.length;
-    const msg = `ลบสัญญา "${contract.title || contract.no}"?` +
+    const msg = `ลบเอกสาร "${contract.title || contract.no}"?` +
       (fileCount > 0
         ? `\n\nไฟล์ ${fileCount} ไฟล์ใน Google Drive จะถูกลบไปด้วย (ไม่สามารถกู้คืนได้)`
         : '\n\n(ไม่มีไฟล์แนบ)');
@@ -695,7 +715,7 @@ export function ScreenContract({ go }) {
       }
       if (d.deleted?.drive_errors?.length) {
         alert(
-          `ลบสัญญาสำเร็จ — แต่มี ${d.deleted.drive_errors.length} ไฟล์ใน Drive ที่ลบไม่ออก:\n` +
+          `ลบเอกสารสำเร็จ — แต่มี ${d.deleted.drive_errors.length} ไฟล์ใน Drive ที่ลบไม่ออก:\n` +
           d.deleted.drive_errors.join('\n')
         );
       }
@@ -823,9 +843,9 @@ export function ScreenContract({ go }) {
               className="btn"
               onClick={() => deleteCurrentContract()}
               style={{ color:'var(--clay)', borderColor:'#F5C0B4' }}
-              title="ลบสัญญานี้และไฟล์ใน Drive"
+              title="ลบเอกสารนี้และไฟล์ใน Drive"
             >
-              🗑 ลบสัญญานี้
+              🗑 ลบเอกสารนี้
             </button>
           </div>
         )}
@@ -861,7 +881,7 @@ export function ScreenContract({ go }) {
         <div className="eyebrow" style={{ marginBottom:14 }}>ขั้นตอนตรวจสอบสัญญา</div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:0, alignItems:'flex-start' }}>
           {[
-            { key:'Uploaded',  label:'1. อัพโหลดสัญญา', sub:'รับไฟล์จากภายนอก' },
+            { key:'Uploaded',  label:'1. อัพโหลดเอกสาร', sub:'รับไฟล์จากภายนอก' },
             { key:'Reviewing', label:'2. AI กำลังตรวจ',  sub:'หลังกดคอนเฟิร์ม' },
             { key:'Reviewed',  label:'3. AI Report',     sub:'รายการที่ต้องแก้' },
             { key:'Legal',     label:'4. ส่งฝ่ายกฎหมาย', sub:'รอผลตรวจ' },
@@ -1001,7 +1021,7 @@ export function ScreenContract({ go }) {
                 className="btn ghost"
                 onClick={() => deleteCurrentContract()}
                 style={{ marginTop:18, color:'var(--clay)' }}>
-                ยกเลิก / ลบสัญญานี้
+                ยกเลิก / ลบเอกสารนี้
               </button>
             </div>
           )}
@@ -1527,7 +1547,7 @@ function UploadFinalModal({ onUpload, onDone, onClose }) {
            style={{ width:520, padding:0, boxShadow:'var(--sh-pop)' }}>
         <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
           <div className="eyebrow" style={{ marginBottom:4 }}>ขั้นสุดท้าย</div>
-          <h3 className="h-section">อัพโหลดสัญญาฉบับ Final</h3>
+          <h3 className="h-section">อัพโหลดเอกสารฉบับ Final</h3>
         </div>
         <div style={{ padding:24 }}>
           {err && (
