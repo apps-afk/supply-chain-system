@@ -6,7 +6,19 @@ import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
 import { appendAudit } from '../../../lib/workspace';
 
 const MAX_MB = 25;
-const ALLOWED_MIME = ['application/pdf'];
+// Accept PDF, Word documents, and common image formats.
+// Keep this list explicit so users can't sneak in executables or zips.
+const ALLOWED_MIME = [
+  'application/pdf',
+  'application/msword',                                                       // .doc
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  // .docx
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'image/gif',
+];
 // Whitelisted entity_type values — keeps the file_attachments table tidy and
 // prevents callers from inventing categories that break later joins.
 const ALLOWED_ENTITY_TYPES = new Set(['rfq', 'contract', 'comparison', 'supplier', 'pricedb', '']);
@@ -53,7 +65,9 @@ export async function POST(request) {
     return NextResponse.json({ error: `ไฟล์ใหญ่เกิน — สูงสุด ${MAX_MB}MB` }, { status: 413 });
   }
   if (!ALLOWED_MIME.includes(file.type)) {
-    return NextResponse.json({ error: `รับเฉพาะ PDF (ได้รับ: ${file.type || 'ไม่ระบุ'})` }, { status: 415 });
+    return NextResponse.json({
+      error: `รองรับเฉพาะไฟล์ PDF / Word (.doc, .docx) / รูปภาพ (.jpg, .png, .webp, .heic, .gif) — ได้รับ: ${file.type || 'ไม่ระบุ'}`
+    }, { status: 415 });
   }
   if (!ALLOWED_ENTITY_TYPES.has(entityType)) {
     return NextResponse.json({ error: `entity_type ไม่ถูกต้อง: ${entityType}` }, { status: 400 });

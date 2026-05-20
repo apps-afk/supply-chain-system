@@ -627,8 +627,8 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
             <div style={{ fontSize:13, fontWeight:500, color:'var(--ink-2)', marginBottom:4 }}>
               ลากไฟล์มาที่นี่ หรือ <span style={{ color:'var(--teal)', textDecoration:'underline' }}>เลือกไฟล์</span>
             </div>
-            <div style={{ fontSize:11, color:'var(--ink-3)' }}>รองรับ .pdf · ไม่เกิน 25 MB</div>
-            <input type="file" accept=".pdf,application/pdf" style={{ display:'none' }}
+            <div style={{ fontSize:11, color:'var(--ink-3)' }}>รองรับ PDF, Word (.doc/.docx), รูป (.jpg/.png/.webp/.heic) · ไม่เกิน 25 MB</div>
+            <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" style={{ display:'none' }}
               onChange={e => setFile(e.target.files?.[0] || null)} />
           </label>
           {file && (
@@ -1354,7 +1354,7 @@ function ActiveContractView({ contract, attachments, onUploadAddon }) {
           {err && (
             <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:12 }}>{err}</div>
           )}
-          <input ref={inputRef} type="file" accept=".pdf"
+          <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
             onChange={e => handleFile(e.target.files?.[0])}
             disabled={busy}
             style={{ fontSize:13 }} />
@@ -1565,7 +1565,7 @@ function UploadFinalModal({ onUpload, onDone, onClose }) {
             <div style={{ fontSize:12.5, fontWeight:500, color:'var(--ink-2)' }}>
               ลากไฟล์ หรือ <span style={{ color:'var(--teal)', textDecoration:'underline' }}>เลือกไฟล์</span>
             </div>
-            <input type="file" accept=".pdf,application/pdf" style={{ display:'none' }}
+            <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" style={{ display:'none' }}
               onChange={e => setFile(e.target.files?.[0] || null)} />
           </label>
           {file && (

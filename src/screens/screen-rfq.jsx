@@ -380,9 +380,9 @@ export function ScreenRFQConfirm({ go }) {
                 {quoteFile ? quoteFile.name : <>เลือกไฟล์ PDF ของใบเสนอราคา</>}
               </div>
               <div style={{ fontSize:11, color:'var(--ink-3)' }}>
-                {quoteFile ? `${Math.round(quoteFile.size/1024)} KB` : 'รองรับ .pdf · ไม่เกิน 25 MB'}
+                {quoteFile ? `${Math.round(quoteFile.size/1024)} KB` : 'รองรับ PDF, Word (.doc/.docx), รูป (.jpg/.png/.webp/.heic) · ไม่เกิน 25 MB'}
               </div>
-              <input type="file" accept=".pdf,application/pdf" style={{ display:'none' }}
+              <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" style={{ display:'none' }}
                 onChange={e => setQuoteFile(e.target.files?.[0] || null)} />
             </label>
             <button className="btn primary" disabled={!quoteFile || uploading || !rfq} onClick={uploadQuote}>
