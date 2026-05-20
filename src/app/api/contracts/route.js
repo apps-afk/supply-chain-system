@@ -45,12 +45,17 @@ export async function DELETE(request) {
   }
 
   try {
-    // 1) Fetch all attachments for this contract
-    const { data: atts } = await supabase
+    // 1) Fetch all attachments for this contract. Surface fetch errors so we
+    //    don't proceed blind and orphan Drive files on a DB hiccup.
+    const { data: atts, error: attsErr } = await supabase
       .from('file_attachments')
       .select('id, drive_file_id, filename')
       .eq('entity_type', 'contract')
       .eq('entity_id', body.id);
+    if (attsErr) {
+      console.error('contracts.delete: attachments fetch failed', attsErr.message);
+      return NextResponse.json({ error: 'ดึงรายการไฟล์ไม่สำเร็จ' }, { status: 500 });
+    }
 
     // 2) Best-effort delete from Drive (one by one — don't fail the whole
     //    operation if a single Drive call errors out)
@@ -63,12 +68,20 @@ export async function DELETE(request) {
       }
     }
 
-    // 3) Delete attachment rows in DB
+    // 3) Delete attachment rows in DB. If this fails after Drive succeeded,
+    //    surface — returning 200 would leave ghost rows pointing at deleted
+    //    Drive files.
     if (atts && atts.length > 0) {
-      await supabase.from('file_attachments')
+      const { error: delErr } = await supabase.from('file_attachments')
         .delete()
         .eq('entity_type', 'contract')
         .eq('entity_id', body.id);
+      if (delErr) {
+        console.error('contracts.delete: attachment rows not removed', delErr.message);
+        return NextResponse.json({
+          error: 'ลบไฟล์จาก Drive แล้ว แต่ลบ metadata ในฐานข้อมูลไม่สำเร็จ',
+        }, { status: 500 });
+      }
     }
 
     // 4) Delete the contract row itself — .select('id') so we can detect
@@ -76,7 +89,10 @@ export async function DELETE(request) {
     //    when two admins delete the same contract simultaneously.
     const { data: deleted, error } = await supabase
       .from('contracts').delete().eq('id', body.id).select('id');
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error) {
+      console.error('contracts.delete: row delete failed', error.message);
+      return NextResponse.json({ error: 'ลบไม่สำเร็จ' }, { status: 400 });
+    }
     if (!deleted || deleted.length === 0) {
       return NextResponse.json({ error: 'ไม่พบสัญญา (อาจถูกลบไปแล้ว)' }, { status: 404 });
     }
@@ -97,6 +113,7 @@ export async function DELETE(request) {
       },
     });
   } catch (e) {
-    return NextResponse.json({ error: e.message || 'ลบไม่สำเร็จ' }, { status: 500 });
+    console.error('contracts.delete failed:', e?.stack || e);
+    return NextResponse.json({ error: 'ลบไม่สำเร็จ' }, { status: 500 });
   }
 }

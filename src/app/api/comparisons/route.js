@@ -31,6 +31,12 @@ export async function DELETE(request) {
   if (!session?.user) {
     return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
   }
+  // Cascade delete is destructive (removes Drive files). Restrict to admin
+  // like the contracts DELETE — non-admins can still cancel/draft a compare
+  // doc via PATCH but cannot wipe attachments.
+  if (session.user.role !== 'admin') {
+    return NextResponse.json({ error: 'ต้องเป็นผู้ดูแลระบบเท่านั้น' }, { status: 403 });
+  }
 
   let body;
   try { body = await request.json(); }
@@ -42,12 +48,17 @@ export async function DELETE(request) {
   }
 
   try {
-    // 1) Best-effort: drop any uploaded Ref files associated with this compare doc
-    const { data: atts } = await supabase
+    // 1) Fetch attachments — surface the error so we don't proceed blind and
+    //    orphan Drive files on a transient DB hiccup.
+    const { data: atts, error: attsErr } = await supabase
       .from('file_attachments')
       .select('id, drive_file_id, filename')
       .eq('entity_type', 'comparison')
       .eq('entity_id', body.id);
+    if (attsErr) {
+      console.error('comparisons.delete: attachments fetch failed', attsErr.message);
+      return NextResponse.json({ error: 'ดึงรายการไฟล์ไม่สำเร็จ' }, { status: 500 });
+    }
 
     const driveErrors = [];
     for (const a of (atts || [])) {
@@ -55,15 +66,27 @@ export async function DELETE(request) {
       catch (e) { driveErrors.push(`${a.filename}: ${e.message}`); }
     }
     if (atts && atts.length > 0) {
-      await supabase.from('file_attachments').delete()
+      const { error: delErr } = await supabase.from('file_attachments').delete()
         .eq('entity_type', 'comparison').eq('entity_id', body.id);
+      if (delErr) {
+        // Drive files already gone — surface so the caller knows DB is out of
+        // sync. Returning 200 here would leave dangling rows pointing at
+        // deleted Drive files.
+        console.error('comparisons.delete: attachment rows not removed', delErr.message);
+        return NextResponse.json({
+          error: 'ลบไฟล์จาก Drive แล้ว แต่ลบ metadata ในฐานข้อมูลไม่สำเร็จ',
+        }, { status: 500 });
+      }
     }
 
     // 2) Delete the comparison row — surface 404 if it's already gone so two
     //    concurrent deletes don't both report success.
     const { data, error } = await supabase
       .from('comparisons').delete().eq('id', body.id).select('id');
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error) {
+      console.error('comparisons.delete: row delete failed', error.message);
+      return NextResponse.json({ error: 'ลบไม่สำเร็จ' }, { status: 400 });
+    }
     if (!data || data.length === 0) {
       return NextResponse.json({ error: 'ไม่พบรายการ (อาจถูกลบไปแล้ว)' }, { status: 404 });
     }
@@ -76,6 +99,7 @@ export async function DELETE(request) {
     });
     return NextResponse.json({ ok: true, deleted: { id: body.id, attachments: atts?.length || 0, drive_errors: driveErrors } });
   } catch (e) {
-    return NextResponse.json({ error: e.message || 'ลบไม่สำเร็จ' }, { status: 500 });
+    console.error('comparisons.delete failed:', e?.stack || e);
+    return NextResponse.json({ error: 'ลบไม่สำเร็จ' }, { status: 500 });
   }
 }

@@ -40,9 +40,13 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 export const authOptions = {
   providers,
   callbacks: {
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       if (account?.provider === 'google') {
-        return Boolean(user.email?.toLowerCase().endsWith(`@${DOMAIN}`));
+        // Require both: domain match AND Google-verified email.
+        // A Workspace admin could otherwise mint an unverified alias.
+        const okDomain = user.email?.toLowerCase().endsWith(`@${DOMAIN}`);
+        const okVerified = profile?.email_verified === true;
+        return Boolean(okDomain && okVerified);
       }
       return true;
     },

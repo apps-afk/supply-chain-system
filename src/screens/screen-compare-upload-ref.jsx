@@ -179,7 +179,7 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
                 ลากไฟล์มาที่นี่ หรือ <span style={{ color:'var(--teal)', textDecoration:'underline' }}>เลือกไฟล์</span>
               </div>
               <div style={{ fontSize:11, color:'var(--ink-3)' }}>รองรับ PDF, Word (.doc/.docx), รูป (.jpg/.png/.webp/.heic) · ไม่เกิน 25 MB</div>
-              <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" style={{ display:'none' }}
+              <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display:'none' }}
                 onChange={e => { const f = e.target.files?.[0]; setFile(f || null); setFilename(f?.name || ''); }} />
             </label>
 

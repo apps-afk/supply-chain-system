@@ -19,6 +19,42 @@ const ALLOWED_MIME = [
   'image/heif',
   'image/gif',
 ];
+// Browser MIME quirks — some clients send legacy/non-standard names for the
+// exact same file content. Normalize so we don't 415 a valid upload.
+const MIME_ALIASES = {
+  'image/jpg':           'image/jpeg',
+  'image/pjpeg':         'image/jpeg',
+  'image/x-png':         'image/png',
+  'application/x-pdf':   'application/pdf',
+  'application/acrobat': 'application/pdf',
+};
+// Extension fallback — Chrome on Windows often reports application/octet-stream
+// for HEIC (no codec installed) and some upload paths report empty type.
+const ALLOWED_EXT = new Set(['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'gif']);
+const EXT_TO_MIME = {
+  pdf:  'application/pdf',
+  doc:  'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  jpg:  'image/jpeg',
+  jpeg: 'image/jpeg',
+  png:  'image/png',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  gif:  'image/gif',
+};
+function normalizeMime(reported, filename) {
+  const aliased = MIME_ALIASES[reported] || reported;
+  if (ALLOWED_MIME.includes(aliased)) return aliased;
+  const ext = (String(filename || '').split('.').pop() || '').toLowerCase();
+  // Only allow extension fallback when the browser was clearly uncertain
+  // (empty type or octet-stream). Don't let a renamed .exe with text/plain
+  // sneak through by having a .pdf extension.
+  if (ALLOWED_EXT.has(ext) && (!reported || reported === 'application/octet-stream')) {
+    return EXT_TO_MIME[ext];
+  }
+  return aliased;
+}
 // Whitelisted entity_type values — keeps the file_attachments table tidy and
 // prevents callers from inventing categories that break later joins.
 const ALLOWED_ENTITY_TYPES = new Set(['rfq', 'contract', 'comparison', 'supplier', 'pricedb', '']);
@@ -64,7 +100,8 @@ export async function POST(request) {
   if (file.size > MAX_MB * 1024 * 1024) {
     return NextResponse.json({ error: `ไฟล์ใหญ่เกิน — สูงสุด ${MAX_MB}MB` }, { status: 413 });
   }
-  if (!ALLOWED_MIME.includes(file.type)) {
+  const effectiveMime = normalizeMime(file.type, file.name);
+  if (!ALLOWED_MIME.includes(effectiveMime)) {
     return NextResponse.json({
       error: `รองรับเฉพาะไฟล์ PDF / Word (.doc, .docx) / รูปภาพ (.jpg, .png, .webp, .heic, .gif) — ได้รับ: ${file.type || 'ไม่ระบุ'}`
     }, { status: 415 });
@@ -78,7 +115,7 @@ export async function POST(request) {
     const result = await uploadToCategory({
       categoryKey,
       filename: file.name,
-      mimeType: file.type,
+      mimeType: effectiveMime,  // normalized — Drive prefers canonical types
       body: buf,
       entityRef,
     });
@@ -94,7 +131,7 @@ export async function POST(request) {
         drive_file_id: result.id,
         drive_view_link: result.webViewLink || null,
         filename:    result.name,
-        mime_type:   file.type,
+        mime_type:   effectiveMime,
         size:        Number(result.size) || file.size,
         uploaded_by: session.user.email,
       };
@@ -134,16 +171,13 @@ export async function POST(request) {
       attachment: attachmentRow,
     });
   } catch (e) {
-    // Surface the most helpful detail to the client + log full stack server-side
+    // Log everything server-side, return a generic message + the body-size
+    // hint when relevant. Previously the inner Drive error string (folder
+    // IDs, OAuth scopes, service account email) was leaked to the client.
     console.error('upload failed:', e?.stack || e);
-    const inner = e?.cause?.response?.data?.error?.message
-              || e?.cause?.errors?.[0]?.message
-              || null;
     return NextResponse.json(
       {
-        error: e.message || 'อัปโหลดไม่สำเร็จ',
-        detail: inner,
-        // helpful hint if it's a body-size issue
+        error: 'อัปโหลดไม่สำเร็จ — กรุณาลองอีกครั้งหรือติดต่อผู้ดูแลระบบ',
         hint: file && file.size > 4.4 * 1024 * 1024
           ? 'ไฟล์อาจใหญ่เกินขีดจำกัดของ Vercel Hobby plan (4.5MB) — ลองไฟล์เล็กกว่านี้ หรืออัปเกรด plan'
           : undefined,

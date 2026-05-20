@@ -21,6 +21,13 @@ export async function GET(request) {
   if (et) q = q.eq('entity_type', et);
   if (ei) q = q.eq('entity_id', ei);
   if (ct) q = q.eq('category', ct);
+  // Attachments tied to a specific entity (contract/rfq/comparison) are
+  // organizational data — anyone on the team can see them. But unscoped
+  // listings (no entity filter) would let any user enumerate every file in
+  // the workspace, so we restrict those to admin or the uploader.
+  if (!et && !ei && session.user.role !== 'admin') {
+    q = q.eq('uploaded_by', session.user.email);
+  }
   const rawLimit = parseInt(url.searchParams.get('limit') || '200', 10);
   const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 1000) : 200;
   q = q.limit(limit);

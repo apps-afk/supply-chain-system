@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Icons, Chip, Av, money } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 /*
@@ -628,7 +628,7 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
               ลากไฟล์มาที่นี่ หรือ <span style={{ color:'var(--teal)', textDecoration:'underline' }}>เลือกไฟล์</span>
             </div>
             <div style={{ fontSize:11, color:'var(--ink-3)' }}>รองรับ PDF, Word (.doc/.docx), รูป (.jpg/.png/.webp/.heic) · ไม่เกิน 25 MB</div>
-            <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" style={{ display:'none' }}
+            <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display:'none' }}
               onChange={e => setFile(e.target.files?.[0] || null)} />
           </label>
           {file && (
@@ -684,6 +684,10 @@ export function ScreenContract({ go }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [legalOpen,   setLegalOpen]   = useState(false);
   const [finalOpen,   setFinalOpen]   = useState(false);
+  // Track the AI-review fake-delay timer so we can clear it on unmount
+  // (otherwise setState fires on a torn-down component).
+  const reviewTimerRef = useRef(null);
+  useEffect(() => () => { if (reviewTimerRef.current) clearTimeout(reviewTimerRef.current); }, []);
 
   async function loadAttachments(contractId) {
     if (!contractId) return;
@@ -792,14 +796,22 @@ export function ScreenContract({ go }) {
       const r = await fetch('/api/upload', { method:'POST', body: fd });
       const d = await r.json();
       if (!r.ok) return { ok:false, error: d.error || 'อัปโหลดไม่สำเร็จ' };
-      // Mark contract as active in DB now that final is uploaded
+      // Mark contract as active in DB now that final is uploaded.
+      // If the PATCH fails, surface it — silently swallowing meant the UI
+      // could show "active" while the DB stayed in draft.
       try {
-        await fetch('/api/contracts', {
+        const pr = await fetch('/api/contracts', {
           method:'PATCH',
           headers:{ 'Content-Type':'application/json' },
           body: JSON.stringify({ id: contract.id, status:'active', signed_at: new Date().toISOString().slice(0,10) }),
         });
-      } catch {}
+        if (!pr.ok) {
+          const pd = await pr.json().catch(() => ({}));
+          return { ok:false, error: pd.error || 'อัปเดตสถานะสัญญาไม่สำเร็จ' };
+        }
+      } catch {
+        return { ok:false, error:'อัปเดตสถานะสัญญาไม่สำเร็จ — เครือข่ายขัดข้อง' };
+      }
       await loadAttachments(contract.id);
       return { ok:true };
     } catch (e) {
@@ -1123,7 +1135,12 @@ export function ScreenContract({ go }) {
 
       {confirmOpen && (
         <ConfirmAIModal
-          onConfirm={() => { setConfirmOpen(false); setPhase('Reviewing'); setTimeout(() => setPhase('Reviewed'), 2000); }}
+          onConfirm={() => {
+            setConfirmOpen(false);
+            setPhase('Reviewing');
+            if (reviewTimerRef.current) clearTimeout(reviewTimerRef.current);
+            reviewTimerRef.current = setTimeout(() => setPhase('Reviewed'), 2000);
+          }}
           onClose={() => setConfirmOpen(false)} />
       )}
       {legalOpen && (
@@ -1216,9 +1233,12 @@ function ContractArchive({ contracts, currentId, attachmentsByContract, supplier
                   onClick={() => {
                     if (isCurrent) return;
                     try { window.localStorage.setItem('contract.currentId', c.id); } catch {}
-                    go('contract-detail');
-                    // Force reload of detail by re-navigating
-                    if (typeof window !== 'undefined') window.location.reload();
+                    // Switch in-place instead of full page reload — keeps the
+                    // already-fetched suppliers/projects/attachments warm.
+                    setContract(c);
+                    setPhase(DB_TO_BUCKET[c.status] || 'Uploaded');
+                    setAttachments(allAttachments[c.id] || []);
+                    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' });
                   }}
                   style={{
                     cursor: isCurrent ? 'default' : 'pointer',
@@ -1354,7 +1374,7 @@ function ActiveContractView({ contract, attachments, onUploadAddon }) {
           {err && (
             <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:12 }}>{err}</div>
           )}
-          <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
+          <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             onChange={e => handleFile(e.target.files?.[0])}
             disabled={busy}
             style={{ fontSize:13 }} />
@@ -1565,7 +1585,7 @@ function UploadFinalModal({ onUpload, onDone, onClose }) {
             <div style={{ fontSize:12.5, fontWeight:500, color:'var(--ink-2)' }}>
               ลากไฟล์ หรือ <span style={{ color:'var(--teal)', textDecoration:'underline' }}>เลือกไฟล์</span>
             </div>
-            <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*" style={{ display:'none' }}
+            <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display:'none' }}
               onChange={e => setFile(e.target.files?.[0] || null)} />
           </label>
           {file && (

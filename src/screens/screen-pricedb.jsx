@@ -96,8 +96,13 @@ export function ScreenPriceDB({ go }) {
     return rows.filter(r => {
       if (cat !== 'ทั้งหมด' && r.cat !== cat) return false;
       if (sourceFilter !== 'ทั้งหมด' && r.source !== sourceFilter) return false;
-      if (q) {
-        if (!(r.name.includes(q) || (r.code||'').toLowerCase().includes(v) || (r.sup||'').includes(q))) return false;
+      if (v) {
+        // Match all text fields case-insensitively — Thai is mostly unaffected
+        // but Latin product codes/supplier names were case-sensitive before.
+        const name = (r.name || '').toLowerCase();
+        const code = (r.code || '').toLowerCase();
+        const sup  = (r.sup  || '').toLowerCase();
+        if (!(name.includes(v) || code.includes(v) || sup.includes(v))) return false;
       }
       return true;
     });
@@ -215,8 +220,8 @@ export function ScreenPriceDB({ go }) {
               <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล — คลิก "เพิ่มราคา" เพื่อสร้างรายการแรก
               </td></tr>
-            ) : filtered.map((r, i) => (
-              <tr key={i} onClick={() => go('pricedb-detail')} style={{ cursor:'pointer' }} className={r.flag ? `row-flag-${r.flag}` : ''}>
+            ) : filtered.map((r) => (
+              <tr key={r.id} onClick={() => go('pricedb-detail')} style={{ cursor:'pointer' }} className={r.flag ? `row-flag-${r.flag}` : ''}>
                 <td style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'var(--ink-4)' }}>{r.code}</td>
                 <td>
                   <div style={{ fontWeight:500, display:'inline-flex', alignItems:'center', gap:8 }}>
@@ -278,7 +283,7 @@ function ManualPriceModal({ materials, suppliers, units, onClose, onSaved }) {
   const [form, setForm] = useState({
     materialId:'', supplierId:'', price:'', unitId:'', source:'Manual', sourceId:'',
   });
-  const set = (k,v) => setForm({ ...form, [k]:v });
+  const set = (k,v) => setForm(prev => ({ ...prev, [k]:v }));
   const [busy, setBusy] = useState(false);
   const [err, setErr]   = useState('');
 

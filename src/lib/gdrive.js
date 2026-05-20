@@ -20,6 +20,7 @@ export const isGDriveConfigured = !!(
 
 let _client = null;
 let _folderCache = {};   // category-label → folder-id (avoid repeated lookups)
+let _folderInflight = {}; // category-label → in-flight Promise (de-duplicates concurrent creates)
 
 function getClient() {
   if (_client) return _client;
@@ -48,36 +49,46 @@ export const CATEGORIES = {
 
 async function findOrCreateSubfolder(label) {
   if (_folderCache[label]) return _folderCache[label];
-  const drive = getClient();
-  const parent = PARENT_ID();
+  // De-duplicate concurrent lookups for the same label — without this, two
+  // simultaneous uploads under a brand-new category would each create their
+  // own subfolder and split files across duplicates.
+  if (_folderInflight[label]) return _folderInflight[label];
 
-  // Look up by name within the parent (Shared Drive aware)
-  const safe = label.replace(/'/g, "\\'");
-  const q = `name = '${safe}' and '${parent}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-  const list = await drive.files.list({
-    q, fields: 'files(id, name)',
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
-    corpora: 'allDrives',
-  });
+  _folderInflight[label] = (async () => {
+    const drive = getClient();
+    const parent = PARENT_ID();
 
-  if (list.data.files?.length) {
-    _folderCache[label] = list.data.files[0].id;
+    // Escape Drive query special chars (' and \) to keep the q-filter safe
+    // even if labels are renamed later.
+    const safe = label.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const q = `name = '${safe}' and '${parent}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const list = await drive.files.list({
+      q, fields: 'files(id, name)',
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      corpora: 'allDrives',
+    });
+
+    if (list.data.files?.length) {
+      _folderCache[label] = list.data.files[0].id;
+      return _folderCache[label];
+    }
+
+    // Not found — create it
+    const created = await drive.files.create({
+      requestBody: {
+        name: label,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parent],
+      },
+      fields: 'id, name',
+      supportsAllDrives: true,
+    });
+    _folderCache[label] = created.data.id;
     return _folderCache[label];
-  }
+  })().finally(() => { delete _folderInflight[label]; });
 
-  // Not found — create it
-  const created = await drive.files.create({
-    requestBody: {
-      name: label,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [parent],
-    },
-    fields: 'id, name',
-    supportsAllDrives: true,
-  });
-  _folderCache[label] = created.data.id;
-  return _folderCache[label];
+  return _folderInflight[label];
 }
 
 /**
