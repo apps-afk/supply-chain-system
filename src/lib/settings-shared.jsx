@@ -268,10 +268,20 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
     if (lines.length === 0) return [];
     // Auto-detect separator: tab wins, then comma
     const sep = lines[0].includes('\t') ? '\t' : ',';
-    // Skip header row if it matches the column labels (case-insensitive)
-    const first = lines[0].split(sep).map(c => c.trim().toLowerCase());
-    const labels = columns.map(c => c.label.toLowerCase());
-    const hasHeader = labels.length > 0 && first[0] === labels[0];
+    // Header detection — tolerant of:
+    //   • trailing " *" we add to required cols in the downloaded template
+    //   • surrounding whitespace
+    //   • the user reordering / renaming a column or two
+    // We count how many cells in row 1 match the expected column labels;
+    // if at least half match, we treat row 1 as a header and skip it.
+    const norm = (s) => String(s || '').replace(/\s*\*\s*$/, '').trim().toLowerCase();
+    const first = lines[0].split(sep).map(norm);
+    const labels = columns.map(c => norm(c.label));
+    let matches = 0;
+    for (let i = 0; i < Math.min(first.length, labels.length); i++) {
+      if (first[i] && first[i] === labels[i]) matches++;
+    }
+    const hasHeader = labels.length > 0 && matches >= Math.ceil(labels.length / 2);
     const dataLines = hasHeader ? lines.slice(1) : lines;
     return dataLines.map((line, idx) => {
       const cells = line.split(sep).map(c => c.trim());
