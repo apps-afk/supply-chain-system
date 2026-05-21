@@ -210,6 +210,58 @@ export function BulkExcelButton({ label = 'Bulk Excel', entity, columns, sampleR
 export function BulkUploadModal({ title, entity, columns, endpoint, transform, sampleRow, onClose, onDone }) {
   const [text, setText] = useState('');
   const [progress, setProgress] = useState(null); // null | {done, total, errors}
+  const [busy, setBusy] = useState(false);        // disable buttons during xlsx I/O
+
+  // Dynamic-import xlsx so the ~600KB lib doesn't hit users who never touch
+  // bulk upload. The lib is loaded once per modal open, browser-cached after.
+  async function downloadTemplate() {
+    setBusy(true);
+    try {
+      const XLSX = await import('xlsx');
+      const headers = columns.map(c => c.label + (c.required ? ' *' : ''));
+      const sampleLines = (sampleRow || '').split(/\r?\n/).filter(Boolean);
+      // First sample line is usually the header — skip it. Remaining lines
+      // become example data rows in the template.
+      const dataRows = sampleLines.slice(1).map(line => {
+        const cells = line.split('\t');
+        return columns.map((_, i) => cells[i] || '');
+      });
+      const aoa = [headers, ...dataRows];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = columns.map(c => ({ wch: Math.max((c.label || '').length, 16) }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, entity.slice(0, 28) || 'Sheet1');
+      XLSX.writeFile(wb, `template_${entity}.xlsx`);
+    } catch (e) {
+      alert(`สร้าง Template ไม่สำเร็จ: ${e.message}`);
+    }
+    setBusy(false);
+  }
+
+  async function uploadExcel(file) {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      if (!sheet) throw new Error('ไม่พบ sheet ใน Excel');
+      // header:1 → array-of-arrays so we can reuse the existing TSV parser
+      // raw:false → format dates / numbers as strings (so they survive
+      // the TSV round-trip without losing precision)
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false, raw: false, defval: '' });
+      // Convert AoA → TSV string and feed into the existing preview/parse
+      // pipeline. Strip cells of tabs/newlines so the round-trip survives.
+      const tsv = rows.map(r =>
+        r.map(c => String(c ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t')
+      ).join('\n');
+      setText(tsv);
+    } catch (e) {
+      alert(`อ่านไฟล์ Excel ไม่สำเร็จ: ${e.message}`);
+    }
+    setBusy(false);
+  }
 
   const parsed = React.useMemo(() => {
     const lines = text.split(/\r?\n/).map(l => l.replace(/\s+$/, '')).filter(l => l.trim());
@@ -276,7 +328,39 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
         </div>
 
         <div style={{ padding:24, overflowY:'auto', flex:1 }}>
-          <p style={{ fontSize:13, color:'var(--ink-2)', margin:'0 0 12px', lineHeight:1.6 }}>
+          {/* Excel template + upload — primary path for non-technical users.
+              Paste-from-clipboard is still available below as a fallback. */}
+          <div style={{
+            display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16,
+          }}>
+            <button className="btn" onClick={downloadTemplate} disabled={busy}
+              style={{ justifyContent:'center', padding:'14px' }}>
+              {Icons.download}
+              <span style={{ display:'inline-flex', flexDirection:'column', alignItems:'flex-start', marginLeft:8 }}>
+                <span style={{ fontWeight:500 }}>ดาวน์โหลด Template</span>
+                <span style={{ fontSize:11, color:'var(--ink-3)' }}>template_{entity}.xlsx</span>
+              </span>
+            </button>
+            <label className="btn" style={{ justifyContent:'center', padding:'14px', cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1 }}>
+              {Icons.upload}
+              <span style={{ display:'inline-flex', flexDirection:'column', alignItems:'flex-start', marginLeft:8 }}>
+                <span style={{ fontWeight:500 }}>อัพโหลดไฟล์ Excel</span>
+                <span style={{ fontSize:11, color:'var(--ink-3)' }}>.xlsx / .xls / .csv</span>
+              </span>
+              <input type="file" accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                disabled={busy}
+                onChange={e => { uploadExcel(e.target.files?.[0]); e.target.value = ''; }}
+                style={{ display:'none' }} />
+            </label>
+          </div>
+
+          <div style={{ display:'flex', alignItems:'center', gap:10, margin:'4px 0 12px' }}>
+            <div style={{ flex:1, height:1, background:'var(--rule)' }} />
+            <span style={{ fontSize:11, color:'var(--ink-4)', letterSpacing:0.4 }}>หรือ วาง TSV/CSV ด้านล่าง</span>
+            <div style={{ flex:1, height:1, background:'var(--rule)' }} />
+          </div>
+
+          <p style={{ fontSize:12.5, color:'var(--ink-3)', margin:'0 0 12px', lineHeight:1.6 }}>
             คัดลอกข้อมูลจาก Excel / Google Sheets แล้ววางช่องด้านล่าง · 1 แถว = 1 รายการ ·
             แท็บ (Tab) คั่นคอลัมน์ (Excel paste แบบนี้อยู่แล้ว) หรือใช้คอมม่า
           </p>
@@ -375,7 +459,7 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
               {progress && progress.done === progress.total ? 'ปิด' : 'ยกเลิก'}
             </button>
             <button className="btn primary"
-              disabled={validRows.length === 0 || (progress && progress.done < progress.total)}
+              disabled={busy || validRows.length === 0 || (progress && progress.done < progress.total)}
               onClick={upload}>
               {Icons.upload} นำเข้า {validRows.length > 0 ? `${validRows.length} รายการ` : ''}
             </button>
