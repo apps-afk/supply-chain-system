@@ -131,7 +131,9 @@ function SidebarImpl({ current, onNav }) {
         <Item id="projects"       icon="folder"    label="โครงการ" />
         <Item id="project-types"  icon="folder"    label="ประเภทโครงการ" />
         <Item id="suppliers"      icon="truck"     label="ผู้ขาย/ผู้รับเหมา" />
-        <Item id="materials"      icon="box"       label="วัสดุก่อสร้าง" />
+        <Item id="material-main-categories" icon="box" label="วัสดุ · หมวดหลัก" />
+        <Item id="material-sub-categories"  icon="box" label="วัสดุ · หมวดย่อย" />
+        <Item id="materials"      icon="box"       label="วัสดุ · รายการ (Items)" />
         <Item id="subcontracts"   icon="hammer"    label="งานจ้างเหมา" />
         <Item id="contract-types" icon="fileCheck" label="ประเภทเอกสาร" />
         <Item id="units"          icon="ruler"     label="หน่วยนับ" />

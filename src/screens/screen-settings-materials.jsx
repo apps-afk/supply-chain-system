@@ -28,6 +28,8 @@ export const MATERIAL_CATEGORIES = [];
 export function ScreenSettingsMaterials({ go }) {
   const [items, setItems]     = useState([]);
   const [units, setUnits]     = useState([]);
+  const [mainCats, setMainCats] = useState([]);
+  const [subCats,  setSubCats]  = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr]         = useState('');
   const [q, setQ]             = useState('');
@@ -40,15 +42,21 @@ export function ScreenSettingsMaterials({ go }) {
   async function load() {
     setLoading(true); setErr('');
     try {
-      const [mRes, uRes] = await Promise.all([
+      const [mRes, uRes, mcRes, scRes] = await Promise.all([
         fetch('/api/materials'),
         fetch('/api/units'),
+        fetch('/api/material-main-categories'),
+        fetch('/api/material-sub-categories'),
       ]);
-      const m = await mRes.json();
-      const u = await uRes.json();
+      const m  = await mRes.json();
+      const u  = await uRes.json();
+      const mc = await mcRes.json();
+      const sc = await scRes.json();
       if (!mRes.ok) setErr(m.error || 'โหลดข้อมูลไม่สำเร็จ');
       else setItems(m.items || []);
       if (uRes.ok) setUnits(u.items || []);
+      if (mcRes.ok) setMainCats(mc.items || []);
+      if (scRes.ok) setSubCats(sc.items || []);
     } catch {
       setErr('เครือข่ายขัดข้อง');
     }
@@ -73,11 +81,22 @@ export function ScreenSettingsMaterials({ go }) {
   }
 
   const unitsById = Object.fromEntries(units.map(u => [u.id, u]));
-  // Main category = level 1, category = level 2 (sub), name = level 3 (item).
-  const mainCategories = Array.from(new Set(items.map(i => i.main_category).filter(Boolean))).sort();
-  const categories = Array.from(new Set(items
-    .filter(i => mainCatFilter === 'ทั้งหมด' || i.main_category === mainCatFilter)
-    .map(i => i.category).filter(Boolean))).sort();
+  // Categories now come from the dedicated master tables (Level 1 + Level 2
+  // managed in their own sidebar pages). Each material row still carries
+  // the string copy for backward compat with legacy data + bulk uploads.
+  const mainCategories = mainCats.filter(m => m.active).map(m => m.name).sort();
+  const mainByName = Object.fromEntries(mainCats.map(m => [m.name, m]));
+  const subsByMainId = subCats.reduce((acc, s) => {
+    (acc[s.main_id] = acc[s.main_id] || []).push(s);
+    return acc;
+  }, {});
+  // Filter list of sub-categories depends on which main is selected.
+  const categories = (() => {
+    if (mainCatFilter === 'ทั้งหมด') return Array.from(new Set(subCats.filter(s => s.active).map(s => s.name))).sort();
+    const main = mainByName[mainCatFilter];
+    if (!main) return [];
+    return (subsByMainId[main.id] || []).filter(s => s.active).map(s => s.name).sort();
+  })();
 
   const filtered = items.filter(p => {
     const status = p.active ? 'Active' : 'Non-Active';
@@ -109,8 +128,8 @@ export function ScreenSettingsMaterials({ go }) {
 
       <SettingsStatStrip stats={[
         { label:'วัสดุทั้งหมด',  value: items.length, sub:`${items.filter(p=>p.active).length} Active` },
-        { label:'หมวดหลัก',     value: mainCategories.length, sub:'Main Category' },
-        { label:'หมวดย่อย',     value: Array.from(new Set(items.map(i => i.category).filter(Boolean))).length, sub:'Sub Category' },
+        { label:'หมวดหลัก',     value: mainCats.length, sub: <button onClick={() => go('settings-material-main-categories')} style={{ background:'none', border:0, padding:0, color:'var(--teal)', textDecoration:'underline', cursor:'pointer', fontFamily:'inherit', fontSize:12 }}>จัดการ Level 1</button> },
+        { label:'หมวดย่อย',     value: subCats.length, sub: <button onClick={() => go('settings-material-sub-categories')} style={{ background:'none', border:0, padding:0, color:'var(--teal)', textDecoration:'underline', cursor:'pointer', fontFamily:'inherit', fontSize:12 }}>จัดการ Level 2</button> },
       ]} />
 
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16, flexWrap:'wrap' }}>
@@ -203,8 +222,10 @@ export function ScreenSettingsMaterials({ go }) {
         <MaterialModal
           item={editing === 'new' ? null : editing}
           units={units}
-          allItems={items}
+          mainCats={mainCats}
+          subCats={subCats}
           existingCodes={items.map(i => i.code).filter(Boolean)}
+          go={go}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
         />
@@ -251,7 +272,7 @@ export function ScreenSettingsMaterials({ go }) {
   );
 }
 
-function MaterialModal({ item, units, allItems, existingCodes, onClose, onSaved }) {
+function MaterialModal({ item, units, mainCats, subCats, existingCodes, go, onClose, onSaved }) {
   const isEdit = !!item;
   const [form, setForm] = useState({
     code:          item?.code          || nextMaterialCode(existingCodes),
@@ -267,12 +288,11 @@ function MaterialModal({ item, units, allItems, existingCodes, onClose, onSaved 
   const [err, setErr]   = useState('');
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  // Cascading category suggestions — sub-category list filters on the
-  // currently-selected main_category so the picker stays sensible.
-  const mainCats = Array.from(new Set((allItems || []).map(i => i.main_category).filter(Boolean))).sort();
-  const subCats  = Array.from(new Set((allItems || [])
-    .filter(i => !form.main_category || i.main_category === form.main_category)
-    .map(i => i.category).filter(Boolean))).sort();
+  // Pull options from the FK-linked masters. Sub list filters by the
+  // currently-selected main so the user only sees valid pairs.
+  const activeMains = (mainCats || []).filter(m => m.active);
+  const currentMain = (mainCats || []).find(m => m.name === form.main_category);
+  const activeSubs  = (subCats || []).filter(s => s.active && (!currentMain || s.main_id === currentMain.id));
 
   async function save() {
     setErr('');
@@ -312,21 +332,24 @@ function MaterialModal({ item, units, allItems, existingCodes, onClose, onSaved 
           <input value={form.code} readOnly disabled
             style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)', background:'var(--paper-2)', color:'var(--ink-3)' }} />
         </SettingsField>
-        <SettingsField label="หมวดหลัก (Level 1)" required hint="พิมพ์เพื่อสร้างใหม่ เช่น งานโครงสร้าง">
-          <input list="material-main-cats" value={form.main_category}
-            onChange={e=>set('main_category', e.target.value)}
-            placeholder="เช่น งานโครงสร้าง" style={settingsInputStyle} />
-          <datalist id="material-main-cats">
-            {mainCats.map(c => <option key={c} value={c} />)}
-          </datalist>
+        <SettingsField label="หมวดหลัก (Level 1)" required
+          hint={<span>เพิ่มได้ที่ <button type="button" onClick={()=>go('settings-material-main-categories')} style={{ background:'none', border:0, padding:0, color:'var(--teal)', textDecoration:'underline', cursor:'pointer' }}>จัดการหมวดหลัก</button></span>}>
+          <select value={form.main_category}
+            onChange={e=>setForm(f => ({ ...f, main_category: e.target.value, category: '' }))}
+            style={settingsInputStyle}>
+            <option value="">— เลือกหมวดหลัก —</option>
+            {activeMains.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+          </select>
         </SettingsField>
-        <SettingsField label="หมวดย่อย (Level 2)" required hint="พิมพ์เพื่อสร้างใหม่ เช่น เสาเข็ม">
-          <input list="material-sub-cats" value={form.category}
+        <SettingsField label="หมวดย่อย (Level 2)" required
+          hint={<span>เพิ่มได้ที่ <button type="button" onClick={()=>go('settings-material-sub-categories')} style={{ background:'none', border:0, padding:0, color:'var(--teal)', textDecoration:'underline', cursor:'pointer' }}>จัดการหมวดย่อย</button></span>}>
+          <select value={form.category}
             onChange={e=>set('category', e.target.value)}
-            placeholder="เช่น เสาเข็ม" style={settingsInputStyle} />
-          <datalist id="material-sub-cats">
-            {subCats.map(c => <option key={c} value={c} />)}
-          </datalist>
+            disabled={!form.main_category}
+            style={settingsInputStyle}>
+            <option value="">{form.main_category ? '— เลือกหมวดย่อย —' : '(เลือกหมวดหลักก่อน)'}</option>
+            {activeSubs.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+          </select>
         </SettingsField>
         <SettingsField label="ชื่อวัสดุ (Item)" required hint="Level 3 — รายการสุดท้าย">
           <input value={form.name} onChange={e=>set('name', e.target.value)}

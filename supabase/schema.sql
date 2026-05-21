@@ -236,6 +236,33 @@ alter table materials add column if not exists main_category text default '';
 alter table units add column if not exists name_en text default '';
 alter table units add column if not exists aliases text default '';
 
+-- ============================================================
+-- Materials: 3-level taxonomy with parent-linked master tables
+-- ============================================================
+-- The denormalized `main_category` / `category` strings on `materials`
+-- stay for backward compat with existing data + Bulk Upload (we look up
+-- the masters by name at save time). The masters exist primarily to
+-- (a) constrain dropdowns in the UI, and (b) record the parent link
+-- (sub → main) so reorganisation has a single source of truth.
+create table if not exists material_main_categories (
+  id          text primary key,
+  name        text unique not null,
+  notes       text default '',
+  active      boolean default true,
+  created_at  timestamptz default now()
+);
+create table if not exists material_sub_categories (
+  id          text primary key,
+  main_id     text references material_main_categories(id) on delete restrict,
+  name        text not null,
+  notes       text default '',
+  active      boolean default true,
+  created_at  timestamptz default now()
+);
+-- A sub-category name can repeat across different mains (e.g. "อื่นๆ")
+-- but must be unique within one main.
+create unique index if not exists material_sub_unique on material_sub_categories (main_id, name);
+
 create table if not exists comparisons (
   id          text  primary key,
   no          text  unique not null,

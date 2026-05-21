@@ -32,6 +32,8 @@ const ScreenSettingsProjects       = dynamic(() => import('./screens/screen-sett
 const ScreenSettingsProjectTypes   = dynamic(() => import('./screens/screen-settings-project-types').then(m => ({ default: m.ScreenSettingsProjectTypes })), { loading: LoadingPage });
 const ScreenSettingsSuppliers      = dynamic(() => import('./screens/screen-settings-suppliers').then(m => ({ default: m.ScreenSettingsSuppliers })), { loading: LoadingPage });
 const ScreenSettingsMaterials      = dynamic(() => import('./screens/screen-settings-materials').then(m => ({ default: m.ScreenSettingsMaterials })), { loading: LoadingPage });
+const ScreenSettingsMaterialMainCategories = dynamic(() => import('./screens/screen-settings-material-main-categories').then(m => ({ default: m.ScreenSettingsMaterialMainCategories })), { loading: LoadingPage });
+const ScreenSettingsMaterialSubCategories  = dynamic(() => import('./screens/screen-settings-material-sub-categories').then(m => ({ default: m.ScreenSettingsMaterialSubCategories })), { loading: LoadingPage });
 const ScreenSettingsSubcontracts   = dynamic(() => import('./screens/screen-settings-subcontracts').then(m => ({ default: m.ScreenSettingsSubcontracts })), { loading: LoadingPage });
 const ScreenSettingsContractTypes  = dynamic(() => import('./screens/screen-settings-contract-types').then(m => ({ default: m.ScreenSettingsContractTypes })), { loading: LoadingPage });
 const ScreenSettingsUnits          = dynamic(() => import('./screens/screen-settings-units').then(m => ({ default: m.ScreenSettingsUnits })), { loading: LoadingPage });
@@ -60,7 +62,9 @@ const CRUMBS = {
   'settings-projects':       ['ตั้งค่า', 'ข้อมูลหลัก', 'โครงการ'],
   'settings-project-types':  ['ตั้งค่า', 'ข้อมูลหลัก', 'ประเภทโครงการ'],
   'settings-suppliers':      ['ตั้งค่า', 'ข้อมูลหลัก', 'ผู้ขาย/ผู้รับเหมา'],
-  'settings-materials':      ['ตั้งค่า', 'ข้อมูลหลัก', 'วัสดุก่อสร้าง'],
+  'settings-materials':      ['ตั้งค่า', 'ข้อมูลหลัก', 'วัสดุ · รายการ'],
+  'settings-material-main-categories': ['ตั้งค่า', 'ข้อมูลหลัก', 'วัสดุ · หมวดหลัก'],
+  'settings-material-sub-categories':  ['ตั้งค่า', 'ข้อมูลหลัก', 'วัสดุ · หมวดย่อย'],
   'settings-subcontracts':   ['ตั้งค่า', 'ข้อมูลหลัก', 'งานจ้างเหมา'],
   'settings-contract-types': ['ตั้งค่า', 'ข้อมูลหลัก', 'ประเภทเอกสาร'],
   'settings-units':          ['ตั้งค่า', 'ข้อมูลหลัก', 'หน่วยนับ'],
@@ -91,6 +95,8 @@ const ACTIVE_NAV = {
   'settings-project-types':  'project-types',
   'settings-suppliers':      'suppliers',
   'settings-materials':      'materials',
+  'settings-material-main-categories': 'material-main-categories',
+  'settings-material-sub-categories':  'material-sub-categories',
   'settings-subcontracts':   'subcontracts',
   'settings-contract-types': 'contract-types',
   'settings-units':          'units',
@@ -156,6 +162,8 @@ export default function App() {
       case 'settings-project-types':  return <ScreenSettingsProjectTypes go={go} />;
       case 'settings-suppliers':      return <ScreenSettingsSuppliers go={go} />;
       case 'settings-materials':      return <ScreenSettingsMaterials go={go} />;
+      case 'settings-material-main-categories': return <ScreenSettingsMaterialMainCategories go={go} />;
+      case 'settings-material-sub-categories':  return <ScreenSettingsMaterialSubCategories  go={go} />;
       case 'settings-subcontracts':   return <ScreenSettingsSubcontracts go={go} />;
       case 'settings-contract-types': return <ScreenSettingsContractTypes go={go} />;
       case 'settings-units':          return <ScreenSettingsUnits go={go} />;
@@ -184,6 +192,8 @@ export default function App() {
       'project-types':  'settings-project-types',
       'suppliers':      'settings-suppliers',
       'materials':      'settings-materials',
+      'material-main-categories': 'settings-material-main-categories',
+      'material-sub-categories':  'settings-material-sub-categories',
       'subcontracts':   'settings-subcontracts',
       'contract-types': 'settings-contract-types',
       'units':          'settings-units',
