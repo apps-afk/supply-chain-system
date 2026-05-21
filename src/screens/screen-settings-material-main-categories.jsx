@@ -191,8 +191,10 @@ export function ScreenSettingsMaterialMainCategories({ go }) {
   );
 }
 
-function MainCategoryModal({ item, onClose, onSaved }) {
-  const isEdit = !!item;
+export function MainCategoryModal({ item, onClose, onSaved }) {
+  // isEdit only when we have a real row id; partial item objects used to
+  // prefill defaults on create are still treated as POST.
+  const isEdit = !!item?.id;
   const [form, setForm] = useState({
     name:   item?.name   || '',
     notes:  item?.notes  || '',

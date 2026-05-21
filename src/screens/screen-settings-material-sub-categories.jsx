@@ -240,8 +240,11 @@ export function ScreenSettingsMaterialSubCategories({ go }) {
   );
 }
 
-function SubCategoryModal({ item, mains, onClose, onSaved }) {
-  const isEdit = !!item;
+export function SubCategoryModal({ item, mains, onClose, onSaved }) {
+  // isEdit only when we have a real row id; partial item objects used to
+  // prefill defaults on create (e.g. main_id passed from the tree view)
+  // are still treated as POST.
+  const isEdit = !!item?.id;
   const activeMains = mains.filter(m => m.active);
   const [form, setForm] = useState({
     main_id: item?.main_id || (activeMains[0]?.id || ''),

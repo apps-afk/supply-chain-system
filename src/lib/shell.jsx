@@ -182,13 +182,7 @@ function SidebarImpl({ current, onNav }) {
         <Item id="projects"       icon="folder"    label="โครงการ" />
         <Item id="project-types"  icon="folder"    label="ประเภทโครงการ" />
         <Item id="suppliers"      icon="truck"     label="ผู้ขาย/ผู้รับเหมา" />
-        <SideCollapse id="materials-group" icon="box" label="วัสดุก่อสร้าง"
-          childIds={['material-main-categories', 'material-sub-categories', 'materials']}
-          current={current} onNav={onNav}>
-          <Item id="material-main-categories" icon="box" label="หมวดหลัก" indent />
-          <Item id="material-sub-categories"  icon="box" label="หมวดย่อย" indent />
-          <Item id="materials"      icon="box"       label="รายการ (Items)" indent />
-        </SideCollapse>
+        <Item id="materials"      icon="box"       label="วัสดุก่อสร้าง" />
         <Item id="subcontracts"   icon="hammer"    label="งานจ้างเหมา" />
         <Item id="contract-types" icon="fileCheck" label="ประเภทเอกสาร" />
         <Item id="units"          icon="ruler"     label="หน่วยนับ" />
