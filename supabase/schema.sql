@@ -263,6 +263,11 @@ create table if not exists material_sub_categories (
 -- but must be unique within one main.
 create unique index if not exists material_sub_unique on material_sub_categories (main_id, name);
 
+-- Sub-category short code — used as the prefix for auto-generated Item
+-- codes (e.g. PILE for เสาเข็ม → items become PILE-00001, PILE-00002).
+-- Per-sub counters keep item codes unambiguous across the catalog.
+alter table material_sub_categories add column if not exists short_code text default '';
+
 create table if not exists comparisons (
   id          text  primary key,
   no          text  unique not null,

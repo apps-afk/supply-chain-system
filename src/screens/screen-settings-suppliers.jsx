@@ -246,14 +246,16 @@ export function ScreenSettingsSuppliers({ go }) {
           endpoint="/api/suppliers"
           columns={[
             { key:'name',         label:'ชื่อบริษัท',   required:true },
-            { key:'type',         label:'ประเภท',       required:true, hint:'Material / SubContract / Material,SubContract' },
+            { key:'type',         label:'ประเภท',       required:true, hint:'Material / SubContract / Material,SubContract',
+              options:['Material', 'SubContract', 'Material,SubContract'] },
             { key:'tax_id',       label:'Tax ID',       hint:'13 หลัก' },
             { key:'address',      label:'ที่อยู่' },
             { key:'contact_name', label:'ผู้ติดต่อ' },
             { key:'phone',        label:'โทร' },
             { key:'email',        label:'อีเมล' },
             { key:'credit_days',  label:'เครดิตเทอม',   hint:'จำนวนวัน (0=ไม่มี)' },
-            { key:'status',       label:'สถานะ',        hint:'Active / Non-Active / Blacklist' },
+            { key:'status',       label:'สถานะ',        hint:'Active / Non-Active / Blacklist',
+              options:['Active', 'Non-Active', 'Blacklist'] },
           ]}
           sampleRow="ชื่อบริษัท	ประเภท	Tax ID	ที่อยู่	ผู้ติดต่อ	โทร	อีเมล	เครดิตเทอม	สถานะ
 บจก. ทรัพย์ก่อสร้าง	Material	0105556012345	กรุงเทพฯ	คุณสมชาย	0812345678	contact@thrap.co.th	30	Active"

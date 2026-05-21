@@ -194,8 +194,9 @@ export function ScreenSettingsMaterialSubCategories({ go }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width:'30%' }}>หมวดหลัก (Parent)</th>
+              <th style={{ width:'24%' }}>หมวดหลัก (Parent)</th>
               <th>หมวดย่อย</th>
+              <th style={{ width:120 }}>Short Code</th>
               <th>หมายเหตุ</th>
               <th style={{ width:120 }}>สถานะ</th>
               <th style={{ width:80 }}></th>
@@ -203,9 +204,9 @@ export function ScreenSettingsMaterialSubCategories({ go }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีหมวดย่อย — คลิก "เพิ่มหมวดย่อย" เพื่อสร้างรายการแรก
               </td></tr>
             ) : filtered.map(p => (
@@ -216,6 +217,11 @@ export function ScreenSettingsMaterialSubCategories({ go }) {
                   </span>
                 </td>
                 <td style={{ fontWeight:500 }}>{p.name}</td>
+                <td className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', letterSpacing:0.5 }}>
+                  {p.short_code ? (
+                    <span style={{ padding:'2px 8px', borderRadius:4, background:'var(--paper-2)', color:'var(--ink-2)' }}>{p.short_code}</span>
+                  ) : <span style={{ color:'var(--ink-4)' }}>—</span>}
+                </td>
                 <td style={{ fontSize:12.5, color:'var(--ink-3)' }}>{p.notes || '—'}</td>
                 <td><StatusPill status={p.active ? 'Active' : 'Non-Active'} /></td>
                 <td style={{ textAlign:'right' }}>
@@ -247,10 +253,11 @@ export function SubCategoryModal({ item, mains, onClose, onSaved }) {
   const isEdit = !!item?.id;
   const activeMains = mains.filter(m => m.active);
   const [form, setForm] = useState({
-    main_id: item?.main_id || (activeMains[0]?.id || ''),
-    name:    item?.name    || '',
-    notes:   item?.notes   || '',
-    active:  item?.active !== false,
+    main_id:    item?.main_id    || (activeMains[0]?.id || ''),
+    name:       item?.name       || '',
+    short_code: item?.short_code || '',
+    notes:      item?.notes      || '',
+    active:     item?.active !== false,
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr]   = useState('');
@@ -260,12 +267,17 @@ export function SubCategoryModal({ item, mains, onClose, onSaved }) {
     setErr('');
     if (!form.main_id) { setErr('เลือกหมวดหลัก (Parent)'); return; }
     if (!form.name.trim()) { setErr('กรอกชื่อหมวดย่อย'); return; }
+    // Short code is optional — when present it's used as the prefix for
+    // auto-generated Item codes. Enforce uppercase + simple charset so the
+    // code looks tidy and survives Excel/CSV round-trips.
+    const shortCode = form.short_code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     setBusy(true);
     const payload = {
-      main_id: form.main_id,
-      name:    form.name.trim(),
-      notes:   form.notes,
-      active:  form.active,
+      main_id:    form.main_id,
+      name:       form.name.trim(),
+      short_code: shortCode,
+      notes:      form.notes,
+      active:     form.active,
     };
     if (isEdit) payload.id = item.id;
     const res = await fetch('/api/material-sub-categories', {
@@ -298,6 +310,14 @@ export function SubCategoryModal({ item, mains, onClose, onSaved }) {
         </SettingsField>
         <SettingsField label="ชื่อหมวดย่อย" required hint="เช่น เสาเข็ม">
           <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เสาเข็ม" style={settingsInputStyle} />
+        </SettingsField>
+        <SettingsField label="Short Code" hint="ใช้เป็น prefix รหัสรายการ เช่น PILE → PILE-00001 (A-Z, 0-9; ตัวพิมพ์ใหญ่อัตโนมัติ)">
+          <input
+            value={form.short_code}
+            onChange={e=>set('short_code', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+            placeholder="PILE"
+            maxLength={10}
+            style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)', letterSpacing:0.5 }} />
         </SettingsField>
         <SettingsField label="หมายเหตุ">
           <textarea value={form.notes} onChange={e=>set('notes', e.target.value)}

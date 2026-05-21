@@ -21,8 +21,23 @@ import { SubCategoryModal }  from './screen-settings-material-sub-categories';
   copied from the master row's name at save time.
 */
 
-// Auto-code helper — same pattern as Suppliers.
-function nextMaterialCode(existing) {
+// Auto-code helpers.
+// When a sub-category has a short_code (e.g. PILE), items under it are
+// numbered as PILE-00001, PILE-00002 … so codes never collide between
+// different subs. When no short_code is set (legacy data or skipped on
+// purpose), fall back to the global MAT-NNNNN counter.
+function nextItemCode(shortCode, existing) {
+  const prefix = (shortCode || '').trim().toUpperCase();
+  if (!prefix) return nextLegacyCode(existing);
+  let max = 0;
+  const re = new RegExp(`^${prefix}-(\\d+)$`);
+  for (const c of existing || []) {
+    const m = re.exec(String(c).trim());
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `${prefix}-${String(max + 1).padStart(5, '0')}`;
+}
+function nextLegacyCode(existing) {
   let max = 0;
   for (const c of existing || []) {
     const m = /^MAT-(\d+)$/.exec(String(c).trim());
@@ -30,6 +45,8 @@ function nextMaterialCode(existing) {
   }
   return `MAT-${String(max + 1).padStart(5, '0')}`;
 }
+// Kept for backward-compat with any external imports.
+function nextMaterialCode(existing) { return nextLegacyCode(existing); }
 
 // NOTE: stub kept for backwards compatibility.
 export const MATERIAL_CATEGORIES = [];
@@ -273,6 +290,7 @@ export function ScreenSettingsMaterials({ go }) {
                       onToggle={() => toggleSub(sub.id)}
                       tag={<Badge bg="var(--teal-soft)" fg="var(--teal-ink)">Level 2</Badge>}
                       title={sub.name}
+                      subTag={sub.short_code ? <Badge bg="var(--paper-2)" fg="var(--ink-2)">{sub.short_code}</Badge> : null}
                       meta={`${sub.items.length} รายการ`}
                       statusActive={sub.active}
                       actions={
@@ -376,19 +394,31 @@ export function ScreenSettingsMaterials({ go }) {
           entity="วัสดุ"
           endpoint="/api/materials"
           columns={[
-            { key:'main_category', label:'หมวดหลัก',   required:true, hint:'Level 1' },
-            { key:'category',      label:'หมวดย่อย',   required:true, hint:'Level 2' },
+            { key:'main_category', label:'หมวดหลัก',   required:true, hint:'Level 1',
+              options: mainCats.filter(m => m.active).map(m => m.name) },
+            { key:'category',      label:'หมวดย่อย',   required:true, hint:'Level 2',
+              options: subCats.filter(s => s.active).map(s => s.name) },
             { key:'name',          label:'ชื่อวัสดุ',   required:true, hint:'Level 3 (Item)' },
             { key:'spec',          label:'Spec' },
-            { key:'unit',          label:'หน่วย',      hint:'code เช่น m, kg' },
-            { key:'status',        label:'สถานะ',      hint:'Active / Non-Active' },
+            { key:'unit',          label:'หน่วย',      hint:'code เช่น m, kg',
+              options: units.filter(u => u.active).map(u => u.code) },
+            { key:'status',        label:'สถานะ',      hint:'Active / Non-Active',
+              options: ['Active', 'Non-Active'] },
           ]}
           sampleRow="หมวดหลัก	หมวดย่อย	ชื่อวัสดุ	Spec	หน่วย	สถานะ
 งานโครงสร้าง	เสาเข็ม	เสาเข็มตัวไอ I-22	22 x 22 cm	เส้น	Active
 งานโครงสร้าง	คอนกรีต	คอนกรีตผสมเสร็จ 240ksc	240 ksc	ลบ.ม.	Active"
           transform={(row, ctx) => {
             const allCodes = [...items.map(i => i.code).filter(Boolean), ...ctx.usedCodes];
-            const code = nextMaterialCode(allCodes);
+            // Look up the sub by (main_name, sub_name) so we can pick the
+            // correct short_code prefix; if no match (typo in the upload),
+            // fall back to the legacy MAT- prefix.
+            const mainMaster = mainCats.find(m => m.name === (row.main_category || '').trim());
+            const subMaster  = subCats.find(s =>
+              s.name === (row.category || '').trim() &&
+              (!mainMaster || s.main_id === mainMaster.id)
+            );
+            const code = nextItemCode(subMaster?.short_code, allCodes);
             const uCode = (row.unit || '').toLowerCase().trim();
             const unit = units.find(u => (u.code || '').toLowerCase() === uCode
               || (u.aliases || '').toLowerCase().split(',').map(a => a.trim()).includes(uCode));
@@ -413,7 +443,7 @@ export function ScreenSettingsMaterials({ go }) {
 
 /* =================== Tree row + helpers =================== */
 
-function TreeRow({ level, isOpen, onToggle, tag, title, meta, statusActive, actions }) {
+function TreeRow({ level, isOpen, onToggle, tag, title, subTag, meta, statusActive, actions }) {
   const indent = (level - 1) * 24;
   return (
     <div
@@ -437,6 +467,7 @@ function TreeRow({ level, isOpen, onToggle, tag, title, meta, statusActive, acti
         fontSize: level === 1 ? 14 : 13,
         color: statusActive ? 'var(--ink)' : 'var(--ink-3)',
       }}>{title}</span>
+      {subTag}
       <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>· {meta}</span>
       {!statusActive && (
         <span style={{ padding:'1px 8px', borderRadius:999, background:'var(--paper-2)', color:'var(--ink-3)', fontSize:10, fontWeight:500 }}>Non-Active</span>
@@ -481,8 +512,16 @@ function MaterialModal({ item, units, mainCats, subCats, existingCodes, go, onCl
   // isEdit only when we have a real row id; partial item objects used to
   // prefill parent main/sub from the tree view are still treated as POST.
   const isEdit = !!item?.id;
+
+  const activeMains = (mainCats || []).filter(m => m.active);
+  const initMain = (mainCats || []).find(m => m.name === item?.main_category);
+  const initSub  = (subCats || []).find(s =>
+    s.name === item?.category && (!initMain || s.main_id === initMain.id)
+  );
+  const initialCode = item?.code || nextItemCode(initSub?.short_code, existingCodes);
+
   const [form, setForm] = useState({
-    code:          item?.code          || nextMaterialCode(existingCodes),
+    code:          initialCode,
     name:          item?.name          || '',
     main_category: item?.main_category || '',
     category:      item?.category      || '',
@@ -495,9 +534,26 @@ function MaterialModal({ item, units, mainCats, subCats, existingCodes, go, onCl
   const [err, setErr]   = useState('');
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const activeMains = (mainCats || []).filter(m => m.active);
   const currentMain = (mainCats || []).find(m => m.name === form.main_category);
   const activeSubs  = (subCats || []).filter(s => s.active && (!currentMain || s.main_id === currentMain.id));
+  const currentSub  = (subCats || []).find(s => s.name === form.category && s.main_id === currentMain?.id);
+
+  // Recompute the auto-code when the user picks a different sub (only for
+  // new items — never touch an existing item's code).
+  function pickSub(subName) {
+    setForm(f => {
+      if (isEdit) return { ...f, category: subName };
+      const sub = (subCats || []).find(s => s.name === subName && s.main_id === currentMain?.id);
+      return { ...f, category: subName, code: nextItemCode(sub?.short_code, existingCodes) };
+    });
+  }
+  function pickMain(mainName) {
+    setForm(f => {
+      if (isEdit) return { ...f, main_category: mainName, category: '' };
+      // Reset code back to the legacy prefix when main is reset (no sub chosen yet)
+      return { ...f, main_category: mainName, category: '', code: nextLegacyCode(existingCodes) };
+    });
+  }
 
   async function save() {
     setErr('');
@@ -539,19 +595,20 @@ function MaterialModal({ item, units, mainCats, subCats, existingCodes, go, onCl
         </SettingsField>
         <SettingsField label="หมวดหลัก (Level 1)" required>
           <select value={form.main_category}
-            onChange={e=>setForm(f => ({ ...f, main_category: e.target.value, category: '' }))}
+            onChange={e=>pickMain(e.target.value)}
             style={settingsInputStyle}>
             <option value="">— เลือกหมวดหลัก —</option>
             {activeMains.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
           </select>
         </SettingsField>
-        <SettingsField label="หมวดย่อย (Level 2)" required>
+        <SettingsField label="หมวดย่อย (Level 2)" required
+          hint={currentSub?.short_code ? `รหัสรายการจะใช้ prefix "${currentSub.short_code}-"` : undefined}>
           <select value={form.category}
-            onChange={e=>set('category', e.target.value)}
+            onChange={e=>pickSub(e.target.value)}
             disabled={!form.main_category}
             style={settingsInputStyle}>
             <option value="">{form.main_category ? '— เลือกหมวดย่อย —' : '(เลือกหมวดหลักก่อน)'}</option>
-            {activeSubs.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+            {activeSubs.map(s => <option key={s.id} value={s.name}>{s.name}{s.short_code ? ` (${s.short_code})` : ''}</option>)}
           </select>
         </SettingsField>
         <SettingsField label="ชื่อวัสดุ (Item)" required hint="Level 3 — รายการสุดท้าย">

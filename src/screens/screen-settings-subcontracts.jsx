@@ -193,10 +193,13 @@ export function ScreenSettingsSubcontracts({ go }) {
           entity="งานจ้าง"
           endpoint="/api/subcontracts"
           columns={[
-            { key:'category', label:'Category',      required:true, hint:'Level 1' },
+            { key:'category', label:'Category',      required:true, hint:'Level 1',
+              options: categories },
             { key:'name',     label:'ชื่องานจ้าง',     required:true, hint:'Level 2 (Item)' },
-            { key:'unit',     label:'หน่วย',          hint:'code เช่น m, ครั้ง' },
-            { key:'status',   label:'สถานะ',          hint:'Active / Non-Active' },
+            { key:'unit',     label:'หน่วย',          hint:'code เช่น m, ครั้ง',
+              options: units.filter(u => u.active).map(u => u.code) },
+            { key:'status',   label:'สถานะ',          hint:'Active / Non-Active',
+              options:['Active', 'Non-Active'] },
           ]}
           sampleRow="Category	ชื่องานจ้าง	หน่วย	สถานะ
 จ้างออกแบบ	จ้างออกแบบงานวิศวกรรม	งาน	Active

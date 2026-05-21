@@ -230,6 +230,43 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
       const ws = XLSX.utils.aoa_to_sheet(aoa);
       ws['!cols'] = columns.map(c => ({ wch: Math.max((c.label || '').length, 16) }));
       const wb = XLSX.utils.book_new();
+
+      // Any column carrying an `options` array becomes a dropdown via a
+      // shared "Lookup" sheet. We attach Excel data-validation that
+      // references the Lookup sheet so a user can pick from a list when
+      // editing the template in Excel / Google Sheets / Numbers.
+      const dropCols = columns
+        .map((c, i) => ({ ...c, idx: i }))
+        .filter(c => Array.isArray(c.options) && c.options.length > 0);
+
+      if (dropCols.length > 0) {
+        const maxLen = Math.max(...dropCols.map(c => c.options.length));
+        const lookupAoA = [dropCols.map(c => c.label)];
+        for (let r = 0; r < maxLen; r++) {
+          lookupAoA.push(dropCols.map(c => c.options[r] || ''));
+        }
+        const wsLookup = XLSX.utils.aoa_to_sheet(lookupAoA);
+        wsLookup['!cols'] = dropCols.map(c => ({ wch: Math.max((c.label || '').length, 24) }));
+        XLSX.utils.book_append_sheet(wb, wsLookup, 'Lookup');
+
+        // SheetJS community supports writing the `!dataValidation` array.
+        // Reference a column on the Lookup sheet so the list is shared
+        // across all data rows and can be extended later by editing Lookup.
+        ws['!dataValidation'] = dropCols.map((c, i) => {
+          const lookupCol = String.fromCharCode(65 + i);            // A, B, …
+          const colLetter = String.fromCharCode(65 + c.idx);
+          return {
+            sqref: `${colLetter}2:${colLetter}1000`,
+            type: 'list',
+            allowBlank: !c.required,
+            formula1: `Lookup!$${lookupCol}$2:$${lookupCol}$${maxLen + 1}`,
+            showErrorMessage: true,
+            errorTitle: 'ค่าไม่ถูกต้อง',
+            error: `กรุณาเลือก ${c.label} จากชีต "Lookup"`,
+          };
+        });
+      }
+
       XLSX.utils.book_append_sheet(wb, ws, entity.slice(0, 28) || 'Sheet1');
       XLSX.writeFile(wb, `template_${entity}.xlsx`);
     } catch (e) {
