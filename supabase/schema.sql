@@ -220,6 +220,11 @@ alter table contracts add column if not exists warranty text default '';
 create index if not exists contracts_status_idx on contracts (status);
 create index if not exists contracts_supplier_idx on contracts (supplier_id);
 
+-- Suppliers: 3-state status (Active / Non-Active / Blacklist) — replaces
+-- the boolean `active` column for UI purposes. Old `active` column is kept
+-- for backward compat (mirrored from status at write-time).
+alter table suppliers add column if not exists status text default 'Active';
+
 create table if not exists comparisons (
   id          text  primary key,
   no          text  unique not null,

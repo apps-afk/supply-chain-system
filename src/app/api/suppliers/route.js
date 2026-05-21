@@ -2,7 +2,7 @@ import { createCrudRoutes } from '../../../lib/crud';
 
 const h = createCrudRoutes('suppliers', {
   fields: ['code', 'name', 'type', 'contact_name', 'email', 'phone',
-           'address', 'tax_id', 'payment_terms', 'rating', 'notes', 'active'],
+           'address', 'tax_id', 'payment_terms', 'rating', 'notes', 'active', 'status'],
   orderBy: 'name',
   idPrefix: 'sup',
 });

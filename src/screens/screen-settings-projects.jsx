@@ -79,8 +79,6 @@ export function ScreenSettingsProjects({ go }) {
   const active   = items.filter(p => p.status === 'Active' || (!p.status && p.active));
   const closed   = items.filter(p => p.status === 'Closed');
   const planning = items.filter(p => p.status === 'Planning');
-  const totalBudget  = items.reduce((s,p) => s + (Number(p.budget) || 0), 0);
-  const activeBudget = active.reduce((s,p) => s + (Number(p.budget) || 0), 0);
 
   return (
     <div className="page">
@@ -99,7 +97,7 @@ export function ScreenSettingsProjects({ go }) {
 
       {/* Summary */}
       <div style={{
-        display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:0,
+        display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:0,
         borderTop:'1px solid var(--rule)', borderBottom:'1px solid var(--rule)',
         padding:'24px 0', marginBottom:32,
       }}>
@@ -122,14 +120,6 @@ export function ScreenSettingsProjects({ go }) {
               <span style={{ color:'var(--ink-3)' }}>Closed</span>
               <strong style={{ color:'var(--ink)' }}>{closed.length}</strong>
             </span>
-          </div>
-        </div>
-
-        <div style={{ paddingLeft:28, borderLeft:'1px solid var(--rule)' }}>
-          <div className="stat-label">งบประมาณรวม</div>
-          <div className="stat-value">{totalBudget.toLocaleString()}</div>
-          <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:8 }}>
-            Active <strong style={{ color:'var(--ink)' }}>{activeBudget.toLocaleString()}</strong>
           </div>
         </div>
 
@@ -171,7 +161,6 @@ export function ScreenSettingsProjects({ go }) {
               <th>ชื่อโครงการ</th>
               <th>ประเภท</th>
               <th>สถานที่</th>
-              <th className="num-col">งบประมาณ</th>
               <th>เริ่มงาน</th>
               <th>สถานะ</th>
               <th style={{ width:80 }}></th>
@@ -179,9 +168,9 @@ export function ScreenSettingsProjects({ go }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล — คลิก "เพิ่มโครงการ" เพื่อสร้างรายการแรก
               </td></tr>
             ) : filtered.map(p => {
@@ -193,7 +182,6 @@ export function ScreenSettingsProjects({ go }) {
                   <td style={{ fontWeight:500 }}>{p.name}</td>
                   <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{type ? type.name : (p.type_id || '—')}</td>
                   <td style={{ fontSize:12.5, color:'var(--ink-3)' }}>{p.location || '—'}</td>
-                  <td className="num-col num" style={{ color:'var(--ink-2)' }}>{p.budget != null ? Number(p.budget).toLocaleString() : '—'}</td>
                   <td style={{ fontSize:12, color:'var(--ink-3)' }}>{p.start_date || '—'}</td>
                   <td><StatusPill status={statusLabel} /></td>
                   <td style={{ textAlign:'right' }}>
@@ -229,7 +217,6 @@ function ProjectModal({ go, item, projectTypes, onClose, onSaved }) {
     type_id:    item?.type_id     || (activeTypes[0]?.id || ''),
     status:     item?.status      || 'Planning',
     location:   item?.location    || '',
-    budget:     item?.budget      ?? '',
     start_date: item?.start_date  || '',
     end_date:   item?.end_date    || '',
     notes:      item?.notes       || '',
@@ -251,7 +238,6 @@ function ProjectModal({ go, item, projectTypes, onClose, onSaved }) {
       type_id:    form.type_id || null,
       status:     form.status,
       location:   form.location,
-      budget:     form.budget === '' ? null : Number(form.budget),
       start_date: form.start_date || null,
       end_date:   form.end_date   || null,
       notes:      form.notes,
@@ -297,13 +283,6 @@ function ProjectModal({ go, item, projectTypes, onClose, onSaved }) {
         <SettingsField label="สถานที่">
           <input value={form.location} onChange={e=>set('location', e.target.value)} placeholder="เช่น กรุงเทพฯ" style={settingsInputStyle} />
         </SettingsField>
-        <div style={{ gridColumn:'1 / -1' }}>
-          <SettingsField label="งบประมาณ" hint="หน่วย: บาท">
-            <input type="number" min={0} step={1} value={form.budget}
-                   onChange={e=>set('budget', e.target.value)} placeholder="0"
-                   style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
-          </SettingsField>
-        </div>
         <SettingsField label="วันเริ่มงาน">
           <input type="date" value={form.start_date} onChange={e=>set('start_date', e.target.value)} style={settingsInputStyle} />
         </SettingsField>

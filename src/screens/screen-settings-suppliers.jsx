@@ -52,11 +52,14 @@ export function ScreenSettingsSuppliers({ go }) {
     load();
   }
 
+  // Derive a 3-state status from either the new `status` column or the
+  // legacy `active` boolean (for rows that pre-date the migration).
+  const statusOf = (s) => s.status || (s.active === false ? 'Non-Active' : 'Active');
+
   const filtered = useMemo(() => {
     const v = q.toLowerCase();
     return items.filter(s => {
-      const status = s.active ? 'Active' : 'Non-Active';
-      if (filter !== 'ทั้งหมด' && status !== filter) return false;
+      if (filter !== 'ทั้งหมด' && statusOf(s) !== filter) return false;
       if (q) {
         const hit =
           s.name?.toLowerCase().includes(v) ||
@@ -69,10 +72,15 @@ export function ScreenSettingsSuppliers({ go }) {
     });
   }, [items, filter, q]);
 
-  const { activeCount, inactiveCount } = useMemo(() => {
-    let active = 0;
-    for (const s of items) if (s.active) active++;
-    return { activeCount: active, inactiveCount: items.length - active };
+  const { activeCount, inactiveCount, blacklistCount } = useMemo(() => {
+    let active = 0, inactive = 0, blacklist = 0;
+    for (const s of items) {
+      const st = statusOf(s);
+      if (st === 'Active') active++;
+      else if (st === 'Blacklist') blacklist++;
+      else inactive++;
+    }
+    return { activeCount: active, inactiveCount: inactive, blacklistCount: blacklist };
   }, [items]);
 
   return (
@@ -94,7 +102,7 @@ export function ScreenSettingsSuppliers({ go }) {
         {
           label:'Supplier ทั้งหมด',
           value: items.length,
-          sub: <span style={{ display:'inline-flex', gap:14, fontSize:12 }}>
+          sub: <span style={{ display:'inline-flex', gap:14, fontSize:12, flexWrap:'wrap' }}>
             <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
               <span style={{ width:6, height:6, borderRadius:999, background:'var(--moss)' }} />
               <span style={{ color:'var(--ink-3)' }}>Active</span>
@@ -105,13 +113,18 @@ export function ScreenSettingsSuppliers({ go }) {
               <span style={{ color:'var(--ink-3)' }}>Non-Active</span>
               <strong style={{ color:'var(--ink)' }}>{inactiveCount}</strong>
             </span>
+            <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+              <span style={{ width:6, height:6, borderRadius:999, background:'var(--clay)' }} />
+              <span style={{ color:'var(--ink-3)' }}>Blacklist</span>
+              <strong style={{ color:'var(--ink)' }}>{blacklistCount}</strong>
+            </span>
           </span>,
         },
       ]} />
 
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16 }}>
         <div style={{ display:'flex', gap:4 }}>
-          {['ทั้งหมด','Active','Non-Active'].map(f => (
+          {['ทั้งหมด','Active','Non-Active','Blacklist'].map(f => (
             <button key={f} onClick={() => setFilter(f)} className="btn sm" style={{
               background: filter === f ? 'var(--ink)' : 'transparent',
               color: filter === f ? 'var(--paper)' : 'var(--ink-2)',
@@ -168,7 +181,7 @@ export function ScreenSettingsSuppliers({ go }) {
                     <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>{s.phone || ''}</div>
                   </td>
                   <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{s.payment_terms || '—'}</td>
-                  <td><StatusPill status={s.active ? 'Active' : 'Non-Active'} /></td>
+                  <td><StatusPill status={statusOf(s)} /></td>
                   <td style={{ textAlign:'right' }}>
                     <button
                       className="btn ghost sm"
@@ -192,7 +205,7 @@ export function ScreenSettingsSuppliers({ go }) {
                           <div className="eyebrow" style={{ marginBottom:8 }}>ที่อยู่</div>
                           <div style={{ fontSize:12.5, color:'var(--ink-2)', lineHeight:1.6 }}>{s.address || '—'}</div>
                           <div className="eyebrow" style={{ margin:'14px 0 6px' }}>ประเภท</div>
-                          <div style={{ fontSize:12, color:'var(--ink-2)' }}>{s.type || '—'}</div>
+                          <div style={{ fontSize:12, color:'var(--ink-2)' }}>{s.type ? s.type.split(',').map(t => t.trim()).filter(Boolean).join(' · ') : '—'}</div>
                         </div>
                         <div>
                           <div className="eyebrow" style={{ marginBottom:8 }}>ผู้ติดต่อหลัก</div>
@@ -203,9 +216,7 @@ export function ScreenSettingsSuppliers({ go }) {
                           </div>
                         </div>
                         <div>
-                          <div className="eyebrow" style={{ marginBottom:8 }}>เรตติ้ง</div>
-                          <div style={{ fontSize:13, fontWeight:500 }}>{s.rating != null ? `${s.rating} / 5` : '—'}</div>
-                          <div className="eyebrow" style={{ margin:'14px 0 6px' }}>หมายเหตุ</div>
+                          <div className="eyebrow" style={{ marginBottom:8 }}>หมายเหตุ</div>
                           <div style={{ fontSize:12, color:'var(--ink-2)' }}>{s.notes || '—'}</div>
                         </div>
                       </div>
@@ -221,6 +232,7 @@ export function ScreenSettingsSuppliers({ go }) {
       {editing && (
         <SupplierModal
           item={editing === 'new' ? null : editing}
+          existingCodes={items.map(s => s.code).filter(Boolean)}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
         />
@@ -229,21 +241,56 @@ export function ScreenSettingsSuppliers({ go }) {
   );
 }
 
-function SupplierModal({ item, onClose, onSaved }) {
+// Build the next SUP-NNNNN code by scanning existing codes for the
+// highest numeric suffix and adding 1. Falls back to 1 if no SUP-* codes
+// exist yet. Race window: two simultaneous "new" modals would compute
+// the same code — the second save hits the unique constraint and the
+// user sees a clear error to retry.
+function nextSupplierCode(existing) {
+  let max = 0;
+  for (const c of existing || []) {
+    const m = /^SUP-(\d+)$/.exec(String(c).trim());
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `SUP-${String(max + 1).padStart(5, '0')}`;
+}
+
+// Parse a payment_terms string back to {has, days} for the toggle UI.
+// We store as either '' (no credit) or 'NN วัน'. Old data with values
+// like 'เงินสด' / 'งวด' falls through to has=false.
+function parsePaymentTerms(str) {
+  if (!str) return { has: false, days: '' };
+  const m = /(\d+)\s*วัน/.exec(String(str));
+  if (m) return { has: true, days: m[1] };
+  return { has: false, days: '' };
+}
+
+// Parse the comma-separated `type` field into a {material, subcontract} pair.
+function parseType(str) {
+  const s = String(str || '').toLowerCase();
+  return { material: s.includes('material'), subcontract: s.includes('subcontract') };
+}
+
+function SupplierModal({ item, existingCodes, onClose, onSaved }) {
   const isEdit = !!item;
+  const initialTerms = parsePaymentTerms(item?.payment_terms);
+  const initialType  = parseType(item?.type);
   const [form, setForm] = useState({
-    code:          item?.code          || '',
+    // For new suppliers the code is auto-generated and read-only. Editing
+    // existing suppliers keeps the original code.
+    code:          item?.code || nextSupplierCode(existingCodes),
     name:          item?.name          || '',
-    type:          item?.type          || '',
+    typeMaterial:    initialType.material,
+    typeSubcontract: initialType.subcontract,
     contact_name:  item?.contact_name  || '',
     email:         item?.email         || '',
     phone:         item?.phone         || '',
     address:       item?.address       || '',
     tax_id:        item?.tax_id        || '',
-    payment_terms: item?.payment_terms || '30 วัน',
-    rating:        item?.rating        ?? '',
+    hasCredit:     initialTerms.has,
+    creditDays:    initialTerms.days,
     notes:         item?.notes         || '',
-    active:        item?.active !== false,
+    status:        item?.status || (item?.active === false ? 'Non-Active' : 'Active'),
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr]   = useState('');
@@ -251,23 +298,37 @@ function SupplierModal({ item, onClose, onSaved }) {
 
   async function save() {
     setErr('');
-    if (!form.code.trim() || !form.name.trim()) {
-      setErr('กรอกรหัสและชื่อให้ครบ'); return;
+    if (!form.name.trim()) {
+      setErr('กรอกชื่อบริษัท'); return;
+    }
+    if (!form.typeMaterial && !form.typeSubcontract) {
+      setErr('เลือกประเภทอย่างน้อย 1 อย่าง (Material / SubContract)'); return;
+    }
+    if (form.hasCredit) {
+      const n = parseInt(form.creditDays, 10);
+      if (!Number.isFinite(n) || n <= 0) {
+        setErr('กรอกจำนวนวันเครดิตเทอม (ตัวเลขมากกว่า 0)'); return;
+      }
     }
     setBusy(true);
+    const typeParts = [];
+    if (form.typeMaterial)    typeParts.push('Material');
+    if (form.typeSubcontract) typeParts.push('SubContract');
     const payload = {
       code:          form.code,
       name:          form.name,
-      type:          form.type,
+      type:          typeParts.join(','),
       contact_name:  form.contact_name,
       email:         form.email,
       phone:         form.phone,
       address:       form.address,
       tax_id:        form.tax_id,
-      payment_terms: form.payment_terms,
-      rating:        form.rating === '' ? null : Number(form.rating),
+      payment_terms: form.hasCredit ? `${parseInt(form.creditDays, 10)} วัน` : '',
       notes:         form.notes,
-      active:        form.active,
+      status:        form.status,
+      // Keep legacy boolean in sync — old screens / queries that look at
+      // `active` should still see Blacklist as inactive.
+      active:        form.status === 'Active',
     };
     if (isEdit) payload.id = item.id;
     const res = await fetch('/api/suppliers', {
@@ -276,7 +337,14 @@ function SupplierModal({ item, onClose, onSaved }) {
       body: JSON.stringify(payload),
     });
     const data = await res.json();
-    if (!res.ok) { setErr(data.error || 'บันทึกไม่สำเร็จ'); setBusy(false); return; }
+    if (!res.ok) {
+      // Likely cause of failure on POST: unique-constraint collision on
+      // code from two simultaneous "new" modals. Tell the user to retry.
+      const friendly = !isEdit && /duplicate|unique/i.test(data.error || '')
+        ? 'รหัส Supplier ถูกใช้ไปแล้ว — กดยกเลิกแล้วเปิดใหม่เพื่อสร้างรหัสถัดไป'
+        : (data.error || 'บันทึกไม่สำเร็จ');
+      setErr(friendly); setBusy(false); return;
+    }
     setBusy(false);
     onSaved();
   }
@@ -289,14 +357,28 @@ function SupplierModal({ item, onClose, onSaved }) {
 
       <div className="eyebrow" style={{ marginBottom:12 }}>ข้อมูลบริษัท</div>
       <div style={{ display:'grid', gridTemplateColumns:'140px 1fr 1fr', gap:14, marginBottom:24 }}>
-        <SettingsField label="รหัส" required hint="เช่น SUP-00001">
-          <input value={form.code} onChange={e=>set('code', e.target.value)} placeholder="SUP-00001" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
+        <SettingsField label="รหัส" hint={isEdit ? 'แก้ไม่ได้' : 'ระบบสร้างให้อัตโนมัติ'}>
+          <input value={form.code} readOnly disabled
+                 style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)', background:'var(--paper-2)', color:'var(--ink-3)' }} />
         </SettingsField>
         <SettingsField label="ชื่อบริษัท" required>
           <input value={form.name} onChange={e=>set('name',e.target.value)} placeholder="เช่น บจก. ทรัพย์ก่อสร้าง" style={settingsInputStyle} />
         </SettingsField>
-        <SettingsField label="ประเภท" hint="เช่น Material / SubContract">
-          <input value={form.type} onChange={e=>set('type',e.target.value)} placeholder="Material" style={settingsInputStyle} />
+        <SettingsField label="ประเภท" required hint="เลือกได้ทั้ง 2 อย่าง">
+          <div style={{ display:'flex', gap:14, alignItems:'center', height:32 }}>
+            <label style={{ display:'inline-flex', alignItems:'center', gap:6, cursor:'pointer', fontSize:13 }}>
+              <input type="checkbox" checked={form.typeMaterial}
+                onChange={e=>set('typeMaterial', e.target.checked)}
+                style={{ width:15, height:15, accentColor:'var(--teal)' }} />
+              Material
+            </label>
+            <label style={{ display:'inline-flex', alignItems:'center', gap:6, cursor:'pointer', fontSize:13 }}>
+              <input type="checkbox" checked={form.typeSubcontract}
+                onChange={e=>set('typeSubcontract', e.target.checked)}
+                style={{ width:15, height:15, accentColor:'var(--teal)' }} />
+              SubContract
+            </label>
+          </div>
         </SettingsField>
         <SettingsField label="Tax ID" hint="13 หลัก">
           <input value={form.tax_id} onChange={e=>set('tax_id',e.target.value.replace(/\D/g,'').slice(0,13))} placeholder="0105556012345" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
@@ -320,22 +402,33 @@ function SupplierModal({ item, onClose, onSaved }) {
           <input type="email" value={form.email} onChange={e=>set('email',e.target.value)} placeholder="contact@company.com" style={settingsInputStyle} />
         </SettingsField>
         <SettingsField label="เครดิตเทอม">
-          <select value={form.payment_terms} onChange={e=>set('payment_terms',e.target.value)} style={settingsInputStyle}>
-            <option>เงินสด</option><option>15 วัน</option><option>30 วัน</option><option>45 วัน</option><option>60 วัน</option><option>งวด</option>
-          </select>
+          <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+            <StatusToggle options={['ไม่มี','มี']}
+              value={form.hasCredit ? 'มี' : 'ไม่มี'}
+              onChange={v => set('hasCredit', v === 'มี')} />
+            {form.hasCredit && (
+              <div style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+                <input type="number" min={1} step={1} value={form.creditDays}
+                  onChange={e=>set('creditDays', e.target.value.replace(/\D/g,''))}
+                  placeholder="30"
+                  style={{ ...settingsInputStyle, width:80, fontFamily:'var(--font-mono)' }} />
+                <span style={{ fontSize:12, color:'var(--ink-3)' }}>วัน</span>
+              </div>
+            )}
+          </div>
         </SettingsField>
       </div>
 
       <div className="eyebrow" style={{ marginBottom:12 }}>อื่นๆ</div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-        <SettingsField label="เรตติ้ง" hint="0–5">
-          <input type="number" min={0} max={5} step={0.1} value={form.rating}
-                 onChange={e=>set('rating', e.target.value)} placeholder="เช่น 4.5"
-                 style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
-        </SettingsField>
         <SettingsField label="สถานะ">
-          <StatusToggle options={['Active','Non-Active']} value={form.active ? 'Active' : 'Non-Active'} onChange={v => set('active', v === 'Active')} />
+          <select value={form.status} onChange={e=>set('status', e.target.value)} style={settingsInputStyle}>
+            <option value="Active">Active</option>
+            <option value="Non-Active">Non-Active</option>
+            <option value="Blacklist">Blacklist</option>
+          </select>
         </SettingsField>
+        <div />
         <div style={{ gridColumn:'1 / -1' }}>
           <SettingsField label="หมายเหตุ">
             <textarea value={form.notes} onChange={e=>set('notes', e.target.value)}
