@@ -67,7 +67,8 @@ export function ScreenSettingsApprovalRoles({ go }) {
   });
   const activeRoles = items.filter(r => r.active);
   const activeCount = activeRoles.length;
-  const meetsMin = activeCount >= 4;
+  const MIN_ROLES = 3;
+  const meetsMin = activeCount >= MIN_ROLES;
   const activeSorted = [...activeRoles].sort((a,b) => (a.level||0) - (b.level||0));
 
   return (
@@ -78,7 +79,7 @@ export function ScreenSettingsApprovalRoles({ go }) {
           <h1 className="h-display">ตำแหน่งผู้อนุมัติ (Approval Roles)</h1>
           <p style={{ fontSize:14, color:'var(--ink-3)', margin:'6px 0 0', maxWidth:640 }}>
             กำหนดตำแหน่ง/หน่วยงานที่ต้องเซ็นในเอกสาร — เช่น <strong style={{ color:'var(--ink-2)' }}>ใบเปรียบเทียบราคา (Compare PDF)</strong> ·
-            ขั้นต่ำ <strong style={{ color:'var(--ink-2)' }}>4 ตำแหน่ง</strong>
+            ขั้นต่ำ <strong style={{ color:'var(--ink-2)' }}>{MIN_ROLES} ตำแหน่ง</strong>
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
@@ -88,7 +89,7 @@ export function ScreenSettingsApprovalRoles({ go }) {
 
       <SettingsStatStrip stats={[
         { label:'ตำแหน่งทั้งหมด',  value: items.length, sub:`${activeCount} Active · ${items.length - activeCount} Non-Active` },
-        { label:'ขั้นต่ำสำหรับ PDF', value:'4 ตำแหน่ง', sub: meetsMin ? `✓ ปัจจุบันมี ${activeCount} ตำแหน่ง · เพียงพอ` : `⚠ ปัจจุบันมี ${activeCount} ตำแหน่ง · ยังไม่ครบ` },
+        { label:'ขั้นต่ำสำหรับ PDF', value:`${MIN_ROLES} ตำแหน่ง`, sub: meetsMin ? `✓ ปัจจุบันมี ${activeCount} ตำแหน่ง · เพียงพอ` : `⚠ ปัจจุบันมี ${activeCount} ตำแหน่ง · ยังไม่ครบ` },
       ]} />
 
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16 }}>
@@ -160,13 +161,13 @@ export function ScreenSettingsApprovalRoles({ go }) {
             <h3 className="h-card">ช่องลงนาม · ใบเปรียบเทียบราคา</h3>
           </div>
           <span style={{ fontSize:11.5, color: meetsMin ? 'var(--moss)' : 'var(--clay)', fontWeight:500 }}>
-            {meetsMin ? `✓ ${activeCount} ตำแหน่ง — ครบขั้นต่ำ` : `⚠ ${activeCount} ตำแหน่ง — ยังไม่ครบ 4 ตำแหน่ง`}
+            {meetsMin ? `✓ ${activeCount} ตำแหน่ง — ครบขั้นต่ำ` : `⚠ ${activeCount} ตำแหน่ง — ยังไม่ครบ ${MIN_ROLES} ตำแหน่ง`}
           </span>
         </div>
         <div style={{ padding:'36px 24px 24px', background:'#FCFAF5' }}>
           <div style={{
             display:'grid',
-            gridTemplateColumns: `repeat(${Math.max(activeCount, 4)}, 1fr)`,
+            gridTemplateColumns: `repeat(${Math.max(activeCount, MIN_ROLES)}, 1fr)`,
             gap:24,
           }}>
             {activeSorted.map(r => (
@@ -178,7 +179,7 @@ export function ScreenSettingsApprovalRoles({ go }) {
                 <span style={{ color:'var(--ink-4)' }}>ลงนาม / วันที่</span>
               </div>
             ))}
-            {[...Array(Math.max(0, 4 - activeCount))].map((_,i) => (
+            {[...Array(Math.max(0, MIN_ROLES - activeCount))].map((_,i) => (
               <div key={'ph'+i} style={{
                 borderTop:'1px dashed var(--rule-2)',
                 paddingTop:8, fontSize:11, color:'var(--ink-4)', textAlign:'center', fontStyle:'italic',

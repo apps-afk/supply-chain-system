@@ -1,7 +1,7 @@
 import { createCrudRoutes } from '../../../lib/crud';
 
 const h = createCrudRoutes('materials', {
-  fields: ['code', 'name', 'category', 'unit_id', 'spec', 'notes', 'active'],
+  fields: ['code', 'name', 'main_category', 'category', 'unit_id', 'spec', 'notes', 'active'],
   orderBy: 'category',
   idPrefix: 'mat',
 });

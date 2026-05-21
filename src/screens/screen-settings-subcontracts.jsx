@@ -1,7 +1,16 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { Icons } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal } from '../lib/settings-shared';
+
+function nextSubcontractCode(existing) {
+  let max = 0;
+  for (const c of existing || []) {
+    const m = /^SUB-(\d+)$/.exec(String(c).trim());
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `SUB-${String(max + 1).padStart(5, '0')}`;
+}
 
 /*
   Settings → SubContract List
@@ -24,6 +33,7 @@ export function ScreenSettingsSubcontracts({ go }) {
   const [filter, setFilter]   = useState('ทั้งหมด');
   const [catFilter, setCatFilter] = useState('ทั้งหมด');
   const [editing, setEditing] = useState(null); // null | 'new' | object
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   async function load() {
     setLoading(true); setErr('');
@@ -85,6 +95,7 @@ export function ScreenSettingsSubcontracts({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
+          <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} Bulk Upload</button>
           <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่มงานจ้าง</button>
         </div>
       </div>
@@ -171,18 +182,52 @@ export function ScreenSettingsSubcontracts({ go }) {
           item={editing === 'new' ? null : editing}
           units={units}
           existingCategories={categories}
+          existingCodes={items.map(i => i.code).filter(Boolean)}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+      {bulkOpen && (
+        <BulkUploadModal
+          title="Bulk Upload งานจ้างเหมา"
+          entity="งานจ้าง"
+          endpoint="/api/subcontracts"
+          columns={[
+            { key:'category', label:'Category',      required:true, hint:'Level 1' },
+            { key:'name',     label:'ชื่องานจ้าง',     required:true, hint:'Level 2 (Item)' },
+            { key:'unit',     label:'หน่วย',          hint:'code เช่น m, ครั้ง' },
+            { key:'status',   label:'สถานะ',          hint:'Active / Non-Active' },
+          ]}
+          sampleRow="Category	ชื่องานจ้าง	หน่วย	สถานะ
+จ้างออกแบบ	จ้างออกแบบงานวิศวกรรม	งาน	Active
+งานโครงสร้าง	งานเสาเข็มตอก	เส้น	Active"
+          transform={(row, ctx) => {
+            const allCodes = [...items.map(i => i.code).filter(Boolean), ...ctx.usedCodes];
+            const code = nextSubcontractCode(allCodes);
+            const uCode = (row.unit || '').toLowerCase().trim();
+            const unit = units.find(u => (u.code || '').toLowerCase() === uCode
+              || (u.aliases || '').toLowerCase().split(',').map(a => a.trim()).includes(uCode));
+            const active = (row.status || 'Active').toLowerCase() !== 'non-active';
+            return {
+              code,
+              category: row.category || '',
+              name: row.name,
+              unit_id: unit?.id || null,
+              active,
+            };
+          }}
+          onClose={() => setBulkOpen(false)}
+          onDone={() => { load(); }}
         />
       )}
     </div>
   );
 }
 
-function SubcontractModal({ item, units, existingCategories, onClose, onSaved }) {
+function SubcontractModal({ item, units, existingCategories, existingCodes, onClose, onSaved }) {
   const isEdit = !!item;
   const [form, setForm] = useState({
-    code:     item?.code     || '',
+    code:     item?.code || nextSubcontractCode(existingCodes),
     name:     item?.name     || '',
     category: item?.category || '',
     unit_id:  item?.unit_id  || '',
@@ -195,8 +240,8 @@ function SubcontractModal({ item, units, existingCategories, onClose, onSaved })
 
   async function save() {
     setErr('');
-    if (!form.code.trim() || !form.name.trim()) {
-      setErr('กรอกรหัสและชื่อให้ครบ'); return;
+    if (!form.name.trim() || !form.category.trim()) {
+      setErr('กรอก Category และชื่องานจ้างให้ครบ'); return;
     }
     setBusy(true);
     const payload = {
@@ -225,17 +270,18 @@ function SubcontractModal({ item, units, existingCategories, onClose, onSaved })
         <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{err}</div>
       )}
       <div style={{ display:'grid', gridTemplateColumns:'140px 1fr', gap:14 }}>
-        <SettingsField label="รหัส" required hint="เช่น SUB-00001">
-          <input value={form.code} onChange={e=>set('code', e.target.value)} placeholder="SUB-00001" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
+        <SettingsField label="รหัส" hint={isEdit ? 'แก้ไม่ได้' : 'ระบบสร้างให้อัตโนมัติ'}>
+          <input value={form.code} readOnly disabled
+            style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)', background:'var(--paper-2)', color:'var(--ink-3)' }} />
         </SettingsField>
-        <SettingsField label="ชื่องานจ้าง" required>
-          <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น งานเสาเข็มตอก" style={settingsInputStyle} />
-        </SettingsField>
-        <SettingsField label="ประเภทงาน" hint="พิมพ์เพื่อสร้างใหม่">
-          <input list="subcontract-cats" value={form.category} onChange={e=>set('category', e.target.value)} placeholder="เช่น งานโครงสร้าง" style={settingsInputStyle} />
+        <SettingsField label="Category (Level 1)" required hint="พิมพ์เพื่อสร้างใหม่ เช่น จ้างออกแบบ">
+          <input list="subcontract-cats" value={form.category} onChange={e=>set('category', e.target.value)} placeholder="เช่น จ้างออกแบบ" style={settingsInputStyle} />
           <datalist id="subcontract-cats">
             {existingCategories.map(c => <option key={c} value={c} />)}
           </datalist>
+        </SettingsField>
+        <SettingsField label="ชื่องานจ้าง (Item)" required hint="Level 2 — รายการสุดท้าย">
+          <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น จ้างออกแบบงานวิศวกรรม" style={settingsInputStyle} />
         </SettingsField>
         <SettingsField label="หน่วย">
           <select value={form.unit_id} onChange={e=>set('unit_id', e.target.value)} style={settingsInputStyle}>

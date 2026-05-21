@@ -133,7 +133,7 @@ function SidebarImpl({ current, onNav }) {
         <Item id="suppliers"      icon="truck"     label="ผู้ขาย/ผู้รับเหมา" />
         <Item id="materials"      icon="box"       label="วัสดุก่อสร้าง" />
         <Item id="subcontracts"   icon="hammer"    label="งานจ้างเหมา" />
-        <Item id="contract-types" icon="fileCheck" label="ประเภทสัญญา" />
+        <Item id="contract-types" icon="fileCheck" label="ประเภทเอกสาร" />
         <Item id="units"          icon="ruler"     label="หน่วยนับ" />
         <Item id="approval-roles" icon="fileCheck" label="ตำแหน่งผู้อนุมัติ" />
       </div>

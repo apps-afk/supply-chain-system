@@ -62,9 +62,9 @@ export function ScreenSettingsContractTypes({ go }) {
       <div className="page-head">
         <div className="page-title">
           <div className="eyebrow">Settings · Master Data</div>
-          <h1 className="h-display">ประเภทสัญญา (Contract Type)</h1>
+          <h1 className="h-display">ประเภทเอกสาร (Document Type)</h1>
           <p style={{ fontSize:14, color:'var(--ink-3)', margin:'6px 0 0', maxWidth:600 }}>
-            แยกประเภทของสัญญาเพื่อใช้ในการออกเอกสารและรายงาน
+            แยกประเภทของเอกสารเพื่อใช้ในการออกเอกสารและรายงาน
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
@@ -104,7 +104,7 @@ export function ScreenSettingsContractTypes({ go }) {
           <thead>
             <tr>
               <th style={{ width:'10%' }}>รหัส</th>
-              <th style={{ width:'28%' }}>ชื่อประเภทสัญญา</th>
+              <th style={{ width:'28%' }}>ชื่อประเภทเอกสาร</th>
               <th>คำอธิบาย</th>
               <th className="num-col" style={{ width:100 }}>มัดจำ %</th>
               <th className="num-col" style={{ width:100 }}>เก็บไว้ %</th>
@@ -189,7 +189,7 @@ function ContractTypeModal({ item, onClose, onSaved }) {
   }
 
   return (
-    <SettingsModal eyebrow={isEdit ? 'แก้ไขประเภทสัญญา' : 'เพิ่มประเภทสัญญา'} title={isEdit ? item.name : 'ประเภทสัญญาใหม่'} onClose={onClose} width={560}>
+    <SettingsModal eyebrow={isEdit ? 'แก้ไขประเภทเอกสาร' : 'เพิ่มประเภทเอกสาร'} title={isEdit ? item.name : 'ประเภทเอกสารใหม่'} onClose={onClose} width={560}>
       {err && (
         <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{err}</div>
       )}
@@ -197,7 +197,7 @@ function ContractTypeModal({ item, onClose, onSaved }) {
         <SettingsField label="รหัส" required hint="เช่น CT-001">
           <input value={form.code} onChange={e=>set('code', e.target.value)} placeholder="CT-001" style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)' }} />
         </SettingsField>
-        <SettingsField label="ชื่อประเภทสัญญา" required>
+        <SettingsField label="ชื่อประเภทเอกสาร" required>
           <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น สัญญาว่าจ้างที่ปรึกษา" style={settingsInputStyle} />
         </SettingsField>
         <div style={{ gridColumn:'1 / -1' }}>

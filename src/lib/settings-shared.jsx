@@ -193,6 +193,199 @@ export function BulkExcelButton({ label = 'Bulk Excel', entity, columns, sampleR
   );
 }
 
+/**
+ * Functional bulk upload — user pastes TSV/CSV (from Excel/Sheets) into a
+ * textarea, gets a live-validated preview, then uploads each row via POST.
+ *
+ * Props:
+ *   title        — modal title
+ *   entity       — short noun shown in copy ("Supplier", "วัสดุ", …)
+ *   columns      — [{ key, label, hint?, required?, parse?(raw, ctx)? }]
+ *   endpoint     — '/api/...'
+ *   transform    — async (parsedRow, ctx) => payload to POST
+ *                  ctx: { rowIndex, usedCodes }
+ *   sampleRow    — string shown as placeholder (tab-separated example)
+ *   onClose, onDone({ ok, fail, errors })
+ */
+export function BulkUploadModal({ title, entity, columns, endpoint, transform, sampleRow, onClose, onDone }) {
+  const [text, setText] = useState('');
+  const [progress, setProgress] = useState(null); // null | {done, total, errors}
+
+  const parsed = React.useMemo(() => {
+    const lines = text.split(/\r?\n/).map(l => l.replace(/\s+$/, '')).filter(l => l.trim());
+    if (lines.length === 0) return [];
+    // Auto-detect separator: tab wins, then comma
+    const sep = lines[0].includes('\t') ? '\t' : ',';
+    // Skip header row if it matches the column labels (case-insensitive)
+    const first = lines[0].split(sep).map(c => c.trim().toLowerCase());
+    const labels = columns.map(c => c.label.toLowerCase());
+    const hasHeader = labels.length > 0 && first[0] === labels[0];
+    const dataLines = hasHeader ? lines.slice(1) : lines;
+    return dataLines.map((line, idx) => {
+      const cells = line.split(sep).map(c => c.trim());
+      const row = {};
+      const errs = [];
+      columns.forEach((col, i) => {
+        const raw = cells[i] || '';
+        row[col.key] = raw;
+        if (col.required && !raw) errs.push(`${col.label}: ว่าง`);
+      });
+      return { lineNo: idx + 1, row, err: errs.length ? errs.join(' · ') : null };
+    });
+  }, [text, columns]);
+
+  const validRows = parsed.filter(r => !r.err);
+
+  async function upload() {
+    const errors = [];
+    setProgress({ done: 0, total: validRows.length, errors });
+    const usedCodes = [];
+    for (let i = 0; i < validRows.length; i++) {
+      const r = validRows[i];
+      try {
+        const payload = await transform(r.row, { rowIndex: i, usedCodes });
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          errors.push(`แถวที่ ${r.lineNo}: ${d.error || 'บันทึกไม่สำเร็จ'}`);
+        } else if (payload.code) {
+          usedCodes.push(payload.code);
+        }
+      } catch (e) {
+        errors.push(`แถวที่ ${r.lineNo}: ${e.message || 'ผิดพลาด'}`);
+      }
+      setProgress({ done: i + 1, total: validRows.length, errors: [...errors] });
+    }
+    onDone?.({ ok: validRows.length - errors.length, fail: errors.length, errors });
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position:'fixed', inset:0, background:'rgba(20,18,14,0.32)',
+      display:'grid', placeItems:'center', zIndex:50,
+    }}>
+      <div onClick={e=>e.stopPropagation()} className="card"
+           style={{ width: 820, padding:0, boxShadow:'var(--sh-pop)', maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
+        <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
+          <div className="eyebrow" style={{ marginBottom:4 }}>เพิ่ม{entity}จำนวนมาก</div>
+          <h3 className="h-section">{title || `Bulk Upload — ${entity}`}</h3>
+        </div>
+
+        <div style={{ padding:24, overflowY:'auto', flex:1 }}>
+          <p style={{ fontSize:13, color:'var(--ink-2)', margin:'0 0 12px', lineHeight:1.6 }}>
+            คัดลอกข้อมูลจาก Excel / Google Sheets แล้ววางช่องด้านล่าง · 1 แถว = 1 รายการ ·
+            แท็บ (Tab) คั่นคอลัมน์ (Excel paste แบบนี้อยู่แล้ว) หรือใช้คอมม่า
+          </p>
+
+          <div className="eyebrow" style={{ marginBottom:6 }}>ลำดับคอลัมน์ที่ต้องวาง</div>
+          <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:12 }}>
+            {columns.map((c, i) => (
+              <span key={i} style={{
+                padding:'4px 10px', borderRadius:4, fontSize:11.5,
+                background: c.required ? 'var(--clay-soft)' : 'var(--paper-2)',
+                color: c.required ? '#6B2D1A' : 'var(--ink-2)',
+                fontWeight:500,
+              }}>
+                {i+1}. {c.label}{c.required && ' *'}
+                {c.hint && <span style={{ color:'var(--ink-4)', marginLeft:6 }}>({c.hint})</span>}
+              </span>
+            ))}
+          </div>
+
+          <textarea value={text} onChange={e=>setText(e.target.value)}
+            placeholder={sampleRow || columns.map(c=>c.label).join('\t')}
+            spellCheck={false}
+            style={{
+              width:'100%', minHeight:160, padding:12, fontSize:12,
+              fontFamily:'var(--font-mono)', border:'1px solid var(--rule-2)',
+              borderRadius:6, background:'var(--paper)', resize:'vertical', outline:'none',
+            }} />
+
+          {parsed.length > 0 && (
+            <>
+              <div style={{ display:'flex', gap:14, marginTop:14, fontSize:12 }}>
+                <span style={{ color:'var(--ink-3)' }}>
+                  แถวทั้งหมด <strong style={{ color:'var(--ink)' }}>{parsed.length}</strong>
+                </span>
+                <span style={{ color:'var(--moss)' }}>
+                  ✓ พร้อมอัพโหลด <strong>{validRows.length}</strong>
+                </span>
+                {parsed.length - validRows.length > 0 && (
+                  <span style={{ color:'var(--clay)' }}>
+                    ⚠ ข้อมูลขาด <strong>{parsed.length - validRows.length}</strong>
+                  </span>
+                )}
+              </div>
+
+              <div style={{ border:'1px solid var(--rule)', borderRadius:6, marginTop:10, maxHeight:240, overflowY:'auto' }}>
+                <table className="tbl" style={{ fontSize:12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width:32 }}>#</th>
+                      {columns.map((c,i) => <th key={i}>{c.label}</th>)}
+                      <th style={{ width:120 }}>สถานะ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsed.map((r) => (
+                      <tr key={r.lineNo} style={{ background: r.err ? '#FDF3EE' : undefined }}>
+                        <td style={{ color:'var(--ink-3)' }}>{r.lineNo}</td>
+                        {columns.map((c,i) => (
+                          <td key={i} style={{ fontSize:11.5, color:'var(--ink-2)', maxWidth:180, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                            {r.row[c.key] || <span style={{ color:'var(--ink-4)' }}>—</span>}
+                          </td>
+                        ))}
+                        <td style={{ fontSize:11 }}>
+                          {r.err ? <span style={{ color:'var(--clay)' }}>⚠ {r.err}</span> : <span style={{ color:'var(--moss)' }}>✓ พร้อม</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {progress && (
+            <div style={{ marginTop:14, padding:'12px 14px', background:'var(--surface-2)', border:'1px solid var(--rule)', borderRadius:6, fontSize:12.5 }}>
+              <div style={{ marginBottom:6 }}>
+                กำลังนำเข้า… <strong>{progress.done}</strong> / {progress.total}
+              </div>
+              {progress.errors.length > 0 && (
+                <div style={{ marginTop:8, color:'var(--clay)', fontSize:11.5, maxHeight:90, overflowY:'auto' }}>
+                  {progress.errors.map((e,i) => <div key={i}>· {e}</div>)}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', display:'flex', justifyContent:'space-between', alignItems:'center', background:'var(--surface-2)' }}>
+          <div style={{ fontSize:12, color:'var(--ink-3)' }}>
+            {progress && progress.done === progress.total
+              ? `เสร็จสิ้น — สำเร็จ ${progress.total - progress.errors.length} · ล้มเหลว ${progress.errors.length}`
+              : 'พร้อมนำเข้า'}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn ghost" onClick={onClose} disabled={progress && progress.done < progress.total}>
+              {progress && progress.done === progress.total ? 'ปิด' : 'ยกเลิก'}
+            </button>
+            <button className="btn primary"
+              disabled={validRows.length === 0 || (progress && progress.done < progress.total)}
+              onClick={upload}>
+              {Icons.upload} นำเข้า {validRows.length > 0 ? `${validRows.length} รายการ` : ''}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function BulkExcelModal({ entity, columns, sampleRows, onClose }) {
   const [step, setStep] = useState(1);
   const [filename, setFilename] = useState('');

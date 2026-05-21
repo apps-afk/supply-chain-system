@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Av } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal } from '../lib/settings-shared';
 
 /*
   Settings → Supplier List
@@ -18,6 +18,7 @@ export function ScreenSettingsSuppliers({ go }) {
   const [q, setQ]             = useState('');
   const [filter, setFilter]   = useState('ทั้งหมด');
   const [editing, setEditing] = useState(null); // null | 'new' | object
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [expanded, setExpanded] = useState(null);
 
   async function load() {
@@ -94,6 +95,7 @@ export function ScreenSettingsSuppliers({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
+          <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} Bulk Upload</button>
           <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่ม Supplier</button>
         </div>
       </div>
@@ -235,6 +237,47 @@ export function ScreenSettingsSuppliers({ go }) {
           existingCodes={items.map(s => s.code).filter(Boolean)}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
+      {bulkOpen && (
+        <BulkUploadModal
+          title="Bulk Upload Suppliers"
+          entity="Supplier"
+          endpoint="/api/suppliers"
+          columns={[
+            { key:'name',         label:'ชื่อบริษัท',   required:true },
+            { key:'type',         label:'ประเภท',       required:true, hint:'Material / SubContract / Material,SubContract' },
+            { key:'tax_id',       label:'Tax ID',       hint:'13 หลัก' },
+            { key:'address',      label:'ที่อยู่' },
+            { key:'contact_name', label:'ผู้ติดต่อ' },
+            { key:'phone',        label:'โทร' },
+            { key:'email',        label:'อีเมล' },
+            { key:'credit_days',  label:'เครดิตเทอม',   hint:'จำนวนวัน (0=ไม่มี)' },
+            { key:'status',       label:'สถานะ',        hint:'Active / Non-Active / Blacklist' },
+          ]}
+          sampleRow="ชื่อบริษัท	ประเภท	Tax ID	ที่อยู่	ผู้ติดต่อ	โทร	อีเมล	เครดิตเทอม	สถานะ
+บจก. ทรัพย์ก่อสร้าง	Material	0105556012345	กรุงเทพฯ	คุณสมชาย	0812345678	contact@thrap.co.th	30	Active"
+          transform={(row, ctx) => {
+            const allCodes = [...items.map(s => s.code).filter(Boolean), ...ctx.usedCodes];
+            const code = nextSupplierCode(allCodes);
+            const days = parseInt(row.credit_days, 10);
+            const status = ['Active','Non-Active','Blacklist'].includes(row.status) ? row.status : 'Active';
+            return {
+              code,
+              name: row.name,
+              type: row.type,
+              tax_id: (row.tax_id || '').replace(/\D/g,'').slice(0,13),
+              address: row.address || '',
+              contact_name: row.contact_name || '',
+              phone: row.phone || '',
+              email: row.email || '',
+              payment_terms: Number.isFinite(days) && days > 0 ? `${days} วัน` : '',
+              status,
+              active: status === 'Active',
+            };
+          }}
+          onClose={() => setBulkOpen(false)}
+          onDone={() => { load(); }}
         />
       )}
     </div>

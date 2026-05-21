@@ -225,6 +225,17 @@ create index if not exists contracts_supplier_idx on contracts (supplier_id);
 -- for backward compat (mirrored from status at write-time).
 alter table suppliers add column if not exists status text default 'Active';
 
+-- Materials: 3-level taxonomy. Existing `category` column is repurposed as
+-- the sub-category (level 2). `main_category` is the new top-level (level 1).
+-- The `name` column remains the leaf item (level 3).
+alter table materials add column if not exists main_category text default '';
+
+-- Units: extend with English name + alias list. `code` is the symbol,
+-- `name` is the Thai label, `name_en` is the English label, and `aliases`
+-- is a comma-separated list of accepted alternative spellings/codes.
+alter table units add column if not exists name_en text default '';
+alter table units add column if not exists aliases text default '';
+
 create table if not exists comparisons (
   id          text  primary key,
   no          text  unique not null,
