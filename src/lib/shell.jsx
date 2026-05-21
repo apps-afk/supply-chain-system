@@ -91,16 +91,67 @@ export function InitialEstateLogo({ width = 148, style }) {
 /* ----------------------- Sidebar ----------------------- */
 // Defined outside Sidebar so React keeps a stable component identity and
 // doesn't remount every nav item on each parent re-render.
-function SideItem({ id, icon, label, count, current, onNav }) {
+function SideItem({ id, icon, label, count, current, onNav, indent }) {
   return (
     <div
       className={"side-item" + (current === id ? " active" : "")}
       onClick={() => onNav(id)}
+      style={indent ? { paddingLeft: 32 } : undefined}
     >
       {Icons[icon]}
       <span>{label}</span>
       {count != null && <span className="count">{count}</span>}
     </div>
+  );
+}
+
+// Collapsible sub-feature group. Header acts like a side-item and toggles
+// the children's visibility. Auto-opens when any child is the current
+// route (so the user lands on an open group, not a hidden one).
+function SideCollapse({ id, icon, label, childIds, current, onNav, children }) {
+  const containsActive = childIds.includes(current);
+  // Persist toggle to localStorage so it survives navigation; default to
+  // open when a child is active or when never-set.
+  const storageKey = `side.collapse.${id}`;
+  const [open, setOpen] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const v = window.localStorage.getItem(storageKey);
+      if (v === '1') return true;
+      if (v === '0') return false;
+    } catch {}
+    return true;
+  });
+  // Force-open whenever a child becomes active so the active item is
+  // visible — but don't close on its own.
+  useEffect(() => {
+    if (containsActive && !open) setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [containsActive]);
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    try { window.localStorage.setItem(storageKey, next ? '1' : '0'); } catch {}
+  };
+  return (
+    <>
+      <div
+        className={"side-item" + (containsActive ? " active" : "")}
+        onClick={toggle}
+        aria-expanded={open}
+      >
+        {Icons[icon]}
+        <span>{label}</span>
+        <span style={{
+          marginLeft: 'auto',
+          display: 'inline-flex',
+          transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+          transition: 'transform 0.15s',
+          color: 'var(--ink-3)',
+        }}>{Icons.chevronD}</span>
+      </div>
+      {open && children}
+    </>
   );
 }
 
@@ -131,9 +182,13 @@ function SidebarImpl({ current, onNav }) {
         <Item id="projects"       icon="folder"    label="โครงการ" />
         <Item id="project-types"  icon="folder"    label="ประเภทโครงการ" />
         <Item id="suppliers"      icon="truck"     label="ผู้ขาย/ผู้รับเหมา" />
-        <Item id="material-main-categories" icon="box" label="วัสดุ · หมวดหลัก" />
-        <Item id="material-sub-categories"  icon="box" label="วัสดุ · หมวดย่อย" />
-        <Item id="materials"      icon="box"       label="วัสดุ · รายการ (Items)" />
+        <SideCollapse id="materials-group" icon="box" label="วัสดุก่อสร้าง"
+          childIds={['material-main-categories', 'material-sub-categories', 'materials']}
+          current={current} onNav={onNav}>
+          <Item id="material-main-categories" icon="box" label="หมวดหลัก" indent />
+          <Item id="material-sub-categories"  icon="box" label="หมวดย่อย" indent />
+          <Item id="materials"      icon="box"       label="รายการ (Items)" indent />
+        </SideCollapse>
         <Item id="subcontracts"   icon="hammer"    label="งานจ้างเหมา" />
         <Item id="contract-types" icon="fileCheck" label="ประเภทเอกสาร" />
         <Item id="units"          icon="ruler"     label="หน่วยนับ" />
