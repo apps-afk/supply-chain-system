@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, Av, Spark, Delta, money } from '../lib/shell';
+import { downloadRfqExcel } from './screen-rfq-create';
 
 /*
   RFQ — list + the post-quote "confirm to Price DB" screen.
@@ -239,6 +240,8 @@ export function ScreenRFQ({ go }) {
 
 export function ScreenRFQConfirm({ go }) {
   const [rfq,        setRfq]        = useState(null);
+  const [parsed,     setParsed]     = useState(null); // hydrated notes payload
+  const [projects,   setProjects]   = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [err,        setErr]        = useState('');
   const [items,      setItems]      = useState([]);  // mock for now
@@ -246,15 +249,17 @@ export function ScreenRFQConfirm({ go }) {
   const [uploading,  setUploading]  = useState(false);
   const [uploadErr,  setUploadErr]  = useState('');
   const [uploadOk,   setUploadOk]   = useState(null); // attachment record
+  const [dlBusy,     setDlBusy]     = useState(false);
 
   useEffect(() => {
     (async () => {
       setLoading(true); setErr('');
       try {
         const stashed = (typeof window !== 'undefined') ? window.localStorage.getItem('rfq.currentId') : null;
-        const r = await fetch('/api/rfqs');
+        const [r, rP] = await Promise.all([fetch('/api/rfqs'), fetch('/api/projects')]);
         const d = await r.json();
         if (!r.ok) { setErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
+        if (rP.ok) { try { setProjects((await rP.json()).items || []); } catch {} }
         const list = d.items || [];
         const picked = (stashed && list.find(x => x.id === stashed)) || list[0] || null;
         setRfq(picked);
@@ -262,6 +267,7 @@ export function ScreenRFQConfirm({ go }) {
         if (picked?.notes) {
           try {
             const parsed = JSON.parse(picked.notes);
+            setParsed(parsed);
             if (parsed && Array.isArray(parsed.items)) {
               setItems(parsed.items.map(it => ({
                 ...it,
@@ -330,6 +336,33 @@ export function ScreenRFQConfirm({ go }) {
     setStatusBusy(false);
   }
 
+  // Rebuild & download the RFQ Excel from the saved record. Item names +
+  // contact + overhead all live in the notes payload, so no catalog needed.
+  async function downloadExcel() {
+    if (!rfq) return;
+    setDlBusy(true); setErr('');
+    try {
+      const proj = projects.find(p => p.id === rfq.project_id);
+      const rows = (parsed?.items || []).map(it => ({
+        code: it.itemCode, name: it.name || '', spec: '', qty: it.qty, unit: it.unit,
+      }));
+      await downloadRfqExcel({
+        rfqNo: rfq.no,
+        supplier: { name: parsed?.supplier_name || '' },
+        project: proj || null,
+        title: rfq.title,
+        due: rfq.due_date,
+        contact: { name: parsed?.contact_name || '', email: parsed?.contact_email || '' },
+        items: rows,
+        overheadHint: parsed?.overheadHint || '',
+        notes: parsed?.memo || '',
+      });
+    } catch (e) {
+      setErr('สร้างไฟล์ Excel ไม่สำเร็จ: ' + (e?.message || ''));
+    }
+    setDlBusy(false);
+  }
+
   const saving = items.filter(i => i.save).length;
   const flagged = items.filter(i => i.outlier).length;
 
@@ -351,12 +384,20 @@ export function ScreenRFQConfirm({ go }) {
           </p>
         </div>
         {rfq && (
-          <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
-            <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>เปลี่ยนสถานะ</span>
-            <select value={rfq.status || 'draft'} onChange={e => changeStatus(e.target.value)} disabled={statusBusy}
-              style={{ padding:'8px 12px', fontSize:13, border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--paper)', fontFamily:'inherit', cursor:'pointer' }}>
-              {Object.keys(RFQ_STATUS).map(s => <option key={s} value={s}>{RFQ_STATUS[s].label}</option>)}
-            </select>
+          <div style={{ display:'flex', gap:16, alignItems:'flex-end' }}>
+            <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-start' }}>
+              <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>เอกสาร RFQ</span>
+              <button className="btn" onClick={downloadExcel} disabled={dlBusy || !parsed}>
+                {Icons.download} {dlBusy ? 'กำลังสร้าง…' : 'ดาวน์โหลด Excel'}
+              </button>
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
+              <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>เปลี่ยนสถานะ</span>
+              <select value={rfq.status || 'draft'} onChange={e => changeStatus(e.target.value)} disabled={statusBusy}
+                style={{ padding:'8px 12px', fontSize:13, border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--paper)', fontFamily:'inherit', cursor:'pointer' }}>
+                {Object.keys(RFQ_STATUS).map(s => <option key={s} value={s}>{RFQ_STATUS[s].label}</option>)}
+              </select>
+            </div>
           </div>
         )}
       </div>

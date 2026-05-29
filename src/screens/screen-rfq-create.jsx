@@ -59,7 +59,7 @@ function itemByCode(catalog, code) {
      VAT amount      = (Subtotal + Overhead) × VAT%
      รวมทั้งสิ้น     = Subtotal + Overhead + VAT
 */
-async function downloadRfqExcel({ rfqNo, supplier, project, title, due, contact, items, overheadHint, notes }) {
+export async function downloadRfqExcel({ rfqNo, supplier, project, title, due, contact, items, overheadHint, notes }) {
   const _xl = await import('exceljs');
   const ExcelJS = _xl.default || _xl;
   const wb = new ExcelJS.Workbook();
@@ -1286,33 +1286,6 @@ function ExcelDocPreview({ rfqNo, supplier, project, items, catalog, approvalRol
         <div style={{ marginTop:12, fontSize:11, color:'var(--ink-3)', fontStyle:'italic' }}>
           * Supplier กรุณากรอกเงื่อนไขทั้ง 5 ข้อ · Description ของแต่ละรายการ · Overhead (%) และระบุสถานะ VAT — ฝ่ายจัดซื้อจะใช้ข้อมูลเปรียบเทียบกับ Supplier รายอื่น
         </div>
-
-        {/* Sign-off — driven by Approval Roles master data */}
-        {(() => {
-          const roles = (approvalRoles || []).filter(r => r.active).sort((a,b) => (a.level||0)-(b.level||0));
-          const all = [...roles, { name: `ผู้เสนอราคา (${supplier?.name || '—'})`, _supplier:true }];
-          const cols = Math.max(all.length, 4);
-          return (
-            <div style={{ marginTop:48, display:'grid', gridTemplateColumns:`repeat(${cols}, 1fr)`, gap:24 }}>
-              {[...Array(cols)].map((_,i) => {
-                const r = all[i];
-                return (
-                  <div key={i} style={{
-                    borderTop: r ? '1px solid var(--ink-3)' : '1px dashed var(--rule-2)',
-                    paddingTop:8, fontSize:11,
-                    color: r ? 'var(--ink-3)' : 'var(--ink-4)', textAlign:'center',
-                    fontStyle: r ? 'normal' : 'italic',
-                  }}>
-                    {r ? r.name : '(ยังไม่ระบุ)'}<br/>
-                    <span style={{ color:'var(--ink-4)' }}>
-                      {r?._supplier ? 'ลงนาม / ประทับตรา' : 'ลงนาม / วันที่'}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
       </div>
     </div>
   );
