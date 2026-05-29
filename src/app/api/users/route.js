@@ -18,10 +18,25 @@ async function requireAdmin() {
   return { session };
 }
 
-export async function GET() {
-  const { err } = await requireAdmin();
-  if (err) return err;
+export async function GET(request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อน' }, { status: 401 });
+  }
+  // `?scope=contacts` returns a minimal directory (name + email) that any
+  // authenticated user may read — used by RFQ/contact pickers. Full user
+  // management data stays admin-only.
+  const url = new URL(request.url);
+  const contactsOnly = url.searchParams.get('scope') === 'contacts';
+  if (!contactsOnly && session.user.role !== 'admin') {
+    return NextResponse.json({ error: 'ต้องเป็นผู้ดูแลระบบเท่านั้น' }, { status: 403 });
+  }
   const users = await listUsers();
+  if (contactsOnly) {
+    return NextResponse.json({
+      users: (users || []).map(u => ({ id: u.id, name: u.name, email: u.email })),
+    });
+  }
   return NextResponse.json({ users });
 }
 

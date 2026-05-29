@@ -19,10 +19,17 @@ import { UnitPicker } from '../lib/settings-shared';
   Sign-off row is driven by the approval_roles master.
 */
 
-function generateRfqNo() {
+// Next running RFQ number for the current year: RFQ-YYYY-####.
+// Scans existing RFQ numbers for the highest #### in this year and adds 1.
+function nextRfqNo(existing) {
   const year = new Date().getFullYear();
-  const rnd  = Math.floor(1000 + Math.random() * 9000);
-  return `RFQ-${year}-${rnd}`;
+  const re = new RegExp(`^RFQ-${year}-(\\d{4})$`);
+  let max = 0;
+  for (const r of existing || []) {
+    const m = re.exec(String(r?.no || '').trim());
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `RFQ-${year}-${String(max + 1).padStart(4, '0')}`;
 }
 
 function blankRow() {
@@ -43,87 +50,184 @@ function itemByCode(catalog, code) {
 }
 
 /* =================== Excel generation ===================
-   Builds a real .xlsx with live formulas so the Supplier only fills the
-   yellow cells (Description, ราคา/หน่วย, Overhead %, VAT %) and every
-   total recalculates automatically:
+   Styled .xlsx via ExcelJS with live formulas — the Supplier fills only
+   the yellow cells (Description, ราคา/หน่วย, Overhead %, VAT %) and all
+   totals recalculate automatically:
      รวม (per line)  = จำนวน × ราคา/หน่วย
      Subtotal        = SUM(รวม)
      Overhead amount = Subtotal × Overhead%
      VAT amount      = (Subtotal + Overhead) × VAT%
      รวมทั้งสิ้น     = Subtotal + Overhead + VAT
 */
-async function downloadRfqExcel({ rfqNo, supplier, project, title, due, items, overheadHint, notes }) {
-  const XLSX = await import('xlsx');
-  const supName = supplier?.name || '';
-  const aoa = [];
-
-  aoa.push(['ใบขอให้เสนอราคา (Request for Quotation)']);
-  aoa.push(['เลขที่', rfqNo, '', '', 'วันที่ออก', new Date().toISOString().slice(0,10)]);
-  aoa.push(['ถึง (Supplier)', supName, '', '', 'ครบกำหนดเสนอราคา', due || '']);
-  aoa.push(['ผู้ติดต่อ', supplier?.contact_name || '', '', '', 'อีเมล', supplier?.email || '']);
-  aoa.push(['โครงการ', project?.name || '', '', '', 'รหัสโครงการ', project?.code || '']);
-  aoa.push(['หัวข้อ', title || '']);
-  aoa.push([]); // spacer (row 7)
-
-  // Header row (row 8, 1-indexed)
-  const headerRowIdx = aoa.length; // 0-based index of header within aoa
-  aoa.push(['#', 'รหัส', 'รายการ / Spec', 'Description (Supplier กรอก)', 'จำนวน', 'หน่วย', 'ราคา/หน่วย (Supplier กรอก)', 'รวม']);
-
-  const firstItemRow = headerRowIdx + 2; // 1-indexed Excel row of first item
-  items.forEach((it, i) => {
-    aoa.push([
-      i + 1,
-      it.code || '',
-      it.spec ? `${it.name} — ${it.spec}` : (it.name || ''),
-      '',                       // Description — supplier
-      Number(it.qty) || 0,      // E
-      it.unit || '',            // F
-      '',                       // G ราคา/หน่วย — supplier
-      '',                       // H รวม — formula set below
-    ]);
+async function downloadRfqExcel({ rfqNo, supplier, project, title, due, contact, items, overheadHint, notes }) {
+  const _xl = await import('exceljs');
+  const ExcelJS = _xl.default || _xl;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Initial Estate Supply Chain';
+  wb.created = new Date();
+  const ws = wb.addWorksheet('RFQ', {
+    properties: { defaultRowHeight: 18 },
+    views: [{ showGridLines: false }],
   });
-  const lastItemRow = firstItemRow + items.length - 1;
 
-  // Totals block
+  const INK = 'FF15130E', SUB = 'FF6B6357', LINE = 'FFD6CFBC';
+  const YELLOW = 'FFFFF4CC', HEADBG = 'FF15130E', TOTALBG = 'FFF6F2E9';
+  const supName = supplier?.name || '';
+
+  ws.columns = [
+    { width: 5 }, { width: 15 }, { width: 38 }, { width: 26 },
+    { width: 9 }, { width: 12 }, { width: 18 }, { width: 16 },
+  ];
+
+  const thin = { style: 'thin', color: { argb: LINE } };
+  const border = { top: thin, left: thin, bottom: thin, right: thin };
+
+  // ---- Title band ----
+  ws.mergeCells('A1:H1');
+  const t1 = ws.getCell('A1');
+  t1.value = 'ใบขอให้เสนอราคา · Request for Quotation';
+  t1.font = { name: 'TH Sarabun New', size: 20, bold: true, color: { argb: INK } };
+  t1.alignment = { vertical: 'middle' };
+  ws.getRow(1).height = 30;
+  ws.mergeCells('A2:H2');
+  const t2 = ws.getCell('A2');
+  t2.value = 'Initial Estate Co., Ltd.';
+  t2.font = { size: 10, color: { argb: SUB } };
+
+  // ---- Meta block (two columns of label/value) ----
+  const meta = [
+    ['เลขที่ RFQ', rfqNo, 'วันที่ออก', new Date().toISOString().slice(0,10)],
+    ['ถึง (Supplier)', supName, 'ครบกำหนดเสนอราคา', due || '—'],
+    ['ผู้ติดต่อภายใน', contact?.name || '—', 'อีเมลผู้ติดต่อ', contact?.email || '—'],
+    ['โครงการ', project?.name || '—', 'รหัสโครงการ', project?.code || '—'],
+    ['หัวข้อ', title || '—', '', ''],
+  ];
+  let row = 4;
+  for (const [l1, v1, l2, v2] of meta) {
+    ws.getCell(`A${row}`).value = l1;
+    ws.getCell(`A${row}`).font = { size: 10, color: { argb: SUB } };
+    ws.mergeCells(`B${row}:C${row}`);
+    ws.getCell(`B${row}`).value = v1;
+    ws.getCell(`B${row}`).font = { size: 11, bold: true, color: { argb: INK } };
+    if (l2) {
+      ws.getCell(`E${row}`).value = l2;
+      ws.getCell(`E${row}`).font = { size: 10, color: { argb: SUB } };
+      ws.mergeCells(`F${row}:H${row}`);
+      ws.getCell(`F${row}`).value = v2;
+      ws.getCell(`F${row}`).font = { size: 11, bold: true, color: { argb: INK } };
+    }
+    row++;
+  }
+
+  // ---- Items header ----
+  const headerRow = row + 1; // one spacer row
+  const headers = ['#', 'รหัส', 'รายการ / Spec', 'Description\n(Supplier กรอก)', 'จำนวน', 'หน่วย', 'ราคา/หน่วย\n(Supplier กรอก)', 'รวม'];
+  const hr = ws.getRow(headerRow);
+  headers.forEach((h, i) => {
+    const c = hr.getCell(i + 1);
+    c.value = h;
+    c.font = { size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADBG } };
+    c.alignment = { vertical: 'middle', horizontal: i >= 4 ? 'center' : 'left', wrapText: true };
+    c.border = border;
+  });
+  hr.height = 30;
+
+  const firstItemRow = headerRow + 1;
+  items.forEach((it, i) => {
+    const r = ws.getRow(firstItemRow + i);
+    r.getCell(1).value = i + 1;
+    r.getCell(2).value = it.code || '';
+    r.getCell(3).value = it.spec ? `${it.name} — ${it.spec}` : (it.name || '');
+    r.getCell(4).value = '';                          // Description (supplier)
+    r.getCell(5).value = Number(it.qty) || 0;         // qty
+    r.getCell(6).value = it.unit || '';
+    r.getCell(7).value = null;                        // ราคา/หน่วย (supplier)
+    r.getCell(8).value = { formula: `E${firstItemRow + i}*G${firstItemRow + i}` };
+    for (let col = 1; col <= 8; col++) {
+      const c = r.getCell(col);
+      c.border = border;
+      c.font = { size: 10, color: { argb: INK } };
+      c.alignment = { vertical: 'middle', horizontal: [5,7,8].includes(col) ? 'right' : 'left', wrapText: col === 3 };
+      if (col === 1 || col === 6) c.alignment = { vertical: 'middle', horizontal: 'center' };
+      if (col === 4 || col === 7) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: YELLOW } };
+      if (col === 2) c.font = { size: 9, name: 'Consolas', color: { argb: SUB } };
+      if ([7,8].includes(col)) c.numFmt = '#,##0.00';
+    }
+  });
+  const lastItemRow = firstItemRow + Math.max(items.length, 1) - 1;
+
+  // ---- Totals ----
   const subtotalRow = lastItemRow + 1;
   const overheadRow = subtotalRow + 1;
   const vatRow      = overheadRow + 1;
   const grandRow    = vatRow + 1;
 
-  aoa.push(['', '', '', '', '', '', 'มูลค่ารวมรายการ (Subtotal)', '']);
-  aoa.push(['', '', '', '', '', 'กรอก %', 'Overhead', '']);
-  aoa.push(['', '', '', '', '', 'กรอก %', 'VAT', '']);
-  aoa.push(['', '', '', '', '', '', 'รวมทั้งสิ้น (Grand Total)', '']);
-  if (overheadHint) aoa.push([]);
-  if (overheadHint) aoa.push(['หมายเหตุ Overhead', overheadHint]);
-  if (notes)        aoa.push(['หมายเหตุเพิ่มเติม', notes]);
+  const setTotal = (rowIdx, label, formula, opts = {}) => {
+    ws.mergeCells(`A${rowIdx}:F${rowIdx}`);
+    const lc = ws.getCell(`A${rowIdx}`);
+    lc.value = label;
+    lc.alignment = { horizontal: 'right', vertical: 'middle' };
+    lc.font = { size: 10.5, bold: !!opts.bold, color: { argb: opts.light ? 'FFFFFFFF' : INK } };
+    const gc = ws.getCell(`G${rowIdx}`);
+    if (opts.pctCell) {
+      gc.value = opts.pctValue;
+      gc.numFmt = '0"%"';
+      gc.alignment = { horizontal: 'center', vertical: 'middle' };
+      gc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: YELLOW } };
+      gc.border = border;
+      gc.font = { size: 10.5, color: { argb: INK } };
+    }
+    const hc = ws.getCell(`H${rowIdx}`);
+    hc.value = { formula };
+    hc.numFmt = '#,##0.00';
+    hc.alignment = { horizontal: 'right', vertical: 'middle' };
+    hc.font = { size: 10.5, bold: !!opts.bold, color: { argb: opts.light ? 'FFFFFFFF' : INK } };
+    hc.border = border;
+    if (opts.fill) {
+      for (const ref of [`A${rowIdx}`, `G${rowIdx}`, `H${rowIdx}`]) {
+        const cell = ws.getCell(ref);
+        if (!cell.fill || ref === `A${rowIdx}` || ref === `H${rowIdx}`) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opts.fill } };
+        }
+      }
+    }
+  };
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  setTotal(subtotalRow, 'มูลค่ารวมรายการ (Subtotal)',
+    items.length ? `SUM(H${firstItemRow}:H${lastItemRow})` : '0', { fill: TOTALBG });
+  setTotal(overheadRow, 'Overhead (Supplier กรอก %) →',
+    `H${subtotalRow}*G${overheadRow}/100`, { pctCell: true, pctValue: 0 });
+  setTotal(vatRow, 'VAT (Supplier กรอก %) →',
+    `(H${subtotalRow}+H${overheadRow})*G${vatRow}/100`, { pctCell: true, pctValue: 7 });
+  setTotal(grandRow, 'รวมทั้งสิ้น (Grand Total)',
+    `H${subtotalRow}+H${overheadRow}+H${vatRow}`, { bold: true, light: true, fill: HEADBG });
 
-  // Per-line total formulas: H = E * G
-  for (let r = firstItemRow; r <= lastItemRow; r++) {
-    ws[`H${r}`] = { t: 'n', f: `E${r}*G${r}` };
+  // ---- Notes ----
+  let nrow = grandRow + 2;
+  if (overheadHint) {
+    ws.getCell(`A${nrow}`).value = `หมายเหตุ Overhead: ${overheadHint}`;
+    ws.getCell(`A${nrow}`).font = { size: 9.5, italic: true, color: { argb: SUB } };
+    nrow++;
   }
-  // Subtotal
-  ws[`H${subtotalRow}`] = { t: 'n', f: items.length ? `SUM(H${firstItemRow}:H${lastItemRow})` : '0' };
-  // Overhead: F col holds the % the supplier types; H = subtotal * F/100
-  ws[`F${overheadRow}`] = { t: 'n', v: 0 };
-  ws[`H${overheadRow}`] = { t: 'n', f: `H${subtotalRow}*F${overheadRow}/100` };
-  // VAT: F col holds % ; H = (subtotal + overhead) * F/100
-  ws[`F${vatRow}`] = { t: 'n', v: 7 };
-  ws[`H${vatRow}`] = { t: 'n', f: `(H${subtotalRow}+H${overheadRow})*F${vatRow}/100` };
-  // Grand total
-  ws[`H${grandRow}`] = { t: 'n', f: `H${subtotalRow}+H${overheadRow}+H${vatRow}` };
+  if (notes) {
+    ws.getCell(`A${nrow}`).value = `หมายเหตุเพิ่มเติม: ${notes}`;
+    ws.getCell(`A${nrow}`).font = { size: 9.5, italic: true, color: { argb: SUB } };
+    nrow++;
+  }
+  ws.getCell(`A${nrow + 1}`).value = '* ช่องสีเหลืองให้ Supplier กรอก — ยอดรวม/Overhead/VAT จะคำนวณอัตโนมัติ';
+  ws.getCell(`A${nrow + 1}`).font = { size: 9.5, italic: true, color: { argb: SUB } };
 
-  ws['!cols'] = [
-    { wch: 5 }, { wch: 14 }, { wch: 34 }, { wch: 26 },
-    { wch: 8 }, { wch: 10 }, { wch: 18 }, { wch: 14 },
-  ];
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'RFQ');
-  const safeName = `${rfqNo}_${supName.replace(/\s+/g, '_')}`.replace(/[\/\\?%*:|"<>]/g, '_');
-  XLSX.writeFile(wb, `${safeName}.xlsx`);
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${rfqNo}_${supName.replace(/\s+/g, '_')}`.replace(/[\/\\?%*:|"<>]/g, '_') + '.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /* =================== Main screen =================== */
@@ -142,14 +246,18 @@ export function ScreenRFQCreate({ go }) {
   const [subcontracts,    setSubcontracts]    = useState([]);
   // Approval roles for the sign-off row
   const [approvalRoles, setApprovalRoles] = useState([]);
+  // Internal contacts (app users / team members)
+  const [people, setPeople] = useState([]);
+  const [contactId, setContactId] = useState('');
 
   const [loadErr,   setLoadErr]   = useState('');
-  const [rfqNo] = useState(() => generateRfqNo());
+  // Sequential RFQ number RFQ-YYYY-#### — set once the existing list loads.
+  const [rfqNo, setRfqNo] = useState('');
 
   useEffect(() => {
     (async () => {
       try {
-        const [rS, rP, rU, rMC, rSC, rM, rSubC, rSub, rAR] = await Promise.all([
+        const [rS, rP, rU, rMC, rSC, rM, rSubC, rSub, rAR, rUsers, rRfq] = await Promise.all([
           fetch('/api/suppliers'),
           fetch('/api/projects'),
           fetch('/api/units'),
@@ -159,6 +267,8 @@ export function ScreenRFQCreate({ go }) {
           fetch('/api/subcontract-categories'),
           fetch('/api/subcontracts'),
           fetch('/api/approval-roles'),
+          fetch('/api/users?scope=contacts'),
+          fetch('/api/rfqs'),
         ]);
         const dS = await rS.json();
         const dP = await rP.json();
@@ -173,11 +283,18 @@ export function ScreenRFQCreate({ go }) {
         if (rSubC.ok) setSubcontractCats((await rSubC.json()).items || []);
         if (rSub.ok)  setSubcontracts((await rSub.json()).items || []);
         if (rAR.ok)   setApprovalRoles((await rAR.json()).items || []);
+        if (rUsers.ok) { const du = await rUsers.json(); setPeople(du.users || du.items || []); }
+        // Compute the next running RFQ number for the current year.
+        let existing = [];
+        if (rRfq.ok) { try { existing = (await rRfq.json()).items || []; } catch {} }
+        setRfqNo(nextRfqNo(existing));
       } catch {
         setLoadErr('เครือข่ายขัดข้อง');
       }
     })();
   }, []);
+
+  const contact = useMemo(() => people.find(p => (p.id || p.email) === contactId), [people, contactId]);
 
   // Resolve a unit row to a short display label (code preferred, then name).
   const unitLabel = useMemo(() => {
@@ -264,7 +381,7 @@ export function ScreenRFQCreate({ go }) {
     }
     return { itemsFilled: filled, itemsValid: valid };
   }, [rows, unitLabel]);
-  const canGenerate = !!supplier && itemsValid.length > 0 && title.trim().length > 0 && !!project && !saving;
+  const canGenerate = !!supplier && itemsValid.length > 0 && title.trim().length > 0 && !!project && !!rfqNo && !saving;
   const projectObj = useMemo(() => projects.find(p => p.id === project), [projects, project]);
 
   async function submit() {
@@ -281,6 +398,8 @@ export function ScreenRFQCreate({ go }) {
     const notesPayload = {
       supplier_id: supplierId,
       supplier_name: supplier?.name,
+      contact_name: contact?.name || '',
+      contact_email: contact?.email || '',
       overheadHint,
       vatPolicy,
       memo: notes,
@@ -330,7 +449,7 @@ export function ScreenRFQCreate({ go }) {
   const removeRow = (uid) => setRows(rs => rs.length === 1 ? [blankRow()] : rs.filter(r => r.uid !== uid));
 
   if (generated) {
-    return <GeneratedView go={go} rfqNo={rfqNo} title={title} supplier={supplier} project={project} projects={projects} items={itemsValid} catalog={catalog} approvalRoles={approvalRoles} due={due} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />;
+    return <GeneratedView go={go} rfqNo={rfqNo} title={title} supplier={supplier} project={project} projects={projects} items={itemsValid} catalog={catalog} approvalRoles={approvalRoles} contact={contact} due={due} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />;
   }
 
   // Are the master catalogs empty? Guide the user to set them up.
@@ -382,7 +501,7 @@ export function ScreenRFQCreate({ go }) {
         <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
 
           <SectionCard step="1" label="ข้อมูลทั่วไป" desc="ตั้งชื่อ RFQ ระบุโครงการและวันครบกำหนดที่ต้องการให้ Supplier ตอบกลับ">
-            <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:16 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:16, marginBottom:16 }}>
               <Field label="ชื่อ RFQ" required>
                 <input type="text" value={title} placeholder="เช่น เหล็กเส้น DB12/16 ล็อต Q2"
                   onChange={e => setTitle(e.target.value)} style={inputStyle} />
@@ -395,6 +514,18 @@ export function ScreenRFQCreate({ go }) {
               </Field>
               <Field label="ครบกำหนดเสนอราคา" required>
                 <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
+              </Field>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
+              <Field label="ผู้ติดต่อภายใน (ผู้ประสานงาน)">
+                <select value={contactId} onChange={e => setContactId(e.target.value)} style={inputStyle}>
+                  <option value="">— เลือกผู้ติดต่อ —</option>
+                  {people.map(u => (
+                    <option key={u.id || u.email} value={u.id || u.email}>
+                      {u.name || u.email}{u.email ? ` · ${u.email}` : ''}
+                    </option>
+                  ))}
+                </select>
               </Field>
             </div>
           </SectionCard>
@@ -652,7 +783,7 @@ export function ScreenRFQCreate({ go }) {
 
 /* =================== Generated success view =================== */
 
-function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, catalog, approvalRoles, due, overheadHint, vatPolicy, notes }) {
+function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, catalog, approvalRoles, contact, due, overheadHint, vatPolicy, notes }) {
   const projectObj = projects.find(p => p.id === project);
   const [dlBusy, setDlBusy] = useState(false);
   const [dlErr, setDlErr]   = useState('');
@@ -664,7 +795,7 @@ function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, c
         const m = itemByCode(catalog, it.itemCode) || {};
         return { code: it.itemCode, name: m.name || '', spec: m.spec || '', qty: it.qty, unit: it.unit };
       });
-      await downloadRfqExcel({ rfqNo, supplier, project: projectObj, title, due, items: rows, overheadHint, notes });
+      await downloadRfqExcel({ rfqNo, supplier, project: projectObj, title, due, contact, items: rows, overheadHint, notes });
     } catch (e) {
       setDlErr('สร้างไฟล์ Excel ไม่สำเร็จ: ' + (e?.message || ''));
     }

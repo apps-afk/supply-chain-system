@@ -194,9 +194,9 @@ export function ScreenRFQ({ go }) {
               return (
                 <tr key={r.id} onClick={() => {
                     try { window.localStorage.setItem('rfq.currentId', r.id); } catch {}
-                    if (r.status === 'sent' || r.status === 'received') go('rfq-confirm');
+                    go('rfq-confirm');
                   }}
-                  style={{ cursor: (r.status === 'sent' || r.status === 'received') ? 'pointer' : 'default' }}>
+                  style={{ cursor: 'pointer' }}>
                   <td>
                     <div className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{r.no}</div>
                   </td>
@@ -314,6 +314,22 @@ export function ScreenRFQConfirm({ go }) {
 
   const toggle = (id) => setItems(its => its.map(it => it.id === id ? { ...it, save: !it.save } : it));
 
+  const [statusBusy, setStatusBusy] = useState(false);
+  async function changeStatus(next) {
+    if (!rfq || next === rfq.status) return;
+    setStatusBusy(true);
+    try {
+      const r = await fetch('/api/rfqs', {
+        method:'PATCH', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ id: rfq.id, status: next }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'เปลี่ยนสถานะไม่สำเร็จ'); }
+      else { setRfq(rf => ({ ...rf, status: next })); }
+    } catch { setErr('เครือข่ายขัดข้อง'); }
+    setStatusBusy(false);
+  }
+
   const saving = items.filter(i => i.save).length;
   const flagged = items.filter(i => i.outlier).length;
 
@@ -334,6 +350,15 @@ export function ScreenRFQConfirm({ go }) {
             อัพโหลดไฟล์ใบเสนอราคาจาก Supplier (PDF) เก็บเข้า Google Drive · จากนั้นเปรียบเทียบราคากับ Price DB
           </p>
         </div>
+        {rfq && (
+          <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
+            <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>เปลี่ยนสถานะ</span>
+            <select value={rfq.status || 'draft'} onChange={e => changeStatus(e.target.value)} disabled={statusBusy}
+              style={{ padding:'8px 12px', fontSize:13, border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--paper)', fontFamily:'inherit', cursor:'pointer' }}>
+              {Object.keys(RFQ_STATUS).map(s => <option key={s} value={s}>{RFQ_STATUS[s].label}</option>)}
+            </select>
+          </div>
+        )}
       </div>
 
       {err && (
