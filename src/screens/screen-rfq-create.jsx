@@ -1,9 +1,7 @@
 'use client';
 import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Av } from '../lib/shell';
-import { MATERIAL_CATEGORIES } from './screen-settings-materials';
-import { SUBCONTRACT_CATEGORIES } from './screen-settings-subcontracts';
-import { getActiveApprovalRoles } from './screen-settings-approval-roles';
+import { UnitPicker } from '../lib/settings-shared';
 
 /*
   Create RFQ — full build flow on one page.
@@ -12,43 +10,23 @@ import { getActiveApprovalRoles } from './screen-settings-approval-roles';
     1. Auto-run RFQ document code
     2. Select Supplier
     3. For each item: Source (Material | SubContract) → Category → Item → Qty + Unit
-    4. Fill in Warranty Terms + Payment Terms (used for comparison later)
-    5. Submit → Excel document generated for Supplier
+    4. Supplier-fill conditions (5)
+    5. Submit → RFQ row saved, Excel preview generated
 
-  Items pulled live from Settings → Material and SubContract masters
-  via MATERIAL_CATEGORIES and SUBCONTRACT_CATEGORIES.
+  Catalog is built live from the master tables:
+    Material    : material_main_categories → material_sub_categories → materials
+    SubContract : subcontract_categories → subcontracts
+  Sign-off row is driven by the approval_roles master.
 */
 
-/* =================== Reference data =================== */
-
-const ALL_UNITS = ['ถุง 50 กก.','เส้น','ก้อน','แผ่น','ตร.ม.','ลบ.ม.','ม.','กก.','ตัน','ลิตร','แกลลอน','ม้วน','ชุด','ชิ้น','ตัว','อัน','หลอด','คน·วัน','ชั่วโมง','งวด','ต้น','จุด'];
-
-// Generate an RFQ number like RFQ-2026-4731 (year + random 4 digits).
 function generateRfqNo() {
   const year = new Date().getFullYear();
   const rnd  = Math.floor(1000 + Math.random() * 9000);
   return `RFQ-${year}-${rnd}`;
 }
 
-/* =================== Helpers =================== */
-
 function blankRow() {
-  return { uid: Math.random().toString(36).slice(2,9), source:'', catShort:'', itemCode:'', qty:'', unit:'' };
-}
-
-function getCategoriesBySource(source) {
-  if (source === 'Material')    return MATERIAL_CATEGORIES    || [];
-  if (source === 'SubContract') return SUBCONTRACT_CATEGORIES || [];
-  return [];
-}
-
-function findItem(source, code) {
-  const cats = getCategoriesBySource(source);
-  for (const c of cats) {
-    const it = c.items.find(i => i.code === code);
-    if (it) return it;
-  }
-  return null;
+  return { uid: Math.random().toString(36).slice(2,9), source:'', catKey:'', itemCode:'', qty:'', unit:'' };
 }
 
 function formatThaiDate(iso) {
@@ -59,22 +37,44 @@ function formatThaiDate(iso) {
   return `${d.getDate()} ${months[d.getMonth()]} ${(d.getFullYear()+543).toString().slice(-2)}`;
 }
 
+// Look up an item across the catalog by code.
+function itemByCode(catalog, code) {
+  return catalog?.itemByCode?.get(code) || null;
+}
+
 /* =================== Main screen =================== */
 
 export function ScreenRFQCreate({ go }) {
   // Lookups
   const [suppliers, setSuppliers] = useState([]);
   const [projects,  setProjects]  = useState([]);
+  const [units,     setUnits]     = useState([]);
+  // Material taxonomy
+  const [mainCats,  setMainCats]  = useState([]);
+  const [subCats,   setSubCats]   = useState([]);
+  const [materials, setMaterials] = useState([]);
+  // Subcontract taxonomy
+  const [subcontractCats, setSubcontractCats] = useState([]);
+  const [subcontracts,    setSubcontracts]    = useState([]);
+  // Approval roles for the sign-off row
+  const [approvalRoles, setApprovalRoles] = useState([]);
+
   const [loadErr,   setLoadErr]   = useState('');
-  // Pre-generated RFQ number — held in state so it doesn't change on re-render
   const [rfqNo] = useState(() => generateRfqNo());
 
   useEffect(() => {
     (async () => {
       try {
-        const [rS, rP] = await Promise.all([
+        const [rS, rP, rU, rMC, rSC, rM, rSubC, rSub, rAR] = await Promise.all([
           fetch('/api/suppliers'),
           fetch('/api/projects'),
+          fetch('/api/units'),
+          fetch('/api/material-main-categories'),
+          fetch('/api/material-sub-categories'),
+          fetch('/api/materials'),
+          fetch('/api/subcontract-categories'),
+          fetch('/api/subcontracts'),
+          fetch('/api/approval-roles'),
         ]);
         const dS = await rS.json();
         const dP = await rP.json();
@@ -82,11 +82,66 @@ export function ScreenRFQCreate({ go }) {
         if (!rP.ok) { setLoadErr(dP.error || 'โหลดโครงการไม่สำเร็จ'); return; }
         setSuppliers(dS.items || []);
         setProjects(dP.items || []);
+        if (rU.ok)    setUnits((await rU.json()).items || []);
+        if (rMC.ok)   setMainCats((await rMC.json()).items || []);
+        if (rSC.ok)   setSubCats((await rSC.json()).items || []);
+        if (rM.ok)    setMaterials((await rM.json()).items || []);
+        if (rSubC.ok) setSubcontractCats((await rSubC.json()).items || []);
+        if (rSub.ok)  setSubcontracts((await rSub.json()).items || []);
+        if (rAR.ok)   setApprovalRoles((await rAR.json()).items || []);
       } catch {
         setLoadErr('เครือข่ายขัดข้อง');
       }
     })();
   }, []);
+
+  // Resolve a unit row to a short display label (code preferred, then name).
+  const unitLabel = useMemo(() => {
+    const byId = new Map(units.map(u => [u.id, u]));
+    return (id) => { const u = byId.get(id); return u ? (u.code || u.name) : ''; };
+  }, [units]);
+
+  // Build the catalog: categories per source + a flat itemByCode map.
+  const catalog = useMemo(() => {
+    const itemByCode = new Map();
+
+    // --- Material: main → sub → items ---
+    const mainById = new Map(mainCats.map(m => [m.id, m]));
+    const materialCats = subCats
+      .filter(s => s.active)
+      .map(sub => {
+        const main = mainById.get(sub.main_id);
+        const mainName = main?.name || '';
+        const its = materials
+          .filter(m => m.active && m.main_category === mainName && m.category === sub.name)
+          .map(m => {
+            const item = { code: m.code, name: m.name, spec: m.spec, unitId: m.unit_id, unitLabel: unitLabel(m.unit_id), source: 'Material' };
+            itemByCode.set(m.code, item);
+            return item;
+          });
+        return { key: sub.id, label: main ? `${mainName} › ${sub.name}` : sub.name, items: its };
+      })
+      .filter(c => c.items.length > 0 || true); // keep empty cats visible too
+
+    // --- SubContract: category → items ---
+    const subcontractCatList = subcontractCats
+      .filter(c => c.active)
+      .map(cat => {
+        const its = subcontracts
+          .filter(s => s.active && s.category === cat.name)
+          .map(s => {
+            const item = { code: s.code, name: s.name, spec: '', unitId: s.unit_id, unitLabel: unitLabel(s.unit_id), source: 'SubContract' };
+            itemByCode.set(s.code, item);
+            return item;
+          });
+        return { key: cat.id, label: cat.name, items: its };
+      });
+
+    return {
+      bySource: { Material: materialCats, SubContract: subcontractCatList },
+      itemByCode,
+    };
+  }, [mainCats, subCats, materials, subcontractCats, subcontracts, unitLabel]);
 
   // Header form
   const [title, setTitle]   = useState('');
@@ -95,31 +150,23 @@ export function ScreenRFQCreate({ go }) {
 
   // Supplier
   const [supplierId, setSupplierId] = useState(null);
-  // Memoised — was .find() every render, even though supplier list is stable
-  const supplier = useMemo(
-    () => suppliers.find(s => s.id === supplierId),
-    [suppliers, supplierId]
-  );
+  const supplier = useMemo(() => suppliers.find(s => s.id === supplierId), [suppliers, supplierId]);
 
   // Items
   const [rows, setRows] = useState([blankRow(), blankRow(), blankRow()]);
 
-  // Conditions — all 5 are SUPPLIER-FILL on the returned quote.
-  // Procurement only owns the optional notes + overhead/VAT policy hint.
+  // Conditions
   const [notes, setNotes] = useState('');
-  const [overheadHint, setOverheadHint] = useState('');     // procurement's hint, e.g. "ไม่เกิน 10%"
-  const [vatPolicy,    setVatPolicy]    = useState('include'); // include | exclude | supplier
+  const [overheadHint, setOverheadHint] = useState('');
+  const [vatPolicy,    setVatPolicy]    = useState('include');
 
   // UI state
   const [generated, setGenerated] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState('');
 
-  const pickSupplier = (s) => {
-    setSupplierId(s.id);
-  };
+  const pickSupplier = (s) => setSupplierId(s.id);
 
-  // Derived — memoised so typing in unrelated fields doesn't re-scan rows
   const { itemsFilled, itemsValid } = useMemo(() => {
     const filled = [];
     const valid = [];
@@ -131,20 +178,20 @@ export function ScreenRFQCreate({ go }) {
     }
     return { itemsFilled: filled, itemsValid: valid };
   }, [rows]);
-  const canGenerate = !!supplier && itemsValid.length > 0 && title.trim().length > 0 && !saving;
-  // Memoised project lookup — was .find() in the SummaryCard prop every render
-  const projectObj = useMemo(
-    () => projects.find(p => p.id === project),
-    [projects, project]
-  );
+  const canGenerate = !!supplier && itemsValid.length > 0 && title.trim().length > 0 && !!project && !saving;
+  const projectObj = useMemo(() => projects.find(p => p.id === project), [projects, project]);
 
   async function submit() {
     setSaveErr('');
-    if (!canGenerate) return;
+    if (!canGenerate) {
+      // Tell the user what's missing rather than silently doing nothing.
+      if (!title.trim()) setSaveErr('กรุณากรอกชื่อ RFQ');
+      else if (!project) setSaveErr('กรุณาเลือกโครงการ');
+      else if (!supplier) setSaveErr('กรุณาเลือก Supplier');
+      else if (itemsValid.length === 0) setSaveErr('กรุณาเพิ่มรายการอย่างน้อย 1 รายการ (เลือก Item + จำนวน + หน่วย)');
+      return;
+    }
     setSaving(true);
-    // TODO: per-item RFQ lines need their own API (rfq_items?). For now we
-    // stash the items + supplier + conditions in the rfqs.notes field as JSON
-    // so the confirm screen can hydrate them.
     const notesPayload = {
       supplier_id: supplierId,
       supplier_name: supplier?.name,
@@ -152,9 +199,9 @@ export function ScreenRFQCreate({ go }) {
       vatPolicy,
       memo: notes,
       items: itemsValid.map(r => ({
-        uid: r.uid, source: r.source, catShort: r.catShort,
+        uid: r.uid, source: r.source, catKey: r.catKey,
         itemCode: r.itemCode, qty: r.qty, unit: r.unit,
-        name: (findItem(r.source, r.itemCode) || {}).name,
+        name: (itemByCode(catalog, r.itemCode) || {}).name,
       })),
     };
     try {
@@ -172,7 +219,6 @@ export function ScreenRFQCreate({ go }) {
       });
       const d = await r.json();
       if (!r.ok) { setSaveErr(d.error || 'บันทึกไม่สำเร็จ'); setSaving(false); return; }
-      // Stash id so the rfq-confirm screen can find it later
       try { window.localStorage.setItem('rfq.currentId', d.item.id); } catch {}
       setSaving(false);
       setGenerated(true);
@@ -182,25 +228,26 @@ export function ScreenRFQCreate({ go }) {
     }
   }
 
-  // Row helpers — use functional setState so back-to-back updates (e.g. two
-  // selects fired before React re-renders) don't clobber each other.
+  // Row helpers — functional setState so back-to-back updates don't clobber.
   const updateRow = (uid, patch) => setRows(rs => rs.map(r => r.uid === uid ? { ...r, ...patch } : r));
-  const onPickSource = (uid, source) => updateRow(uid, { source, catShort:'', itemCode:'', unit:'' });
-  const onPickCat    = (uid, catShort) => updateRow(uid, { catShort, itemCode:'', unit:'' });
+  const onPickSource = (uid, source) => updateRow(uid, { source, catKey:'', itemCode:'', unit:'' });
+  const onPickCat    = (uid, catKey) => updateRow(uid, { catKey, itemCode:'', unit:'' });
   const onPickItem   = (uid, code) => {
-    setRows(rs => {
-      const row = rs.find(r => r.uid === uid);
-      if (!row) return rs;
-      const it = findItem(row.source, code);
-      return rs.map(r => r.uid === uid ? { ...r, itemCode: code, unit: it?.unit || '' } : r);
-    });
+    setRows(rs => rs.map(r => {
+      if (r.uid !== uid) return r;
+      const it = itemByCode(catalog, code);
+      return { ...r, itemCode: code, unit: it?.unitLabel || r.unit || '' };
+    }));
   };
   const addRow    = () => setRows(rs => [...rs, blankRow()]);
   const removeRow = (uid) => setRows(rs => rs.length === 1 ? [blankRow()] : rs.filter(r => r.uid !== uid));
 
   if (generated) {
-    return <GeneratedView go={go} rfqNo={rfqNo} title={title} supplier={supplier} project={project} projects={projects} items={itemsValid} due={due} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />;
+    return <GeneratedView go={go} rfqNo={rfqNo} title={title} supplier={supplier} project={project} projects={projects} items={itemsValid} catalog={catalog} approvalRoles={approvalRoles} due={due} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />;
   }
+
+  // Are the master catalogs empty? Guide the user to set them up.
+  const noCatalog = catalog.bySource.Material.length === 0 && catalog.bySource.SubContract.length === 0;
 
   return (
     <div className="page" style={{ paddingBottom: 200 }}>
@@ -229,13 +276,24 @@ export function ScreenRFQCreate({ go }) {
         </div>
       </div>
 
-      {/* Two-column: form left, summary right */}
+      {noCatalog && (
+        <div style={{
+          padding:'12px 16px', background:'var(--ochre-soft)', border:'1px solid var(--ochre)',
+          borderRadius:6, marginBottom:20, fontSize:13, color:'#6B5121',
+        }}>
+          ยังไม่มีข้อมูลวัสดุ/งานจ้างในระบบ — เพิ่มที่
+          <button onClick={() => go('settings-materials')} style={{ background:'none', border:0, padding:'0 4px', color:'#6B5121', textDecoration:'underline', cursor:'pointer', fontWeight:500 }}>วัสดุก่อสร้าง</button>
+          หรือ
+          <button onClick={() => go('settings-subcontracts')} style={{ background:'none', border:0, padding:'0 4px', color:'#6B5121', textDecoration:'underline', cursor:'pointer', fontWeight:500 }}>งานจ้างเหมา</button>
+          ก่อนถึงจะเลือกรายการได้
+        </div>
+      )}
+
       <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:32, alignItems:'flex-start' }}>
 
         {/* ========== LEFT: form ========== */}
         <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
 
-          {/* Section 1: header info */}
           <SectionCard step="1" label="ข้อมูลทั่วไป" desc="ตั้งชื่อ RFQ ระบุโครงการและวันครบกำหนดที่ต้องการให้ Supplier ตอบกลับ">
             <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:16 }}>
               <Field label="ชื่อ RFQ" required>
@@ -254,14 +312,12 @@ export function ScreenRFQCreate({ go }) {
             </div>
           </SectionCard>
 
-          {/* Section 2: supplier */}
           <SectionCard step="2" label="เลือก Supplier" desc="หนึ่งใบ ต่อ Supplier หนึ่งราย">
             {!supplier
               ? <SupplierPicker suppliers={suppliers} onPick={pickSupplier} />
               : <SelectedSupplierCard supplier={supplier} onChange={() => setSupplierId(null)} />}
           </SectionCard>
 
-          {/* Section 3: items */}
           <SectionCard step="3" label="รายการสินค้า / งาน" desc="เลือก Source: Material หรือ SubContract → หมวด → Item → จำนวน + หน่วย · ช่อง Description จะให้ Supplier กรอกรายละเอียดในใบเสนอราคา">
             <div style={{ overflowX:'auto', margin:'0 -20px' }}>
               <table className="tbl" style={{ minWidth:'100%' }}>
@@ -269,22 +325,22 @@ export function ScreenRFQCreate({ go }) {
                   <tr>
                     <th style={{ width:32, paddingLeft:20 }}>#</th>
                     <th style={{ width:'12%' }}>ประเภท</th>
-                    <th style={{ width:'14%' }}>หมวด</th>
+                    <th style={{ width:'18%' }}>หมวด</th>
                     <th>Item</th>
-                    <th style={{ width:'18%' }}>
+                    <th style={{ width:'16%' }}>
                       Description
                       <span style={{ display:'inline-block', marginLeft:6, padding:'1px 5px', borderRadius:3, background:'#FFF4CC', color:'#6B5121', fontSize:9, fontWeight:600, letterSpacing:0.04, verticalAlign:'middle' }}>SUPPLIER</span>
                     </th>
                     <th style={{ width:80 }} className="num-col">จำนวน</th>
-                    <th style={{ width:100 }}>หน่วย</th>
+                    <th style={{ width:120 }}>หน่วย</th>
                     <th style={{ width:36, paddingRight:20 }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r, i) => {
-                    const cats = getCategoriesBySource(r.source);
-                    const cat  = cats.find(c => c.short === r.catShort);
-                    const it   = r.itemCode ? findItem(r.source, r.itemCode) : null;
+                    const cats = catalog.bySource[r.source] || [];
+                    const cat  = cats.find(c => c.key === r.catKey);
+                    const it   = r.itemCode ? itemByCode(catalog, r.itemCode) : null;
                     return (
                       <tr key={r.uid}>
                         <td style={{ paddingLeft:20, color:'var(--ink-4)', fontFamily:'var(--font-mono)', fontSize:11 }}>{String(i+1).padStart(2,'0')}</td>
@@ -296,17 +352,17 @@ export function ScreenRFQCreate({ go }) {
                           </select>
                         </td>
                         <td>
-                          <select value={r.catShort} onChange={e => onPickCat(r.uid, e.target.value)} style={tableSelectStyle} disabled={!r.source}>
+                          <select value={r.catKey} onChange={e => onPickCat(r.uid, e.target.value)} style={tableSelectStyle} disabled={!r.source}>
                             <option value="">{r.source ? '— เลือกหมวด —' : 'เลือก Source ก่อน'}</option>
-                            {cats.map(c => <option key={c.short} value={c.short}>{c.short} · {c.name}</option>)}
+                            {cats.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
                           </select>
                         </td>
                         <td>
                           <select value={r.itemCode}
                             onChange={e => onPickItem(r.uid, e.target.value)}
                             style={{ ...tableSelectStyle, color: r.itemCode ? 'var(--ink)' : 'var(--ink-4)' }}
-                            disabled={!r.catShort}>
-                            <option value="">{r.catShort ? '— เลือก Item —' : 'เลือกหมวดก่อน'}</option>
+                            disabled={!r.catKey}>
+                            <option value="">{r.catKey ? '— เลือก Item —' : 'เลือกหมวดก่อน'}</option>
                             {cat?.items.map(i2 => (
                               <option key={i2.code} value={i2.code}>{i2.name}</option>
                             ))}
@@ -319,8 +375,6 @@ export function ScreenRFQCreate({ go }) {
                           )}
                         </td>
                         <td>
-                          {/* Description — Supplier will fill this in their returned quote.
-                              Render as disabled-looking placeholder on procurement side. */}
                           <div style={{
                             padding:'8px 10px',
                             border:'1px dashed var(--rule-2)', borderRadius:4,
@@ -340,7 +394,15 @@ export function ScreenRFQCreate({ go }) {
                           <select value={r.unit} onChange={e => updateRow(r.uid, { unit:e.target.value })}
                             style={tableSelectStyle} disabled={!r.itemCode}>
                             <option value="">—</option>
-                            {ALL_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+                            {/* Item's own unit first (auto-filled), then the full master */}
+                            {units.map(u => {
+                              const lbl = u.code || u.name;
+                              return <option key={u.id} value={lbl}>{u.code}{u.name ? ` · ${u.name}` : ''}</option>;
+                            })}
+                            {/* Preserve a legacy/custom unit value that isn't in the master */}
+                            {r.unit && !units.some(u => (u.code || u.name) === r.unit) && (
+                              <option value={r.unit}>{r.unit}</option>
+                            )}
                           </select>
                         </td>
                         <td style={{ paddingRight:20 }}>
@@ -364,7 +426,6 @@ export function ScreenRFQCreate({ go }) {
               </div>
             </div>
 
-            {/* Pricing policy (procurement-defined) — sits at the end of the items section */}
             <div style={{
               marginTop:20, padding:'16px 16px',
               background:'var(--surface-2)',
@@ -407,7 +468,6 @@ export function ScreenRFQCreate({ go }) {
             </div>
           </SectionCard>
 
-          {/* Section 4: Supplier-fill conditions */}
           <SectionCard step="4" label="เงื่อนไขที่ให้ Supplier กรอก"
             desc="ทั้ง 5 เงื่อนไขจะเป็นช่องว่างให้ Supplier เขียนเองในใบเสนอราคา">
             <div className="eyebrow" style={{ marginBottom:10, display:'inline-flex', alignItems:'center', gap:8 }}>
@@ -464,7 +524,7 @@ export function ScreenRFQCreate({ go }) {
             overheadHint={overheadHint}
             vatPolicy={vatPolicy}
           />
-          <ExcelPreviewCard items={itemsValid} />
+          <ExcelPreviewCard items={itemsValid} catalog={catalog} />
         </div>
       </div>
 
@@ -501,7 +561,6 @@ export function ScreenRFQCreate({ go }) {
         </div>
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
           <button className="btn ghost" onClick={() => go('rfq')} disabled={saving}>ยกเลิก</button>
-          <button className="btn" disabled={!canGenerate} onClick={submit}>บันทึกร่าง</button>
           <button className="btn primary" disabled={!canGenerate} onClick={submit}
             style={{ padding:'10px 20px', opacity: canGenerate ? 1 : 0.5, cursor: canGenerate ? 'pointer' : 'not-allowed' }}>
             {saving ? 'กำลังบันทึก…' : <>{Icons.download} Submit & ดาวน์โหลด Excel</>}
@@ -514,7 +573,7 @@ export function ScreenRFQCreate({ go }) {
 
 /* =================== Generated success view =================== */
 
-function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, due, overheadHint, vatPolicy, notes }) {
+function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, catalog, approvalRoles, due, overheadHint, vatPolicy, notes }) {
   const projectObj = projects.find(p => p.id === project);
   return (
     <div className="page">
@@ -585,7 +644,7 @@ function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, d
       </div>
 
       <h3 className="h-section" style={{ marginBottom:16 }}>ตัวอย่างเอกสาร Excel</h3>
-      <ExcelDocPreview rfqNo={rfqNo} supplier={supplier} project={projectObj} items={items}
+      <ExcelDocPreview rfqNo={rfqNo} supplier={supplier} project={projectObj} items={items} catalog={catalog} approvalRoles={approvalRoles}
         due={due} title={title} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />
     </div>
   );
@@ -749,7 +808,7 @@ function Row({ label, value, last }) {
 }
 
 /* ----- Mini Excel preview (right rail) ----- */
-function ExcelPreviewCard({ items }) {
+function ExcelPreviewCard({ items, catalog }) {
   return (
     <div className="card" style={{ padding:0, overflow:'hidden' }}>
       <div style={{ padding:'12px 16px', borderBottom:'1px solid var(--rule)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -757,7 +816,7 @@ function ExcelPreviewCard({ items }) {
         <span style={{ fontSize:10, fontFamily:'var(--font-mono)', color:'var(--ink-4)' }}>.xlsx</span>
       </div>
       <div style={{ background:'#FCFAF5', padding:'4px 0' }}>
-        <MiniSheet items={items} />
+        <MiniSheet items={items} catalog={catalog} />
       </div>
       <div style={{ padding:'10px 16px', borderTop:'1px solid var(--rule)', fontSize:11, color:'var(--ink-3)' }}>
         {items.length > 0
@@ -768,7 +827,7 @@ function ExcelPreviewCard({ items }) {
   );
 }
 
-function MiniSheet({ items }) {
+function MiniSheet({ items, catalog }) {
   const cols = ['ลำดับ','รหัส','รายการ','Description','จำนวน','หน่วย','ราคา/หน่วย','รวม'];
   const widths = ['7%','14%','22%','14%','10%','10%','12%','11%'];
   const supplierCols = new Set(['Description','ราคา/หน่วย','รวม']);
@@ -791,7 +850,7 @@ function MiniSheet({ items }) {
         </thead>
         <tbody>
           {display.map((it, i) => {
-            const it2 = findItem(it.source, it.itemCode) || {};
+            const it2 = itemByCode(catalog, it.itemCode) || {};
             return (
               <tr key={it.uid} style={{ background: i%2 ? '#FAF7F0' : '#FCFAF5' }}>
                 <td style={cellStyle(false)}>{i+1}</td>
@@ -827,7 +886,7 @@ function cellStyle(supplierFill, last) {
 }
 
 /* ----- Big Excel doc preview (success page) ----- */
-function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overheadHint, vatPolicy, notes }) {
+function ExcelDocPreview({ rfqNo, supplier, project, items, catalog, approvalRoles, due, title, overheadHint, vatPolicy, notes }) {
   return (
     <div className="card" style={{ padding:0, overflow:'hidden', boxShadow:'0 8px 32px -16px rgba(20,18,14,0.18)' }}>
       <div style={{
@@ -839,7 +898,6 @@ function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overhead
       </div>
 
       <div style={{ padding:'36px 48px', background:'#FFFFFF', minHeight:600 }}>
-        {/* Doc header */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:24, paddingBottom:16, borderBottom:'2px solid #15130E' }}>
           <div>
             <div style={{ fontSize:11, letterSpacing:0.16, textTransform:'uppercase', color:'var(--ink-3)' }}>Initial Estate Co., Ltd.</div>
@@ -853,7 +911,6 @@ function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overhead
           </div>
         </div>
 
-        {/* Parties */}
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:24, marginBottom:24 }}>
           <div>
             <div style={{ fontSize:10, letterSpacing:0.12, textTransform:'uppercase', color:'var(--ink-3)', marginBottom:6 }}>เรียน — Supplier</div>
@@ -875,7 +932,6 @@ function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overhead
           <div style={{ fontSize:14, fontWeight:500 }}>{title}</div>
         </div>
 
-        {/* Items table */}
         <table style={{ width:'100%', borderCollapse:'collapse', marginTop:20, fontSize:11 }}>
           <thead>
             <tr style={{ background:'#15130E', color:'#FFFFFF' }}>
@@ -894,7 +950,7 @@ function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overhead
           </thead>
           <tbody>
             {items.map((it, i) => {
-              const it2 = findItem(it.source, it.itemCode) || {};
+              const it2 = itemByCode(catalog, it.itemCode) || {};
               return (
                 <tr key={it.uid} style={{ borderBottom:'1px solid #E5DFD0' }}>
                   <td style={{ padding:'10px 8px', textAlign:'center', color:'var(--ink-3)', fontFamily:'var(--font-mono)' }}>{i+1}</td>
@@ -934,16 +990,10 @@ function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overhead
                 VAT &nbsp;
                 <span style={{ display:'inline-flex', alignItems:'center', gap:14, fontSize:11, color:'var(--ink-2)' }}>
                   <span style={{ display:'inline-flex', alignItems:'center', gap:5 }}>
-                    <span style={{
-                      display:'inline-block', width:12, height:12,
-                      border:'1.4px solid var(--ink-2)', borderRadius:2, background:'#FFFFFF',
-                    }} /> มี
+                    <span style={{ display:'inline-block', width:12, height:12, border:'1.4px solid var(--ink-2)', borderRadius:2, background:'#FFFFFF' }} /> มี
                   </span>
                   <span style={{ display:'inline-flex', alignItems:'center', gap:5 }}>
-                    <span style={{
-                      display:'inline-block', width:12, height:12,
-                      border:'1.4px solid var(--ink-2)', borderRadius:2, background:'#FFFFFF',
-                    }} /> ไม่มี
+                    <span style={{ display:'inline-block', width:12, height:12, border:'1.4px solid var(--ink-2)', borderRadius:2, background:'#FFFFFF' }} /> ไม่มี
                   </span>
                 </span>
                 <span style={{ color:'var(--ink-3)', marginLeft:8 }}>(Supplier ติ๊ก)</span>
@@ -962,7 +1012,6 @@ function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overhead
           </tbody>
         </table>
 
-        {/* 5 Supplier-fill conditions — blank lines for each */}
         <div style={{ marginTop:32 }}>
           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:14 }}>
             <div style={{ fontSize:11, letterSpacing:0.12, textTransform:'uppercase', color:'var(--ink-3)', fontWeight:600 }}>
@@ -1009,7 +1058,7 @@ function ExcelDocPreview({ rfqNo, supplier, project, items, due, title, overhead
 
         {/* Sign-off — driven by Approval Roles master data */}
         {(() => {
-          const roles = getActiveApprovalRoles() || [];
+          const roles = (approvalRoles || []).filter(r => r.active).sort((a,b) => (a.level||0)-(b.level||0));
           const all = [...roles, { name: `ผู้เสนอราคา (${supplier?.name || '—'})`, _supplier:true }];
           const cols = Math.max(all.length, 4);
           return (

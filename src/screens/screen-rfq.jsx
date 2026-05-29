@@ -265,9 +265,14 @@ export function ScreenRFQConfirm({ go }) {
             if (parsed && Array.isArray(parsed.items)) {
               setItems(parsed.items.map(it => ({
                 ...it,
+                // Items saved from RFQ-create carry uid/itemCode but no `id`;
+                // the table keys + toggle rely on a stable id, so derive one.
+                id:      it.id || it.uid || it.itemCode,
                 save:    it.save ?? true,
                 outlier: it.outlier ?? false,
                 isNew:   it.isNew   ?? false,
+                newP:    it.newP ?? 0,
+                oldP:    it.oldP ?? null,
               })));
             }
           } catch { /* not JSON, ignore */ }
