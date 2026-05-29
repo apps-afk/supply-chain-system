@@ -205,7 +205,7 @@ export function ScreenSettingsMaterials({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} Bulk Upload</button>
+          <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} เพิ่มหลายรายการ</button>
           <button className="btn primary" onClick={() => setAdding({ level:'main' })}>{Icons.plus} เพิ่มหมวดหลัก</button>
         </div>
       </div>
@@ -372,7 +372,7 @@ export function ScreenSettingsMaterials({ go }) {
 
       {bulkOpen && (
         <BulkUploadModal
-          title="Bulk Upload วัสดุ"
+          title="เพิ่มหลายรายการ · วัสดุ"
           entity="วัสดุ"
           endpoint="/api/materials"
           columns={[

@@ -95,7 +95,7 @@ export function ScreenSettingsSubcontracts({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} Bulk Upload</button>
+          <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} เพิ่มหลายรายการ</button>
           <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่มงานจ้าง</button>
         </div>
       </div>
@@ -189,7 +189,7 @@ export function ScreenSettingsSubcontracts({ go }) {
       )}
       {bulkOpen && (
         <BulkUploadModal
-          title="Bulk Upload งานจ้างเหมา"
+          title="เพิ่มหลายรายการ · งานจ้างเหมา"
           entity="งานจ้าง"
           endpoint="/api/subcontracts"
           columns={[

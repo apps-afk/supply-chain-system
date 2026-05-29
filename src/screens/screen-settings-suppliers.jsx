@@ -95,7 +95,7 @@ export function ScreenSettingsSuppliers({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} Bulk Upload</button>
+          <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} เพิ่มหลายรายการ</button>
           <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่ม Supplier</button>
         </div>
       </div>
@@ -241,7 +241,7 @@ export function ScreenSettingsSuppliers({ go }) {
       )}
       {bulkOpen && (
         <BulkUploadModal
-          title="Bulk Upload Suppliers"
+          title="เพิ่มหลายรายการ · Supplier"
           entity="Supplier"
           endpoint="/api/suppliers"
           columns={[

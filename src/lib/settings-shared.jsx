@@ -458,7 +458,7 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
                     <tr>
                       <th style={{ width:32 }}>#</th>
                       {columns.map((c,i) => <th key={i}>{c.label}</th>)}
-                      <th style={{ width:120 }}>สถานะ</th>
+                      <th style={{ width:120 }}>ผลตรวจสอบ</th>
                     </tr>
                   </thead>
                   <tbody>
