@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal, findUnit } from '../lib/settings-shared';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal, findUnit, UnitPicker } from '../lib/settings-shared';
 
 /*
   Settings → งานจ้างเหมา (2-level hierarchical browser)
@@ -510,10 +510,7 @@ function SubcontractModal({ item, units, cats, existingCodes, onClose, onSaved }
           </SettingsField>
         </div>
         <SettingsField label="หน่วย">
-          <select value={form.unit_id} onChange={e=>set('unit_id', e.target.value)} style={settingsInputStyle}>
-            <option value="">— เลือกหน่วย —</option>
-            {units.map(u => <option key={u.id} value={u.id}>{u.name} ({u.code})</option>)}
-          </select>
+          <UnitPicker units={units} value={form.unit_id} onChange={(id)=>set('unit_id', id)} />
         </SettingsField>
         <div />
         <div style={{ gridColumn:'1 / -1' }}>

@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Stat, Spark, Delta, Av, money } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox } from '../lib/settings-shared';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox, UnitPicker } from '../lib/settings-shared';
 
 /*
   Price DB — list + detail.
@@ -368,10 +368,7 @@ function ManualPriceModal({ materials, suppliers, units, onClose, onSaved }) {
             style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)', textAlign:'right' }} />
         </SettingsField>
         <SettingsField label="หน่วย" hint={selectedMat?.unit_id ? `auto-fill จาก Material — เปลี่ยนได้` : 'เลือกจาก master หน่วยนับ'}>
-          <select value={form.unitId} onChange={e => set('unitId', e.target.value)} style={settingsInputStyle}>
-            <option value="">— ใช้หน่วยจาก Material —</option>
-            {units.map(u => <option key={u.id} value={u.id}>{u.code ? `${u.code} · ` : ''}{u.name}</option>)}
-          </select>
+          <UnitPicker units={units} value={form.unitId} onChange={(id)=>set('unitId', id)} placeholder="— ใช้หน่วยจาก Material —" />
         </SettingsField>
         <SettingsField label="ที่มา (Source)" hint='เช่น "Manual" หรือ "RFQ-2025-1234"'>
           <input value={form.source} onChange={e => set('source', e.target.value)}

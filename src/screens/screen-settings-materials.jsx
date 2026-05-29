@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal, findUnit } from '../lib/settings-shared';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal, findUnit, UnitPicker } from '../lib/settings-shared';
 import { MainCategoryModal } from './screen-settings-material-main-categories';
 import { SubCategoryModal }  from './screen-settings-material-sub-categories';
 
@@ -559,10 +559,7 @@ function MaterialModal({ item, units, mainCats, subCats, existingCodes, go, onCl
             placeholder="เช่น เสาเข็มตัวไอ I-22" style={settingsInputStyle} />
         </SettingsField>
         <SettingsField label="หน่วย">
-          <select value={form.unit_id} onChange={e=>set('unit_id', e.target.value)} style={settingsInputStyle}>
-            <option value="">— เลือกหน่วย —</option>
-            {units.map(u => <option key={u.id} value={u.id}>{u.name} ({u.code})</option>)}
-          </select>
+          <UnitPicker units={units} value={form.unit_id} onChange={(id)=>set('unit_id', id)} />
         </SettingsField>
         <SettingsField label="Spec">
           <input value={form.spec} onChange={e=>set('spec', e.target.value)} placeholder="คุณลักษณะ / รุ่น / Grade" style={settingsInputStyle} />

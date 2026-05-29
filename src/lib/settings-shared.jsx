@@ -1,5 +1,5 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Icons, Chip } from './shell';
 
 /* ===================== Unit matching helpers =====================
@@ -70,6 +70,130 @@ export const settingsInputStyle = {
   fontFamily: 'inherit',
   width: '100%',
 };
+
+/* ===================== Searchable unit picker =====================
+   A combobox replacement for the plain <select> unit dropdowns. Lets the
+   user type to filter (matching code / Thai+English name / aliases) and
+   shows the aliases inline so the right unit is easy to spot — e.g. typing
+   "คิว" surfaces "m³ · ลูกบาศก์เมตร · คิว, m^3, ลบ.ม.".
+
+   Props: units, value (unit id), onChange(id), placeholder, allowClear.
+*/
+export function UnitPicker({ units = [], value, onChange, placeholder = 'เลือก / ค้นหาหน่วย…', allowClear = true }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+
+  const selected = units.find(u => u.id === value) || null;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onEsc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onEsc);
+    // focus the search box when opening
+    setTimeout(() => inputRef.current?.focus(), 0);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [open]);
+
+  const filtered = useMemo(() => {
+    if (!q.trim()) return units;
+    return units.filter(u => unitMatches(u, q));
+  }, [units, q]);
+
+  function pick(u) {
+    onChange?.(u ? u.id : '');
+    setOpen(false);
+    setQ('');
+  }
+
+  const label = selected
+    ? `${selected.code ? selected.code + ' · ' : ''}${selected.name || ''}`
+    : '';
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          ...settingsInputStyle,
+          textAlign: 'left', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 8,
+          color: selected ? 'var(--ink)' : 'var(--ink-4)',
+        }}>
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {selected ? label : placeholder}
+        </span>
+        {selected && allowClear && (
+          <span
+            onClick={(e) => { e.stopPropagation(); pick(null); }}
+            title="ล้าง"
+            style={{ color: 'var(--ink-4)', fontSize: 14, padding: '0 2px' }}>×</span>
+        )}
+        <span style={{ color: 'var(--ink-4)', display: 'inline-flex', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>
+          {Icons.chevronD}
+        </span>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          background: 'var(--paper)', border: '1px solid var(--rule-2)',
+          borderRadius: 8, boxShadow: 'var(--sh-pop)', zIndex: 60,
+          maxHeight: 280, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}>
+          <div style={{ padding: 8, borderBottom: '1px solid var(--rule)' }}>
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="พิมพ์ค้นหา เช่น คิว, m^3, ตร.ม.…"
+              style={{ ...settingsInputStyle, padding: '7px 10px', fontSize: 12.5 }} />
+          </div>
+          <div style={{ overflowY: 'auto' }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: '14px 12px', fontSize: 12.5, color: 'var(--ink-4)', textAlign: 'center' }}>
+                ไม่พบหน่วยที่ตรง
+              </div>
+            ) : filtered.map(u => {
+              const aliases = String(u.aliases || '').split(',').map(a => a.trim()).filter(Boolean);
+              const isSel = u.id === value;
+              return (
+                <div
+                  key={u.id}
+                  onClick={() => pick(u)}
+                  style={{
+                    padding: '8px 12px', cursor: 'pointer',
+                    background: isSel ? 'var(--teal-soft)' : 'transparent',
+                    borderBottom: '1px solid var(--rule)',
+                  }}
+                  onMouseEnter={(e) => { if (!isSel) e.currentTarget.style.background = 'var(--paper-2)'; }}
+                  onMouseLeave={(e) => { if (!isSel) e.currentTarget.style.background = 'transparent'; }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span className="font-mono" style={{ fontSize: 12.5, fontWeight: 600, color: isSel ? 'var(--teal-ink)' : 'var(--ink)' }}>{u.code}</span>
+                    <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{u.name}</span>
+                    {u.name_en && <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>· {u.name_en}</span>}
+                  </div>
+                  {aliases.length > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>
+                      {aliases.join(' · ')}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function SettingsField({ label, required, hint, children }) {
   return (
