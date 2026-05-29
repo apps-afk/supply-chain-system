@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, Av, Spark, Delta, money } from '../lib/shell';
-import { downloadRfqExcel } from './screen-rfq-create';
+import { downloadRfqExcel, ExcelDocPreview } from './screen-rfq-create';
 
 /*
   RFQ — list + the post-quote "confirm to Price DB" screen.
@@ -451,9 +451,9 @@ export function ScreenRFQConfirm({ go }) {
                 {quoteFile ? quoteFile.name : <>เลือกไฟล์ PDF ของใบเสนอราคา</>}
               </div>
               <div style={{ fontSize:11, color:'var(--ink-3)' }}>
-                {quoteFile ? `${Math.round(quoteFile.size/1024)} KB` : 'รองรับ PDF, Word (.doc/.docx), รูป (.jpg/.png/.webp/.heic) · ไม่เกิน 25 MB'}
+                {quoteFile ? `${Math.round(quoteFile.size/1024)} KB` : 'รองรับ PDF, Excel (.xls/.xlsx/.csv), Word, รูป · ไม่เกิน 25 MB'}
               </div>
-              <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display:'none' }}
+              <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display:'none' }}
                 onChange={e => setQuoteFile(e.target.files?.[0] || null)} />
             </label>
             <button className="btn primary" disabled={!quoteFile || uploading || !rfq} onClick={uploadQuote}>
@@ -462,6 +462,31 @@ export function ScreenRFQConfirm({ go }) {
           </div>
         )}
       </div>
+
+      {/* Preview of the RFQ document that gets exported to Excel */}
+      {parsed && Array.isArray(parsed.items) && parsed.items.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
+            <h3 className="h-section">ตัวอย่างเอกสาร RFQ (ก่อน Export)</h3>
+            <button className="btn" onClick={downloadExcel} disabled={dlBusy || !parsed}>
+              {Icons.download} {dlBusy ? 'กำลังสร้าง…' : 'ดาวน์โหลด Excel'}
+            </button>
+          </div>
+          <ExcelDocPreview
+            rfqNo={rfq?.no}
+            supplier={{ name: parsed.supplier_name || '' }}
+            project={projects.find(p => p.id === rfq?.project_id) || null}
+            items={parsed.items}
+            catalog={{ itemByCode: new Map((parsed.items || []).map(it => [it.itemCode, { name: it.name, spec: '' }])) }}
+            approvalRoles={[]}
+            due={rfq?.due_date}
+            title={rfq?.title}
+            overheadHint={parsed.overheadHint || ''}
+            vatPolicy={parsed.vatPolicy || 'supplier'}
+            notes={parsed.memo || ''}
+          />
+        </div>
+      )}
 
       {/* Main comparison panel — items table remains mock */}
       <div className="card" style={{ padding: 0 }}>

@@ -12,6 +12,9 @@ const ALLOWED_MIME = [
   'application/pdf',
   'application/msword',                                                       // .doc
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  // .docx
+  'application/vnd.ms-excel',                                                 // .xls
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',        // .xlsx
+  'text/csv',                                                                 // .csv
   'image/jpeg',
   'image/png',
   'image/webp',
@@ -27,14 +30,21 @@ const MIME_ALIASES = {
   'image/x-png':         'image/png',
   'application/x-pdf':   'application/pdf',
   'application/acrobat': 'application/pdf',
+  'application/excel':                                  'application/vnd.ms-excel',
+  'application/x-excel':                                'application/vnd.ms-excel',
+  'application/x-msexcel':                              'application/vnd.ms-excel',
+  'application/vnd.ms-excel.sheet.macroenabled.12':     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
 // Extension fallback — Chrome on Windows often reports application/octet-stream
 // for HEIC (no codec installed) and some upload paths report empty type.
-const ALLOWED_EXT = new Set(['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'gif']);
+const ALLOWED_EXT = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'gif']);
 const EXT_TO_MIME = {
   pdf:  'application/pdf',
   doc:  'application/msword',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:  'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv:  'text/csv',
   jpg:  'image/jpeg',
   jpeg: 'image/jpeg',
   png:  'image/png',
@@ -103,7 +113,7 @@ export async function POST(request) {
   const effectiveMime = normalizeMime(file.type, file.name);
   if (!ALLOWED_MIME.includes(effectiveMime)) {
     return NextResponse.json({
-      error: `รองรับเฉพาะไฟล์ PDF / Word (.doc, .docx) / รูปภาพ (.jpg, .png, .webp, .heic, .gif) — ได้รับ: ${file.type || 'ไม่ระบุ'}`
+      error: `รองรับไฟล์ PDF / Word (.doc, .docx) / Excel (.xls, .xlsx, .csv) / รูปภาพ (.jpg, .png, .webp, .heic, .gif) — ได้รับ: ${file.type || 'ไม่ระบุ'}`
     }, { status: 415 });
   }
   if (!ALLOWED_ENTITY_TYPES.has(entityType)) {

@@ -1170,7 +1170,7 @@ function cellStyle(supplierFill, last) {
 }
 
 /* ----- Big Excel doc preview (success page) ----- */
-function ExcelDocPreview({ rfqNo, supplier, project, items, catalog, approvalRoles, due, title, overheadHint, vatPolicy, notes }) {
+export function ExcelDocPreview({ rfqNo, supplier, project, items, catalog, approvalRoles, due, title, overheadHint, vatPolicy, notes }) {
   return (
     <div className="card" style={{ padding:0, overflow:'hidden', boxShadow:'0 8px 32px -16px rgba(20,18,14,0.18)' }}>
       <div style={{
