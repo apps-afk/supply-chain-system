@@ -26,7 +26,7 @@ function generateRfqNo() {
 }
 
 function blankRow() {
-  return { uid: Math.random().toString(36).slice(2,9), source:'', catKey:'', itemCode:'', qty:'', unit:'' };
+  return { uid: Math.random().toString(36).slice(2,9), source:'', catKey:'', itemCode:'', qty:'', unitId:'' };
 }
 
 function formatThaiDate(iso) {
@@ -173,11 +173,13 @@ export function ScreenRFQCreate({ go }) {
     for (const r of rows) {
       if (r.itemCode) {
         filled.push(r);
-        if (Number(r.qty) > 0 && r.unit) valid.push(r);
+        // Valid rows carry a resolved unit label (for the doc/preview/payload)
+        // alongside the unitId used by the picker.
+        if (Number(r.qty) > 0 && r.unitId) valid.push({ ...r, unit: unitLabel(r.unitId) });
       }
     }
     return { itemsFilled: filled, itemsValid: valid };
-  }, [rows]);
+  }, [rows, unitLabel]);
   const canGenerate = !!supplier && itemsValid.length > 0 && title.trim().length > 0 && !!project && !saving;
   const projectObj = useMemo(() => projects.find(p => p.id === project), [projects, project]);
 
@@ -230,13 +232,14 @@ export function ScreenRFQCreate({ go }) {
 
   // Row helpers — functional setState so back-to-back updates don't clobber.
   const updateRow = (uid, patch) => setRows(rs => rs.map(r => r.uid === uid ? { ...r, ...patch } : r));
-  const onPickSource = (uid, source) => updateRow(uid, { source, catKey:'', itemCode:'', unit:'' });
-  const onPickCat    = (uid, catKey) => updateRow(uid, { catKey, itemCode:'', unit:'' });
+  const onPickSource = (uid, source) => updateRow(uid, { source, catKey:'', itemCode:'', unitId:'' });
+  const onPickCat    = (uid, catKey) => updateRow(uid, { catKey, itemCode:'', unitId:'' });
   const onPickItem   = (uid, code) => {
     setRows(rs => rs.map(r => {
       if (r.uid !== uid) return r;
       const it = itemByCode(catalog, code);
-      return { ...r, itemCode: code, unit: it?.unitLabel || r.unit || '' };
+      // Auto-fill the item's master unit, but the user can change it freely.
+      return { ...r, itemCode: code, unitId: it?.unitId || r.unitId || '' };
     }));
   };
   const addRow    = () => setRows(rs => [...rs, blankRow()]);
@@ -331,8 +334,8 @@ export function ScreenRFQCreate({ go }) {
                       Description
                       <span style={{ display:'inline-block', marginLeft:6, padding:'1px 5px', borderRadius:3, background:'#FFF4CC', color:'#6B5121', fontSize:9, fontWeight:600, letterSpacing:0.04, verticalAlign:'middle' }}>SUPPLIER</span>
                     </th>
-                    <th style={{ width:80 }} className="num-col">จำนวน</th>
-                    <th style={{ width:120 }}>หน่วย</th>
+                    <th style={{ width:70 }} className="num-col">จำนวน</th>
+                    <th style={{ width:150 }}>หน่วย</th>
                     <th style={{ width:36, paddingRight:20 }}></th>
                   </tr>
                 </thead>
@@ -391,19 +394,11 @@ export function ScreenRFQCreate({ go }) {
                             style={{ ...tableInputStyle, textAlign:'right' }} disabled={!r.itemCode} />
                         </td>
                         <td>
-                          <select value={r.unit} onChange={e => updateRow(r.uid, { unit:e.target.value })}
-                            style={tableSelectStyle} disabled={!r.itemCode}>
-                            <option value="">—</option>
-                            {/* Item's own unit first (auto-filled), then the full master */}
-                            {units.map(u => {
-                              const lbl = u.code || u.name;
-                              return <option key={u.id} value={lbl}>{u.code}{u.name ? ` · ${u.name}` : ''}</option>;
-                            })}
-                            {/* Preserve a legacy/custom unit value that isn't in the master */}
-                            {r.unit && !units.some(u => (u.code || u.name) === r.unit) && (
-                              <option value={r.unit}>{r.unit}</option>
-                            )}
-                          </select>
+                          {/* Searchable unit picker — type to filter by code /
+                              name / alias, same as the Material modal. */}
+                          <UnitPicker units={units} value={r.unitId}
+                            onChange={(id) => updateRow(r.uid, { unitId: id })}
+                            placeholder="— เลือก —" />
                         </td>
                         <td style={{ paddingRight:20 }}>
                           <button onClick={() => removeRow(r.uid)} className="btn ghost sm"
