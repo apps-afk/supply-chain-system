@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal } from '../lib/settings-shared';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal, findUnit } from '../lib/settings-shared';
 import { MainCategoryModal } from './screen-settings-material-main-categories';
 import { SubCategoryModal }  from './screen-settings-material-sub-categories';
 
@@ -391,9 +391,7 @@ export function ScreenSettingsMaterials({ go }) {
           transform={(row, ctx) => {
             const allCodes = [...items.map(i => i.code).filter(Boolean), ...ctx.usedCodes];
             const code = nextMaterialCode(allCodes);
-            const uCode = (row.unit || '').toLowerCase().trim();
-            const unit = units.find(u => (u.code || '').toLowerCase() === uCode
-              || (u.aliases || '').toLowerCase().split(',').map(a => a.trim()).includes(uCode));
+            const unit = findUnit(units, row.unit);
             const active = (row.status || 'Active').toLowerCase() !== 'non-active';
             return {
               code,

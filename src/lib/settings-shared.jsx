@@ -2,6 +2,63 @@
 import React, { useState } from 'react';
 import { Icons, Chip } from './shell';
 
+/* ===================== Unit matching helpers =====================
+   Units can be referred to many ways: code (m³), Thai name (ลูกบาศก์เมตร),
+   English name (cubic meter), or any alias (ลบ.ม., คิว, m^3, cu.m). These
+   helpers normalize all of those to a common form so search + lookups
+   match regardless of which spelling the user types.
+
+   Normalization:
+     - lowercase, trim
+     - superscripts ² ³ → 2 3
+     - caret exponents (m^3 → m3) — strip the caret
+     - drop spaces and dots (ลบ.ม. → ลบม, cu.m → cum)
+*/
+export function normalizeUnitToken(s) {
+  return String(s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/²/g, '2')
+    .replace(/³/g, '3')
+    .replace(/\^/g, '')
+    .replace(/[\s.]/g, '');
+}
+
+// All normalized tokens a unit can be matched by (code + names + aliases).
+export function unitTokens(u) {
+  const raw = [
+    u?.code, u?.name, u?.name_en,
+    ...String(u?.aliases || '').split(','),
+  ];
+  const out = [];
+  for (const t of raw) {
+    const n = normalizeUnitToken(t);
+    if (n && !out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+// Substring match — for search boxes (typing "คิว" highlights the m³ unit).
+export function unitMatches(u, query) {
+  const q = normalizeUnitToken(query);
+  if (!q) return true;
+  return unitTokens(u).some(t => t.includes(q) || q.includes(t));
+}
+
+// Exact-ish lookup — for resolving a free-text cell (bulk upload) to a unit.
+// Prefers an exact token equality; falls back to substring containment.
+export function findUnit(units, query) {
+  const q = normalizeUnitToken(query);
+  if (!q) return null;
+  let partial = null;
+  for (const u of units || []) {
+    const tokens = unitTokens(u);
+    if (tokens.includes(q)) return u;                 // exact
+    if (!partial && tokens.some(t => t.includes(q) || q.includes(t))) partial = u;
+  }
+  return partial;
+}
+
 export const settingsInputStyle = {
   padding: '9px 12px',
   fontSize: 13,

@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal } from '../lib/settings-shared';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal, findUnit } from '../lib/settings-shared';
 
 /*
   Settings → งานจ้างเหมา (2-level hierarchical browser)
@@ -317,9 +317,7 @@ export function ScreenSettingsSubcontracts({ go }) {
           transform={(row, ctx) => {
             const allCodes = [...items.map(i => i.code).filter(Boolean), ...ctx.usedCodes];
             const code = nextSubcontractCode(allCodes);
-            const uCode = (row.unit || '').toLowerCase().trim();
-            const unit = units.find(u => (u.code || '').toLowerCase() === uCode
-              || (u.aliases || '').toLowerCase().split(',').map(a => a.trim()).includes(uCode));
+            const unit = findUnit(units, row.unit);
             const active = (row.status || 'Active').toLowerCase() !== 'non-active';
             return {
               code,

@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { Icons } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, unitMatches } from '../lib/settings-shared';
 
 const TYPE_OPTIONS = ['count', 'length', 'area', 'volume', 'weight', 'time', 'other'];
 const TYPE_LABEL = {
@@ -29,7 +29,7 @@ const SI_UNITS = [
   { code:'ft',  name:'ฟุต',         name_en:'foot',         type:'length', aliases:'ฟุต,\'' },
   { code:'yd',  name:'หลา',         name_en:'yard',         type:'length', aliases:'หลา' },
   // Area
-  { code:'m²',   name:'ตารางเมตร',     name_en:'square meter',     type:'area', aliases:'sq.m,m2,ตร.ม.' },
+  { code:'m²',   name:'ตารางเมตร',     name_en:'square meter',     type:'area', aliases:'sq.m,m2,m^2,ตร.ม.,ตารางเมตร,เมตร2' },
   { code:'cm²',  name:'ตารางเซนติเมตร', name_en:'square centimeter', type:'area', aliases:'sq.cm,cm2,ตร.ซม.' },
   { code:'km²',  name:'ตารางกิโลเมตร',  name_en:'square kilometer',  type:'area', aliases:'sq.km,km2,ตร.กม.' },
   { code:'ft²',  name:'ตารางฟุต',       name_en:'square foot',        type:'area', aliases:'sq.ft,ft2,ตร.ฟ.' },
@@ -39,8 +39,8 @@ const SI_UNITS = [
   { code:'งาน',  name:'งาน',             name_en:'ngan',               type:'area', aliases:'ngan' },
   { code:'ตร.ว.', name:'ตารางวา',         name_en:'square wah',         type:'area', aliases:'sq.wa,wah' },
   // Volume
-  { code:'m³',   name:'ลูกบาศก์เมตร',     name_en:'cubic meter',       type:'volume', aliases:'cu.m,m3,ลบ.ม.' },
-  { code:'cm³',  name:'ลูกบาศก์เซนติเมตร', name_en:'cubic centimeter',  type:'volume', aliases:'cc,cm3,ลบ.ซม.' },
+  { code:'m³',   name:'ลูกบาศก์เมตร',     name_en:'cubic meter',       type:'volume', aliases:'cu.m,m3,m^3,ลบ.ม.,ลูกบาศก์เมตร,คิว,คิวบ์' },
+  { code:'cm³',  name:'ลูกบาศก์เซนติเมตร', name_en:'cubic centimeter',  type:'volume', aliases:'cc,cm3,cm^3,ลบ.ซม.' },
   { code:'L',    name:'ลิตร',             name_en:'liter',             type:'volume', aliases:'l,ลิตร,ล.' },
   { code:'mL',   name:'มิลลิลิตร',        name_en:'milliliter',        type:'volume', aliases:'ml,มล.' },
   { code:'gal',  name:'แกลลอน',          name_en:'gallon',            type:'volume', aliases:'gallon,แกลลอน' },
@@ -162,10 +162,9 @@ export function ScreenSettingsUnits() {
 
   const filtered = units.filter(u => {
     if (filter !== 'ทั้งหมด' && u.type !== filter) return false;
-    if (q) {
-      const s = q.toLowerCase();
-      if (!(u.name?.toLowerCase().includes(s) || u.code?.toLowerCase().includes(s))) return false;
-    }
+    // Match across code / Thai name / English name / aliases with
+    // normalization (so "คิว", "ลบ.ม.", "m^3" all find ลูกบาศก์เมตร).
+    if (q && !unitMatches(u, q)) return false;
     return true;
   });
 
