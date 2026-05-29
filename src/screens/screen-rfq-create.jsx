@@ -20,16 +20,23 @@ import { UnitPicker } from '../lib/settings-shared';
 */
 
 // Next running RFQ number for the current year: RFQ-YYYY-####.
-// Scans existing RFQ numbers for the highest #### in this year and adds 1.
+// Finds the first FREE 0001-style slot (so legacy random suffixes from the
+// old generator don't push every new number into the thousands), while
+// still guaranteeing the result doesn't collide with an existing number.
 function nextRfqNo(existing) {
   const year = new Date().getFullYear();
-  const re = new RegExp(`^RFQ-${year}-(\\d{4})$`);
-  let max = 0;
+  const prefix = `RFQ-${year}-`;
+  const used = new Set();
   for (const r of existing || []) {
-    const m = re.exec(String(r?.no || '').trim());
-    if (m) max = Math.max(max, parseInt(m[1], 10));
+    const no = String(r?.no || '').trim();
+    if (no.startsWith(prefix)) {
+      const n = parseInt(no.slice(prefix.length), 10);
+      if (!Number.isNaN(n)) used.add(n);
+    }
   }
-  return `RFQ-${year}-${String(max + 1).padStart(4, '0')}`;
+  let n = 1;
+  while (used.has(n)) n++;
+  return `${prefix}${String(n).padStart(4, '0')}`;
 }
 
 function blankRow() {
@@ -68,6 +75,12 @@ export async function downloadRfqExcel({ rfqNo, supplier, project, title, due, c
   const ws = wb.addWorksheet('RFQ', {
     properties: { defaultRowHeight: 18 },
     views: [{ showGridLines: false }],
+    pageSetup: {
+      paperSize: 9,            // A4
+      orientation: 'portrait',
+      fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+      margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
+    },
   });
 
   const INK = 'FF15130E', SUB = 'FF6B6357', LINE = 'FFD6CFBC';
@@ -203,8 +216,48 @@ export async function downloadRfqExcel({ rfqNo, supplier, project, title, due, c
   setTotal(grandRow, 'รวมทั้งสิ้น (Grand Total)',
     `H${subtotalRow}+H${overheadRow}+H${vatRow}`, { bold: true, light: true, fill: HEADBG });
 
+  // ---- Supplier-fill conditions (5) ----
+  // Section header
+  let crow = grandRow + 2;
+  ws.mergeCells(`A${crow}:H${crow}`);
+  const ch = ws.getCell(`A${crow}`);
+  ch.value = 'เงื่อนไขในใบเสนอราคา (Supplier กรอก)';
+  ch.font = { size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  ch.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADBG } };
+  ch.alignment = { vertical: 'middle' };
+  ws.getRow(crow).height = 22;
+  crow++;
+
+  const conditions = [
+    ['1. เงื่อนไขการชำระเงิน', 'เครดิตเทอม / ช่องทาง / งวด'],
+    ['2. เงื่อนไขการจัดส่ง',   'ค่าขนส่ง / จุดส่งมอบ'],
+    ['3. เงื่อนไขการยืนราคา',  'จำนวนวันที่ราคามีผล'],
+    ['4. เงื่อนไขการรับประกัน','ระยะเวลา / ขอบเขต / ข้อยกเว้น'],
+    ['5. Lead Time ในการสั่ง', 'จำนวนวันหลังออก PO ถึงส่งมอบ'],
+  ];
+  for (const [label, hint] of conditions) {
+    // Label cell (A:B) + a wide yellow fill-in box (C:H)
+    ws.mergeCells(`A${crow}:B${crow}`);
+    const lc = ws.getCell(`A${crow}`);
+    lc.value = label;
+    lc.font = { size: 10, bold: true, color: { argb: INK } };
+    lc.alignment = { vertical: 'middle', wrapText: true };
+    lc.border = border;
+    ws.mergeCells(`C${crow}:H${crow}`);
+    const fc = ws.getCell(`C${crow}`);
+    fc.value = '';
+    fc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: YELLOW } };
+    fc.alignment = { vertical: 'middle' };
+    fc.border = border;
+    // a faint hint in the box
+    fc.value = `(${hint})`;
+    fc.font = { size: 9, italic: true, color: { argb: SUB } };
+    ws.getRow(crow).height = 26;
+    crow++;
+  }
+
   // ---- Notes ----
-  let nrow = grandRow + 2;
+  let nrow = crow + 1;
   if (overheadHint) {
     ws.getCell(`A${nrow}`).value = `หมายเหตุ Overhead: ${overheadHint}`;
     ws.getCell(`A${nrow}`).font = { size: 9.5, italic: true, color: { argb: SUB } };
