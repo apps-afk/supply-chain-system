@@ -45,14 +45,20 @@ export function SettingsModal({ title, eyebrow, onClose, onSave, children, width
           <h3 className="h-section">{title}</h3>
         </div>
         <div style={{ padding: 24, overflowY: 'auto' }}>{children}</div>
-        <div style={{
-          padding: '14px 24px', borderTop: '1px solid var(--rule)',
-          display: 'flex', justifyContent: 'flex-end', gap: 8,
-          background: 'var(--surface-2)',
-        }}>
-          <button className="btn ghost" onClick={onClose}>ยกเลิก</button>
-          <button className="btn primary" onClick={onSave || onClose}>{Icons.check} บันทึก</button>
-        </div>
+        {/* Only render the built-in footer when the caller delegates saving
+            via onSave. Modals that render their own action row inside
+            children (most of them) leave onSave undefined to avoid a
+            duplicate, stacked footer. */}
+        {onSave && (
+          <div style={{
+            padding: '14px 24px', borderTop: '1px solid var(--rule)',
+            display: 'flex', justifyContent: 'flex-end', gap: 8,
+            background: 'var(--surface-2)',
+          }}>
+            <button className="btn ghost" onClick={onClose}>ยกเลิก</button>
+            <button className="btn primary" onClick={onSave}>{Icons.check} บันทึก</button>
+          </div>
+        )}
       </div>
     </div>
   );
