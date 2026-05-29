@@ -268,6 +268,20 @@ create unique index if not exists material_sub_unique on material_sub_categories
 -- Per-sub counters keep item codes unambiguous across the catalog.
 alter table material_sub_categories add column if not exists short_code text default '';
 
+-- ============================================================
+-- Subcontracts: 2-level taxonomy (ประเภท → ชิ้นงานจ้าง)
+-- ============================================================
+-- Master table for the top-level category. The `subcontracts` rows keep
+-- their denormalized `category` string (Level 1 name) for backward compat
+-- and bulk upload; `name` remains the leaf item (Level 2).
+create table if not exists subcontract_categories (
+  id          text primary key,
+  name        text unique not null,
+  notes       text default '',
+  active      boolean default true,
+  created_at  timestamptz default now()
+);
+
 create table if not exists comparisons (
   id          text  primary key,
   no          text  unique not null,
