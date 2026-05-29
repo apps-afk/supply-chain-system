@@ -181,13 +181,20 @@ export async function POST(request) {
       attachment: attachmentRow,
     });
   } catch (e) {
-    // Log everything server-side, return a generic message + the body-size
-    // hint when relevant. Previously the inner Drive error string (folder
-    // IDs, OAuth scopes, service account email) was leaked to the client.
+    // Log full stack server-side. Surface the Drive API's own reason to the
+    // client too (it's a diagnostic message like "Insufficient permission" /
+    // "rate limit" — not a credential) so failures are actionable instead of
+    // a silent "ลองอีกครั้ง".
     console.error('upload failed:', e?.stack || e);
+    const inner = e?.cause?.response?.data?.error?.message
+              || e?.cause?.errors?.[0]?.message
+              || e?.response?.data?.error?.message
+              || e?.message
+              || null;
     return NextResponse.json(
       {
-        error: 'อัปโหลดไม่สำเร็จ — กรุณาลองอีกครั้งหรือติดต่อผู้ดูแลระบบ',
+        error: 'อัปโหลดไม่สำเร็จ',
+        detail: inner,
         hint: file && file.size > 4.4 * 1024 * 1024
           ? 'ไฟล์อาจใหญ่เกินขีดจำกัดของ Vercel Hobby plan (4.5MB) — ลองไฟล์เล็กกว่านี้ หรืออัปเกรด plan'
           : undefined,

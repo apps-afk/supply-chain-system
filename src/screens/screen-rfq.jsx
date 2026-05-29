@@ -250,6 +250,7 @@ export function ScreenRFQConfirm({ go }) {
   const [uploadErr,  setUploadErr]  = useState('');
   const [uploadOk,   setUploadOk]   = useState(null); // attachment record
   const [dlBusy,     setDlBusy]     = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -302,7 +303,10 @@ export function ScreenRFQConfirm({ go }) {
     try {
       const r = await fetch('/api/upload', { method:'POST', body: fd });
       const d = await r.json();
-      if (!r.ok) { setUploadErr(d.error || 'อัปโหลดไม่สำเร็จ'); setUploading(false); return; }
+      if (!r.ok) {
+        setUploadErr([d.error, d.detail, d.hint].filter(Boolean).join(' — ') || 'อัปโหลดไม่สำเร็จ');
+        setUploading(false); return;
+      }
       // bump status to 'received'
       try {
         await fetch('/api/rfqs', {
@@ -463,28 +467,37 @@ export function ScreenRFQConfirm({ go }) {
         )}
       </div>
 
-      {/* Preview of the RFQ document that gets exported to Excel */}
+      {/* Preview of the RFQ document that gets exported to Excel (collapsible) */}
       {parsed && Array.isArray(parsed.items) && parsed.items.length > 0 && (
         <div style={{ marginBottom: 24 }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-            <h3 className="h-section">ตัวอย่างเอกสาร RFQ (ก่อน Export)</h3>
+            <button onClick={() => setPreviewOpen(o => !o)}
+              style={{ display:'inline-flex', alignItems:'center', gap:8, background:'none', border:0, padding:0, cursor:'pointer' }}>
+              <span style={{ display:'inline-flex', transform: previewOpen ? 'rotate(0deg)' : 'rotate(-90deg)', transition:'transform 0.15s', color:'var(--ink-3)' }}>
+                {Icons.chevronD}
+              </span>
+              <h3 className="h-section" style={{ margin:0 }}>ตัวอย่างเอกสาร RFQ (ก่อน Export)</h3>
+              <span style={{ fontSize:12, color:'var(--ink-3)' }}>· {parsed.items.length} รายการ</span>
+            </button>
             <button className="btn" onClick={downloadExcel} disabled={dlBusy || !parsed}>
               {Icons.download} {dlBusy ? 'กำลังสร้าง…' : 'ดาวน์โหลด Excel'}
             </button>
           </div>
-          <ExcelDocPreview
-            rfqNo={rfq?.no}
-            supplier={{ name: parsed.supplier_name || '' }}
-            project={projects.find(p => p.id === rfq?.project_id) || null}
-            items={parsed.items}
-            catalog={{ itemByCode: new Map((parsed.items || []).map(it => [it.itemCode, { name: it.name, spec: '' }])) }}
-            approvalRoles={[]}
-            due={rfq?.due_date}
-            title={rfq?.title}
-            overheadHint={parsed.overheadHint || ''}
-            vatPolicy={parsed.vatPolicy || 'supplier'}
-            notes={parsed.memo || ''}
-          />
+          {previewOpen && (
+            <ExcelDocPreview
+              rfqNo={rfq?.no}
+              supplier={{ name: parsed.supplier_name || '' }}
+              project={projects.find(p => p.id === rfq?.project_id) || null}
+              items={parsed.items}
+              catalog={{ itemByCode: new Map((parsed.items || []).map(it => [it.itemCode, { name: it.name, spec: '' }])) }}
+              approvalRoles={[]}
+              due={rfq?.due_date}
+              title={rfq?.title}
+              overheadHint={parsed.overheadHint || ''}
+              vatPolicy={parsed.vatPolicy || 'supplier'}
+              notes={parsed.memo || ''}
+            />
+          )}
         </div>
       )}
 
