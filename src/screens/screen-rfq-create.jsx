@@ -42,6 +42,90 @@ function itemByCode(catalog, code) {
   return catalog?.itemByCode?.get(code) || null;
 }
 
+/* =================== Excel generation ===================
+   Builds a real .xlsx with live formulas so the Supplier only fills the
+   yellow cells (Description, ราคา/หน่วย, Overhead %, VAT %) and every
+   total recalculates automatically:
+     รวม (per line)  = จำนวน × ราคา/หน่วย
+     Subtotal        = SUM(รวม)
+     Overhead amount = Subtotal × Overhead%
+     VAT amount      = (Subtotal + Overhead) × VAT%
+     รวมทั้งสิ้น     = Subtotal + Overhead + VAT
+*/
+async function downloadRfqExcel({ rfqNo, supplier, project, title, due, items, overheadHint, notes }) {
+  const XLSX = await import('xlsx');
+  const supName = supplier?.name || '';
+  const aoa = [];
+
+  aoa.push(['ใบขอให้เสนอราคา (Request for Quotation)']);
+  aoa.push(['เลขที่', rfqNo, '', '', 'วันที่ออก', new Date().toISOString().slice(0,10)]);
+  aoa.push(['ถึง (Supplier)', supName, '', '', 'ครบกำหนดเสนอราคา', due || '']);
+  aoa.push(['ผู้ติดต่อ', supplier?.contact_name || '', '', '', 'อีเมล', supplier?.email || '']);
+  aoa.push(['โครงการ', project?.name || '', '', '', 'รหัสโครงการ', project?.code || '']);
+  aoa.push(['หัวข้อ', title || '']);
+  aoa.push([]); // spacer (row 7)
+
+  // Header row (row 8, 1-indexed)
+  const headerRowIdx = aoa.length; // 0-based index of header within aoa
+  aoa.push(['#', 'รหัส', 'รายการ / Spec', 'Description (Supplier กรอก)', 'จำนวน', 'หน่วย', 'ราคา/หน่วย (Supplier กรอก)', 'รวม']);
+
+  const firstItemRow = headerRowIdx + 2; // 1-indexed Excel row of first item
+  items.forEach((it, i) => {
+    aoa.push([
+      i + 1,
+      it.code || '',
+      it.spec ? `${it.name} — ${it.spec}` : (it.name || ''),
+      '',                       // Description — supplier
+      Number(it.qty) || 0,      // E
+      it.unit || '',            // F
+      '',                       // G ราคา/หน่วย — supplier
+      '',                       // H รวม — formula set below
+    ]);
+  });
+  const lastItemRow = firstItemRow + items.length - 1;
+
+  // Totals block
+  const subtotalRow = lastItemRow + 1;
+  const overheadRow = subtotalRow + 1;
+  const vatRow      = overheadRow + 1;
+  const grandRow    = vatRow + 1;
+
+  aoa.push(['', '', '', '', '', '', 'มูลค่ารวมรายการ (Subtotal)', '']);
+  aoa.push(['', '', '', '', '', 'กรอก %', 'Overhead', '']);
+  aoa.push(['', '', '', '', '', 'กรอก %', 'VAT', '']);
+  aoa.push(['', '', '', '', '', '', 'รวมทั้งสิ้น (Grand Total)', '']);
+  if (overheadHint) aoa.push([]);
+  if (overheadHint) aoa.push(['หมายเหตุ Overhead', overheadHint]);
+  if (notes)        aoa.push(['หมายเหตุเพิ่มเติม', notes]);
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  // Per-line total formulas: H = E * G
+  for (let r = firstItemRow; r <= lastItemRow; r++) {
+    ws[`H${r}`] = { t: 'n', f: `E${r}*G${r}` };
+  }
+  // Subtotal
+  ws[`H${subtotalRow}`] = { t: 'n', f: items.length ? `SUM(H${firstItemRow}:H${lastItemRow})` : '0' };
+  // Overhead: F col holds the % the supplier types; H = subtotal * F/100
+  ws[`F${overheadRow}`] = { t: 'n', v: 0 };
+  ws[`H${overheadRow}`] = { t: 'n', f: `H${subtotalRow}*F${overheadRow}/100` };
+  // VAT: F col holds % ; H = (subtotal + overhead) * F/100
+  ws[`F${vatRow}`] = { t: 'n', v: 7 };
+  ws[`H${vatRow}`] = { t: 'n', f: `(H${subtotalRow}+H${overheadRow})*F${vatRow}/100` };
+  // Grand total
+  ws[`H${grandRow}`] = { t: 'n', f: `H${subtotalRow}+H${overheadRow}+H${vatRow}` };
+
+  ws['!cols'] = [
+    { wch: 5 }, { wch: 14 }, { wch: 34 }, { wch: 26 },
+    { wch: 8 }, { wch: 10 }, { wch: 18 }, { wch: 14 },
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'RFQ');
+  const safeName = `${rfqNo}_${supName.replace(/\s+/g, '_')}`.replace(/[\/\\?%*:|"<>]/g, '_');
+  XLSX.writeFile(wb, `${safeName}.xlsx`);
+}
+
 /* =================== Main screen =================== */
 
 export function ScreenRFQCreate({ go }) {
@@ -570,6 +654,23 @@ export function ScreenRFQCreate({ go }) {
 
 function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, catalog, approvalRoles, due, overheadHint, vatPolicy, notes }) {
   const projectObj = projects.find(p => p.id === project);
+  const [dlBusy, setDlBusy] = useState(false);
+  const [dlErr, setDlErr]   = useState('');
+
+  async function handleDownload() {
+    setDlErr(''); setDlBusy(true);
+    try {
+      const rows = items.map(it => {
+        const m = itemByCode(catalog, it.itemCode) || {};
+        return { code: it.itemCode, name: m.name || '', spec: m.spec || '', qty: it.qty, unit: it.unit };
+      });
+      await downloadRfqExcel({ rfqNo, supplier, project: projectObj, title, due, items: rows, overheadHint, notes });
+    } catch (e) {
+      setDlErr('สร้างไฟล์ Excel ไม่สำเร็จ: ' + (e?.message || ''));
+    }
+    setDlBusy(false);
+  }
+
   return (
     <div className="page">
       <button className="btn ghost sm" onClick={() => go('rfq')} style={{ marginBottom:20, marginLeft:-8 }}>
@@ -596,10 +697,14 @@ function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, c
           </p>
 
           <div style={{ display:'flex', gap:8, marginTop:24, flexWrap:'wrap' }}>
-            <button className="btn primary">{Icons.download} ดาวน์โหลด Excel</button>
-            <button className="btn">{Icons.external} ส่งอีเมลให้ Supplier</button>
+            <button className="btn primary" onClick={handleDownload} disabled={dlBusy}>
+              {Icons.download} {dlBusy ? 'กำลังสร้าง…' : 'ดาวน์โหลด Excel'}
+            </button>
             <button className="btn ghost" onClick={() => go('rfq')}>ดู RFQ ทั้งหมด</button>
           </div>
+          {dlErr && (
+            <div style={{ marginTop:12, padding:'8px 12px', background:'#FDE8E4', color:'#8B2A1A', borderRadius:6, fontSize:12.5 }}>{dlErr}</div>
+          )}
 
           <div className="card" style={{ marginTop:32, background:'var(--surface-2)' }}>
             <div className="eyebrow" style={{ marginBottom:10 }}>ขั้นตอนถัดไป</div>
