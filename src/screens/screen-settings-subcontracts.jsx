@@ -506,15 +506,18 @@ function SubcontractModal({ item, units, cats, existingCodes, onClose, onSaved }
             {activeCats.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
         </SettingsField>
-        <SettingsField label="ชื่องานจ้าง (Item)" required hint="Level 2 — รายการสุดท้าย">
-          <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น จ้างออกแบบงานวิศวกรรม" style={settingsInputStyle} />
-        </SettingsField>
+        <div style={{ gridColumn:'1 / -1' }}>
+          <SettingsField label="ชื่องานจ้าง (Item)" required hint="Level 2 — รายการสุดท้าย">
+            <input value={form.name} onChange={e=>set('name', e.target.value)} placeholder="เช่น จ้างออกแบบงานวิศวกรรม" style={settingsInputStyle} />
+          </SettingsField>
+        </div>
         <SettingsField label="หน่วย">
           <select value={form.unit_id} onChange={e=>set('unit_id', e.target.value)} style={settingsInputStyle}>
             <option value="">— เลือกหน่วย —</option>
             {units.map(u => <option key={u.id} value={u.id}>{u.name} ({u.code})</option>)}
           </select>
         </SettingsField>
+        <div />
         <div style={{ gridColumn:'1 / -1' }}>
           <SettingsField label="หมายเหตุ">
             <textarea value={form.notes} onChange={e=>set('notes', e.target.value)}
