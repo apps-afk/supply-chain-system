@@ -532,7 +532,7 @@ function MaterialModal({ item, units, mainCats, subCats, existingCodes, go, onCl
       {err && (
         <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{err}</div>
       )}
-      <div style={{ display:'grid', gridTemplateColumns:'140px 1fr', gap:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
         <SettingsField label="รหัส" hint={isEdit ? 'แก้ไม่ได้' : 'ระบบสร้างให้อัตโนมัติ'}>
           <input value={form.code} readOnly disabled
             style={{ ...settingsInputStyle, fontFamily:'var(--font-mono)', background:'var(--paper-2)', color:'var(--ink-3)' }} />
@@ -554,16 +554,20 @@ function MaterialModal({ item, units, mainCats, subCats, existingCodes, go, onCl
             {activeSubs.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
           </select>
         </SettingsField>
-        <SettingsField label="ชื่อวัสดุ (Item)" required hint="Level 3 — รายการสุดท้าย">
-          <input value={form.name} onChange={e=>set('name', e.target.value)}
-            placeholder="เช่น เสาเข็มตัวไอ I-22" style={settingsInputStyle} />
-        </SettingsField>
         <SettingsField label="หน่วย">
           <UnitPicker units={units} value={form.unit_id} onChange={(id)=>set('unit_id', id)} />
         </SettingsField>
-        <SettingsField label="Spec">
-          <input value={form.spec} onChange={e=>set('spec', e.target.value)} placeholder="คุณลักษณะ / รุ่น / Grade" style={settingsInputStyle} />
-        </SettingsField>
+        <div style={{ gridColumn:'1 / -1' }}>
+          <SettingsField label="ชื่อวัสดุ (Item)" required hint="Level 3 — รายการสุดท้าย">
+            <input value={form.name} onChange={e=>set('name', e.target.value)}
+              placeholder="เช่น เสาเข็มตัวไอ I-22" style={settingsInputStyle} />
+          </SettingsField>
+        </div>
+        <div style={{ gridColumn:'1 / -1' }}>
+          <SettingsField label="Spec">
+            <input value={form.spec} onChange={e=>set('spec', e.target.value)} placeholder="คุณลักษณะ / รุ่น / Grade" style={settingsInputStyle} />
+          </SettingsField>
+        </div>
         <div style={{ gridColumn:'1 / -1' }}>
           <SettingsField label="หมายเหตุ">
             <textarea value={form.notes} onChange={e=>set('notes', e.target.value)}
