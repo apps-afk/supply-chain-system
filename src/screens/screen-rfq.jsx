@@ -2,6 +2,38 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, Av, Spark, Delta, money } from '../lib/shell';
 import { downloadRfqExcel, ExcelDocPreview } from './screen-rfq-create';
+import { findUnit } from '../lib/settings-shared';
+
+// Read the supplier's filled-in quote workbook and pull out the unit price
+// they entered per line (matched by the item code in column B → price in
+// column G), plus the Overhead/VAT % from the totals rows. Mirrors the
+// layout produced by downloadRfqExcel.
+async function parseQuoteExcel(file, itemCodes) {
+  const _xl = await import('exceljs');
+  const ExcelJS = _xl.default || _xl;
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  const ws = wb.worksheets[0];
+  const codeSet = new Set(itemCodes);
+  const priceByCode = {};
+  let overheadPct = null, vatPct = null;
+  const num = (v) => {
+    if (v == null) return NaN;
+    if (typeof v === 'object') return Number(v.result ?? v.value ?? NaN);
+    return Number(String(v).replace(/[^\d.-]/g, ''));
+  };
+  ws?.eachRow((row) => {
+    const code  = String(row.getCell(2).value ?? '').trim();   // col B
+    if (codeSet.has(code)) {
+      const p = num(row.getCell(7).value);                     // col G price/unit
+      if (!Number.isNaN(p)) priceByCode[code] = p;
+    }
+    const labelA = String(row.getCell(1).value ?? '');
+    if (/overhead/i.test(labelA)) { const v = num(row.getCell(7).value); if (!Number.isNaN(v)) overheadPct = v; }
+    else if (/vat/i.test(labelA)) { const v = num(row.getCell(7).value); if (!Number.isNaN(v)) vatPct = v; }
+  });
+  return { priceByCode, overheadPct, vatPct };
+}
 
 /*
   RFQ — list + the post-quote "confirm to Price DB" screen.
@@ -251,16 +283,43 @@ export function ScreenRFQConfirm({ go }) {
   const [uploadOk,   setUploadOk]   = useState(null); // attachment record
   const [dlBusy,     setDlBusy]     = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  // Master data needed to turn parsed quote rows into price points
+  const [matByCode,  setMatByCode]  = useState({});   // code → { id, unit_id, name }
+  const [units,      setUnits]      = useState([]);
+  const [lastPrice,  setLastPrice]  = useState({});   // material_id → latest price
+  const [readBusy,   setReadBusy]   = useState(false);
+  const [savePxBusy, setSavePxBusy] = useState(false);
+  const [savePxMsg,  setSavePxMsg]  = useState('');
+  const [pricesSaved, setPricesSaved] = useState(false);
 
   useEffect(() => {
     (async () => {
       setLoading(true); setErr('');
       try {
         const stashed = (typeof window !== 'undefined') ? window.localStorage.getItem('rfq.currentId') : null;
-        const [r, rP] = await Promise.all([fetch('/api/rfqs'), fetch('/api/projects')]);
+        const [r, rP, rM, rU, rPx] = await Promise.all([
+          fetch('/api/rfqs'), fetch('/api/projects'),
+          fetch('/api/materials'), fetch('/api/units'), fetch('/api/prices'),
+        ]);
         const d = await r.json();
         if (!r.ok) { setErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
         if (rP.ok) { try { setProjects((await rP.json()).items || []); } catch {} }
+        if (rM.ok) {
+          try {
+            const mats = (await rM.json()).items || [];
+            setMatByCode(Object.fromEntries(mats.map(m => [m.code, { id: m.id, unit_id: m.unit_id, name: m.name }])));
+          } catch {}
+        }
+        if (rU.ok) { try { setUnits((await rU.json()).items || []); } catch {} }
+        if (rPx.ok) {
+          try {
+            // Latest price per material (list is ordered captured_at desc)
+            const pts = (await rPx.json()).items || [];
+            const latest = {};
+            for (const p of pts) { if (!(p.material_id in latest)) latest[p.material_id] = Number(p.price); }
+            setLastPrice(latest);
+          } catch {}
+        }
         const list = d.items || [];
         const picked = (stashed && list.find(x => x.id === stashed)) || list[0] || null;
         setRfq(picked);
@@ -316,10 +375,74 @@ export function ScreenRFQConfirm({ go }) {
         });
       } catch {}
       setUploadOk(d.file);
+      // Read the just-uploaded workbook and pull the supplier's prices in.
+      await readQuoteIntoItems(quoteFile);
     } catch {
       setUploadErr('เครือข่ายขัดข้อง');
     }
     setUploading(false);
+  }
+
+  // Parse a quote file and merge prices into the items table for review.
+  async function readQuoteIntoItems(file) {
+    if (!file) return;
+    setReadBusy(true);
+    try {
+      const codes = items.map(it => it.itemCode).filter(Boolean);
+      const { priceByCode } = await parseQuoteExcel(file, codes);
+      setItems(its => its.map(it => {
+        const px = priceByCode[it.itemCode];
+        const mat = matByCode[it.itemCode];
+        const oldP = mat && lastPrice[mat.id] != null ? lastPrice[mat.id] : (it.oldP ?? null);
+        if (px == null) return { ...it, oldP };
+        return { ...it, newP: px, oldP, save: true };
+      }));
+    } catch (e) {
+      setUploadErr('อ่านไฟล์ Excel ไม่สำเร็จ: ' + (e?.message || ''));
+    }
+    setReadBusy(false);
+  }
+
+  // Save the reviewed prices into the Price DB (Material items only — the
+  // price_points table links to materials).
+  async function savePrices() {
+    if (!rfq) return;
+    const rows = items.filter(it => it.save && Number(it.newP) > 0 && it.source === 'Material' && matByCode[it.itemCode]);
+    if (rows.length === 0) {
+      setSavePxMsg('ไม่มีรายการวัสดุที่มีราคา (>0) ให้บันทึก · งานจ้างเหมายังไม่รองรับ Price DB');
+      return;
+    }
+    setSavePxBusy(true); setSavePxMsg('');
+    let ok = 0; const errs = [];
+    for (const it of rows) {
+      const mat = matByCode[it.itemCode];
+      const unit = findUnit(units, it.unit);
+      try {
+        const r = await fetch('/api/prices', {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            material_id: mat.id,
+            supplier_id: parsed?.supplier_id || null,
+            price: Number(it.newP),
+            unit_id: unit?.id || mat.unit_id || null,
+            source: 'RFQ',
+            source_id: rfq.no || '',
+          }),
+        });
+        if (r.ok) ok++; else { const d = await r.json().catch(()=>({})); errs.push(`${it.name}: ${d.error || 'ไม่สำเร็จ'}`); }
+      } catch (e) { errs.push(`${it.name}: ${e.message}`); }
+    }
+    // Close the RFQ once prices are captured
+    if (ok > 0) {
+      try {
+        await fetch('/api/rfqs', { method:'PATCH', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ id: rfq.id, status:'closed' }) });
+        setRfq(rf => ({ ...rf, status: 'closed' }));
+      } catch {}
+      setPricesSaved(true);
+    }
+    setSavePxMsg(`บันทึกเข้า Price DB สำเร็จ ${ok}/${rows.length} รายการ${errs.length ? ' · ' + errs.slice(0,3).join(' · ') : ''}`);
+    setSavePxBusy(false);
   }
 
   const toggle = (id) => setItems(its => its.map(it => it.id === id ? { ...it, save: !it.save } : it));
@@ -433,11 +556,18 @@ export function ScreenRFQConfirm({ go }) {
           }}>
             <span style={{ color:'var(--moss)' }}>{Icons.check}</span>
             <div style={{ flex:1 }}>
-              <div style={{ fontSize:13, fontWeight:500, color:'#2F4A1A' }}>อัปโหลดสำเร็จ</div>
+              <div style={{ fontSize:13, fontWeight:500, color:'#2F4A1A' }}>
+                อัปโหลดสำเร็จ {readBusy ? '· กำลังอ่านราคา…' : '· อ่านราคาจากไฟล์แล้ว'}
+              </div>
               <div style={{ fontSize:11.5, color:'#2F4A1A', marginTop:2 }}>
-                {uploadOk.name} · เก็บเข้า Google Drive แล้ว
+                {uploadOk.name} · เก็บเข้า Google Drive แล้ว · ตรวจสอบราคาด้านล่างก่อนบันทึกเข้า Price DB
               </div>
             </div>
+            {quoteFile && (
+              <button className="btn sm" onClick={() => readQuoteIntoItems(quoteFile)} disabled={readBusy}>
+                {readBusy ? 'อ่าน…' : 'อ่านไฟล์อีกครั้ง'}
+              </button>
+            )}
             {uploadOk.viewLink && (
               <a href={uploadOk.viewLink} target="_blank" rel="noreferrer" className="btn sm">
                 {Icons.external} เปิดดู
@@ -625,11 +755,19 @@ export function ScreenRFQConfirm({ go }) {
             <div style={{ fontFamily:'var(--font-serif)', fontSize:24, lineHeight:1 }}>{money(items.filter(i=>i.save).reduce((s,i)=>s+(i.newP||0)*(i.qty||0),0))}</div>
           </div>
         </div>
+        {savePxMsg && (
+          <div style={{
+            padding:'8px 12px', borderRadius:6, fontSize:12, alignSelf:'center',
+            background: pricesSaved ? 'var(--moss-soft)' : '#FDE8E4',
+            color: pricesSaved ? '#2F4A1A' : '#8B2A1A', maxWidth:360,
+          }}>{savePxMsg}</div>
+        )}
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-          <button className="btn ghost" onClick={() => go('rfq')}>ยกเลิก</button>
-          <button className="btn">บันทึก RFQ แต่ไม่เข้า Price DB</button>
-          <button className="btn primary" style={{ padding:'10px 20px' }} disabled={items.length === 0}>
-            {Icons.check} ยืนยันบันทึก Price DB
+          <button className="btn ghost" onClick={() => go('rfq')}>กลับ</button>
+          <button className="btn primary" style={{ padding:'10px 20px' }}
+            disabled={items.length === 0 || savePxBusy || pricesSaved}
+            onClick={savePrices}>
+            {Icons.check} {savePxBusy ? 'กำลังบันทึก…' : (pricesSaved ? 'บันทึกแล้ว' : 'ยืนยันบันทึก Price DB')}
           </button>
         </div>
       </div>
