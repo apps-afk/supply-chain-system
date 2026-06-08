@@ -17,22 +17,46 @@ async function parseQuoteExcel(file, itemCodes) {
   const codeSet = new Set(itemCodes);
   const priceByCode = {};
   let overheadPct = null, vatPct = null;
+  // ExcelJS cell.value can be: number, string, Date, {formula,result},
+  // {richText:[...]}, {hyperlink,text}, or {error}. Pull a numeric value
+  // out of any of these.
   const num = (v) => {
     if (v == null) return NaN;
-    if (typeof v === 'object') return Number(v.result ?? v.value ?? NaN);
-    return Number(String(v).replace(/[^\d.-]/g, ''));
+    if (typeof v === 'number') return v;
+    if (v instanceof Date) return NaN;
+    if (typeof v === 'object') {
+      if (v.error) return NaN;
+      if (Array.isArray(v.richText)) return num(v.richText.map(t => t.text).join(''));
+      if (v.result !== undefined) return num(v.result);
+      if (v.text !== undefined) return num(v.text);     // hyperlink
+      if (v.value !== undefined) return num(v.value);
+      return NaN;
+    }
+    const n = Number(String(v).replace(/[^\d.\-]/g, ''));
+    return n;
   };
+  // A code cell may also be richText/string — read its plain text.
+  const txt = (v) => {
+    if (v == null) return '';
+    if (typeof v === 'object') {
+      if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join('');
+      if (v.text !== undefined) return String(v.text);
+      if (v.result !== undefined) return String(v.result);
+    }
+    return String(v);
+  };
+  let matched = 0;
   ws?.eachRow((row) => {
-    const code  = String(row.getCell(2).value ?? '').trim();   // col B
+    const code  = txt(row.getCell(2).value).trim();            // col B
     if (codeSet.has(code)) {
       const p = num(row.getCell(7).value);                     // col G price/unit
-      if (!Number.isNaN(p)) priceByCode[code] = p;
+      if (!Number.isNaN(p)) { priceByCode[code] = p; matched++; }
     }
-    const labelA = String(row.getCell(1).value ?? '');
+    const labelA = txt(row.getCell(1).value);
     if (/overhead/i.test(labelA)) { const v = num(row.getCell(7).value); if (!Number.isNaN(v)) overheadPct = v; }
     else if (/vat/i.test(labelA)) { const v = num(row.getCell(7).value); if (!Number.isNaN(v)) vatPct = v; }
   });
-  return { priceByCode, overheadPct, vatPct };
+  return { priceByCode, overheadPct, vatPct, matched, total: itemCodes.length };
 }
 
 /*
@@ -388,8 +412,11 @@ export function ScreenRFQConfirm({ go }) {
     if (!file) return;
     setReadBusy(true);
     try {
-      const codes = items.map(it => it.itemCode).filter(Boolean);
-      const { priceByCode } = await parseQuoteExcel(file, codes);
+      // Derive codes inside the functional updater so we never read a stale
+      // `items` closure after the table was edited.
+      let codes = [];
+      setItems(its => { codes = its.map(it => it.itemCode).filter(Boolean); return its; });
+      const { priceByCode, matched, total } = await parseQuoteExcel(file, codes);
       setItems(its => its.map(it => {
         const px = priceByCode[it.itemCode];
         const mat = matByCode[it.itemCode];
@@ -397,6 +424,11 @@ export function ScreenRFQConfirm({ go }) {
         if (px == null) return { ...it, oldP };
         return { ...it, newP: px, oldP, save: true };
       }));
+      if (matched === 0) {
+        setUploadErr(`อ่านไฟล์แล้ว แต่ไม่พบราคาที่ตรงกับรหัสรายการ (0/${total}) — ตรวจสอบว่าใช้ไฟล์ Template ของ RFQ นี้และไม่ได้แก้คอลัมน์รหัส`);
+      } else {
+        setUploadErr('');
+      }
     } catch (e) {
       setUploadErr('อ่านไฟล์ Excel ไม่สำเร็จ: ' + (e?.message || ''));
     }
@@ -407,6 +439,10 @@ export function ScreenRFQConfirm({ go }) {
   // price_points table links to materials).
   async function savePrices() {
     if (!rfq) return;
+    if (Object.keys(matByCode).length === 0) {
+      setSavePxMsg('โหลดข้อมูลวัสดุไม่สำเร็จ — รีเฟรชหน้าแล้วลองใหม่');
+      return;
+    }
     const rows = items.filter(it => it.save && Number(it.newP) > 0 && it.source === 'Material' && matByCode[it.itemCode]);
     if (rows.length === 0) {
       setSavePxMsg('ไม่มีรายการวัสดุที่มีราคา (>0) ให้บันทึก · งานจ้างเหมายังไม่รองรับ Price DB');

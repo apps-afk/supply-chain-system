@@ -462,12 +462,15 @@ export function ScreenRFQCreate({ go }) {
         name: (itemByCode(catalog, r.itemCode) || {}).name,
       })),
     };
-    try {
+    // The RFQ number is computed client-side, so two concurrent creates can
+    // pick the same slot. If the POST loses the unique-constraint race,
+    // re-fetch the list, recompute a fresh number, and retry once.
+    async function postOnce(no) {
       const r = await fetch('/api/rfqs', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
         body: JSON.stringify({
-          no:         rfqNo,
+          no,
           project_id: project || null,
           title:      title.trim(),
           status:     'draft',
@@ -475,9 +478,22 @@ export function ScreenRFQCreate({ go }) {
           notes:      JSON.stringify(notesPayload),
         }),
       });
-      const d = await r.json();
-      if (!r.ok) { setSaveErr(d.error || 'บันทึกไม่สำเร็จ'); setSaving(false); return; }
-      try { window.localStorage.setItem('rfq.currentId', d.item.id); } catch {}
+      const d = await r.json().catch(() => ({}));
+      return { ok: r.ok, d };
+    }
+    try {
+      let attempt = await postOnce(rfqNo);
+      if (!attempt.ok && /duplicate|unique|already/i.test(attempt.d.error || '')) {
+        try {
+          const lr = await fetch('/api/rfqs');
+          const ld = lr.ok ? await lr.json() : { items: [] };
+          const fresh = nextRfqNo(ld.items || []);
+          setRfqNo(fresh);
+          attempt = await postOnce(fresh);
+        } catch { /* fall through to error below */ }
+      }
+      if (!attempt.ok) { setSaveErr(attempt.d.error || 'บันทึกไม่สำเร็จ'); setSaving(false); return; }
+      try { window.localStorage.setItem('rfq.currentId', attempt.d.item.id); } catch {}
       setSaving(false);
       setGenerated(true);
     } catch {

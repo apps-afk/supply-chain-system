@@ -4,6 +4,8 @@ const h = createCrudRoutes('material_sub_categories', {
   fields: ['main_id', 'name', 'notes', 'active'],
   orderBy: 'name',
   idPrefix: 'msc',
+  // Master data is maintained by procurement users, not only admins.
+  writeRole: 'session',
 });
 
 export const GET    = h.list;

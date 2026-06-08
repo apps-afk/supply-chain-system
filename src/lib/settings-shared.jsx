@@ -46,17 +46,16 @@ export function unitMatches(u, query) {
 }
 
 // Exact-ish lookup — for resolving a free-text cell (bulk upload) to a unit.
-// Prefers an exact token equality; falls back to substring containment.
+// Requires an EXACT token match so we never silently assign the wrong unit
+// (e.g. "m" must not partial-match "mm"/"cm"/"m2"). The substring search is
+// only for the interactive picker (unitMatches), where a human confirms.
 export function findUnit(units, query) {
   const q = normalizeUnitToken(query);
   if (!q) return null;
-  let partial = null;
   for (const u of units || []) {
-    const tokens = unitTokens(u);
-    if (tokens.includes(q)) return u;                 // exact
-    if (!partial && tokens.some(t => t.includes(q) || q.includes(t))) partial = u;
+    if (unitTokens(u).includes(q)) return u;
   }
-  return partial;
+  return null;
 }
 
 export const settingsInputStyle = {
@@ -82,22 +81,36 @@ export const settingsInputStyle = {
 export function UnitPicker({ units = [], value, onChange, placeholder = 'เลือก / ค้นหาหน่วย…', allowClear = true }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  const [rect, setRect] = useState(null); // button viewport rect for fixed dropdown
   const ref = useRef(null);
+  const btnRef = useRef(null);
   const inputRef = useRef(null);
 
   const selected = units.find(u => u.id === value) || null;
 
+  // Position the dropdown with `position: fixed` from the button's viewport
+  // rect so it escapes any overflow:hidden/auto ancestor (modals, table
+  // cells) that would otherwise clip an absolutely-positioned panel.
+  const place = () => { if (btnRef.current) setRect(btnRef.current.getBoundingClientRect()); };
+
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    place();
+    const onDoc = (e) => {
+      if (ref.current && !ref.current.contains(e.target) && !e.target.closest?.('[data-unitpicker-panel]')) setOpen(false);
+    };
     const onEsc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    const onScroll = () => place();
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onEsc);
-    // focus the search box when opening
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
     setTimeout(() => inputRef.current?.focus(), 0);
     return () => {
       document.removeEventListener('mousedown', onDoc);
       document.removeEventListener('keydown', onEsc);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
     };
   }, [open]);
 
@@ -119,6 +132,7 @@ export function UnitPicker({ units = [], value, onChange, placeholder = 'เล�
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen(o => !o)}
         style={{
@@ -141,11 +155,12 @@ export function UnitPicker({ units = [], value, onChange, placeholder = 'เล�
         </span>
       </button>
 
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+      {open && rect && (
+        <div data-unitpicker-panel style={{
+          position: 'fixed',
+          top: rect.bottom + 4, left: rect.left, width: rect.width,
           background: 'var(--paper)', border: '1px solid var(--rule-2)',
-          borderRadius: 8, boxShadow: 'var(--sh-pop)', zIndex: 60,
+          borderRadius: 8, boxShadow: 'var(--sh-pop)', zIndex: 1000,
           maxHeight: 280, display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}>
           <div style={{ padding: 8, borderBottom: '1px solid var(--rule)' }}>
