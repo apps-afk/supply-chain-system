@@ -37,24 +37,67 @@ export function ScreenCompareCreateRFQ({ go }) {
     (async () => {
       setLoading(true); setLoadErr('');
       try {
-        const r = await fetch('/api/rfqs');
+        // RFQ rows keep their payload (supplier + items) as a JSON string in
+        // `notes` — there are no supplier_id/items_json columns. Quoted prices
+        // live in price_points (written by the RFQ-confirm save flow with
+        // source='RFQ', source_id=<rfq.no>), so join those in by material code.
+        const [r, rPx, rM] = await Promise.all([
+          fetch('/api/rfqs'), fetch('/api/prices'), fetch('/api/materials'),
+        ]);
         const d = await r.json();
-        if (!r.ok) setLoadErr(d.error || 'โหลดข้อมูลไม่สำเร็จ');
-        else {
-          // Filter received status client-side, and normalize the shape this screen expects
-          const list = (d.items || []).filter(x => x.status === 'received').map(x => ({
-            no: x.no || x.id,
-            supplierId: x.supplier_id || '',
-            supName:    x.supplier_name || x.title || x.no || '—',
-            supKind:    'company',
-            category:   x.category || x.project_id || 'ทั่วไป',
-            project:    x.project_id || '',
-            credit:     x.payment_terms || '—',
-            received:   x.received_at || x.updated_at || '',
-            items:      Array.isArray(x.items_json) ? x.items_json : [],
-          }));
-          setRfqs(list);
+        if (!r.ok) { setLoadErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
+        let pricePoints = [], materials = [];
+        if (rPx.ok) { try { pricePoints = (await rPx.json()).items || []; } catch {} }
+        if (rM.ok)  { try { materials   = (await rM.json()).items  || []; } catch {} }
+        const matIdByCode = new Map(materials.map(m => [m.code, m.id]));
+
+        // Latest price per (material_id, source_id) and per material —
+        // pricePoints come ordered captured_at desc, so first match wins.
+        const byRfq = new Map();    // `${material_id}|${source_id}` → price
+        const latest = new Map();   // material_id → price
+        for (const p of pricePoints) {
+          const k = `${p.material_id}|${p.source_id || ''}`;
+          if (!byRfq.has(k)) byRfq.set(k, Number(p.price));
+          if (!latest.has(p.material_id)) latest.set(p.material_id, Number(p.price));
         }
+
+        // Include both 'received' and 'closed' RFQs — saving prices closes
+        // the RFQ, and closed RFQs are exactly the ones with quoted prices.
+        const list = (d.items || [])
+          .filter(x => x.status === 'received' || x.status === 'closed')
+          .map(x => {
+            let parsed = null;
+            try { parsed = JSON.parse(x.notes); } catch {}
+            const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
+            const items = rawItems.map(it => {
+              const matId = matIdByCode.get(it.itemCode);
+              const price = matId != null
+                ? (byRfq.get(`${matId}|${x.no || ''}`) ?? latest.get(matId) ?? null)
+                : null;
+              return {
+                code: it.itemCode,
+                name: it.name || it.itemCode,
+                spec: '',
+                unit: it.unit || '',
+                qty:  Number(it.qty) || 0,
+                price,
+              };
+            });
+            return {
+              no: x.no || x.id,
+              // Fall back to the RFQ id (unique) so two RFQs without a
+              // supplier_id never collide under the same '' key.
+              supplierId: parsed?.supplier_id || `rfq_${x.id}`,
+              supName:    parsed?.supplier_name || x.title || x.no || '—',
+              supKind:    'company',
+              category:   x.project_id || 'ทั่วไป',
+              project:    x.project_id || '',
+              credit:     '—',
+              received:   x.created_at || '',
+              items,
+            };
+          });
+        setRfqs(list);
       } catch {
         setLoadErr('เครือข่ายขัดข้อง');
       }
@@ -102,7 +145,9 @@ export function ScreenCompareCreateRFQ({ go }) {
   const totals = useMemo(() => {
     const t = {};
     pickedRfqs.forEach(r => {
-      t[r.supplierId] = r.items.reduce((s, it) => s + it.price * it.qty, 0);
+      // Items with no recorded price contribute 0 instead of poisoning the
+      // whole total with NaN.
+      t[r.supplierId] = r.items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
     });
     return t;
   }, [pickedRfqs]);

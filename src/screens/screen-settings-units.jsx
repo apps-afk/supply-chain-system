@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { Icons } from '../lib/shell';
-import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, unitMatches } from '../lib/settings-shared';
+import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, unitMatches, normalizeUnitToken } from '../lib/settings-shared';
 
 const TYPE_OPTIONS = ['count', 'length', 'area', 'volume', 'weight', 'time', 'other'];
 const TYPE_LABEL = {
@@ -113,8 +113,10 @@ export function ScreenSettingsUnits() {
   // errors but don't surface them per-row — a final summary is enough.
   async function seedSI() {
     if (!confirm(`เพิ่มชุดหน่วยมาตรฐาน ${SI_UNITS.length} หน่วย?\nหน่วยที่มีรหัสซ้ำจะถูกข้าม (ไม่ทับของเดิม)`)) return;
-    const existingCodes = new Set(units.map(u => u.code));
-    const toAdd = SI_UNITS.filter(u => !existingCodes.has(u.code));
+    // Compare normalized codes ('KG' vs 'kg', 'M2' vs 'm²') so seeding never
+    // creates near-duplicates that the unit matcher can't disambiguate.
+    const existingCodes = new Set(units.map(u => normalizeUnitToken(u.code)));
+    const toAdd = SI_UNITS.filter(u => !existingCodes.has(normalizeUnitToken(u.code)));
     if (toAdd.length === 0) {
       alert('มีครบทุกหน่วยแล้ว — ไม่มีอะไรต้องเพิ่ม');
       return;

@@ -155,10 +155,19 @@ export function UnitPicker({ units = [], value, onChange, placeholder = 'เล�
         </span>
       </button>
 
-      {open && rect && (
+      {open && rect && (() => {
+        // Flip the panel above the button when there's not enough room
+        // below the fold (e.g. unit field near the bottom of a modal).
+        const PANEL_H = 284;
+        const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+        const flipUp = rect.bottom + PANEL_H > vh && rect.top > PANEL_H;
+        const pos = flipUp
+          ? { bottom: vh - rect.top + 4 }
+          : { top: rect.bottom + 4 };
+        return (
         <div data-unitpicker-panel style={{
           position: 'fixed',
-          top: rect.bottom + 4, left: rect.left, width: rect.width,
+          ...pos, left: rect.left, width: rect.width,
           background: 'var(--paper)', border: '1px solid var(--rule-2)',
           borderRadius: 8, boxShadow: 'var(--sh-pop)', zIndex: 1000,
           maxHeight: 280, display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -205,7 +214,8 @@ export function UnitPicker({ units = [], value, onChange, placeholder = 'เล�
             })}
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -414,63 +424,78 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
   const [progress, setProgress] = useState(null); // null | {done, total, errors}
   const [busy, setBusy] = useState(false);        // disable buttons during xlsx I/O
 
-  // Dynamic-import xlsx so the ~600KB lib doesn't hit users who never touch
-  // bulk upload. The lib is loaded once per modal open, browser-cached after.
+  // Excel column letter for a 0-based index (handles AA+ past column Z).
+  const colLetter = (i) => {
+    let s = '', n = i;
+    do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+    return s;
+  };
+
+  // Template is generated with ExcelJS — SheetJS community edition silently
+  // drops data-validation, so dropdowns never actually appeared in Excel.
+  // ExcelJS writes real validations referencing the Lookup sheet.
   async function downloadTemplate() {
     setBusy(true);
     try {
-      const XLSX = await import('xlsx');
-      const headers = columns.map(c => c.label + (c.required ? ' *' : ''));
-      const sampleLines = (sampleRow || '').split(/\r?\n/).filter(Boolean);
-      // First sample line is usually the header — skip it. Remaining lines
-      // become example data rows in the template.
-      const dataRows = sampleLines.slice(1).map(line => {
-        const cells = line.split('\t');
-        return columns.map((_, i) => cells[i] || '');
-      });
-      const aoa = [headers, ...dataRows];
-      const ws = XLSX.utils.aoa_to_sheet(aoa);
-      ws['!cols'] = columns.map(c => ({ wch: Math.max((c.label || '').length, 16) }));
-      const wb = XLSX.utils.book_new();
+      const _xl = await import('exceljs');
+      const ExcelJS = _xl.default || _xl;
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet((entity || 'Sheet1').slice(0, 28));
 
-      // Any column carrying an `options` array becomes a dropdown via a
-      // shared "Lookup" sheet. We attach Excel data-validation that
-      // references the Lookup sheet so a user can pick from a list when
-      // editing the template in Excel / Google Sheets / Numbers.
+      // Header row
+      const hr = ws.getRow(1);
+      columns.forEach((c, i) => {
+        const cell = hr.getCell(i + 1);
+        cell.value = c.label + (c.required ? ' *' : '');
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF15130E' } };
+        ws.getColumn(i + 1).width = Math.max((c.label || '').length + 4, 16);
+      });
+
+      // Sample data rows (first line of sampleRow is the header — skip it)
+      const sampleLines = (sampleRow || '').split(/\r?\n/).filter(Boolean).slice(1);
+      sampleLines.forEach((line, r) => {
+        const cells = line.split('\t');
+        columns.forEach((_, i) => { ws.getRow(r + 2).getCell(i + 1).value = cells[i] || ''; });
+      });
+
+      // Dropdown columns → Lookup sheet + real data validation
       const dropCols = columns
         .map((c, i) => ({ ...c, idx: i }))
         .filter(c => Array.isArray(c.options) && c.options.length > 0);
-
       if (dropCols.length > 0) {
-        const maxLen = Math.max(...dropCols.map(c => c.options.length));
-        const lookupAoA = [dropCols.map(c => c.label)];
-        for (let r = 0; r < maxLen; r++) {
-          lookupAoA.push(dropCols.map(c => c.options[r] || ''));
-        }
-        const wsLookup = XLSX.utils.aoa_to_sheet(lookupAoA);
-        wsLookup['!cols'] = dropCols.map(c => ({ wch: Math.max((c.label || '').length, 24) }));
-        XLSX.utils.book_append_sheet(wb, wsLookup, 'Lookup');
+        const lk = wb.addWorksheet('Lookup');
+        dropCols.forEach((c, i) => {
+          lk.getRow(1).getCell(i + 1).value = c.label;
+          lk.getRow(1).getCell(i + 1).font = { bold: true };
+          c.options.forEach((opt, r) => { lk.getRow(r + 2).getCell(i + 1).value = opt; });
+          lk.getColumn(i + 1).width = Math.max((c.label || '').length + 4, 24);
 
-        // SheetJS community supports writing the `!dataValidation` array.
-        // Reference a column on the Lookup sheet so the list is shared
-        // across all data rows and can be extended later by editing Lookup.
-        ws['!dataValidation'] = dropCols.map((c, i) => {
-          const lookupCol = String.fromCharCode(65 + i);            // A, B, …
-          const colLetter = String.fromCharCode(65 + c.idx);
-          return {
-            sqref: `${colLetter}2:${colLetter}1000`,
-            type: 'list',
-            allowBlank: !c.required,
-            formula1: `Lookup!$${lookupCol}$2:$${lookupCol}$${maxLen + 1}`,
-            showErrorMessage: true,
-            errorTitle: 'ค่าไม่ถูกต้อง',
-            error: `กรุณาเลือก ${c.label} จากชีต "Lookup"`,
-          };
+          const lkCol = colLetter(i);
+          const dataCol = colLetter(c.idx);
+          const formula = `Lookup!$${lkCol}$2:$${lkCol}$${c.options.length + 1}`;
+          for (let r = 2; r <= 1000; r++) {
+            ws.getCell(`${dataCol}${r}`).dataValidation = {
+              type: 'list', allowBlank: !c.required,
+              formulae: [formula],
+              showErrorMessage: true,
+              errorTitle: 'ค่าไม่ถูกต้อง',
+              error: `กรุณาเลือก ${c.label} จากรายการ`,
+            };
+          }
         });
       }
 
-      XLSX.utils.book_append_sheet(wb, ws, entity.slice(0, 28) || 'Sheet1');
-      XLSX.writeFile(wb, `template_${entity}.xlsx`);
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `template_${entity}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
       alert(`สร้าง Template ไม่สำเร็จ: ${e.message}`);
     }
@@ -507,30 +532,58 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
     if (lines.length === 0) return [];
     // Auto-detect separator: tab wins, then comma
     const sep = lines[0].includes('\t') ? '\t' : ',';
-    // Header detection — tolerant of:
-    //   • trailing " *" we add to required cols in the downloaded template
-    //   • surrounding whitespace
-    //   • the user reordering / renaming a column or two
-    // We count how many cells in row 1 match the expected column labels;
-    // if at least half match, we treat row 1 as a header and skip it.
+    // Quote-aware splitter — CSV cells like "บจก. เอ, บี" must stay one cell.
+    // Handles doubled quotes ("") inside quoted fields. Tab-separated input
+    // passes through the same path harmlessly.
+    const splitLine = (line) => {
+      const out = [];
+      let cur = '', inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQ) {
+          if (ch === '"') {
+            if (line[i + 1] === '"') { cur += '"'; i++; }
+            else inQ = false;
+          } else cur += ch;
+        } else if (ch === '"' && cur === '') {
+          inQ = true;
+        } else if (ch === sep) {
+          out.push(cur); cur = '';
+        } else cur += ch;
+      }
+      out.push(cur);
+      return out.map(c => c.trim());
+    };
+    // Header detection — tolerant of the " *" suffix on required columns in
+    // the downloaded template + whitespace. We match each header cell to an
+    // expected label ANYWHERE in the row (not positionally), so a reordered
+    // template still maps every value to the right field.
     const norm = (s) => String(s || '').replace(/\s*\*\s*$/, '').trim().toLowerCase();
-    const first = lines[0].split(sep).map(norm);
+    const first = splitLine(lines[0]).map(norm);
     const labels = columns.map(c => norm(c.label));
-    let matches = 0;
-    for (let i = 0; i < Math.min(first.length, labels.length); i++) {
-      if (first[i] && first[i] === labels[i]) matches++;
-    }
-    const hasHeader = labels.length > 0 && matches >= Math.ceil(labels.length / 2);
+    // colIdx[i] = which cell index holds columns[i]'s data
+    const colIdx = labels.map(lbl => first.indexOf(lbl));
+    const matched = colIdx.filter(i => i >= 0).length;
+    const hasHeader = labels.length > 0 && matched >= Math.ceil(labels.length / 2);
+    // When the header is recognized, use the label→index map (falling back
+    // to position for any unmatched column); otherwise assume positional.
+    const indexFor = (i) => (hasHeader && colIdx[i] >= 0) ? colIdx[i] : i;
     const dataLines = hasHeader ? lines.slice(1) : lines;
     return dataLines.map((line, idx) => {
-      const cells = line.split(sep).map(c => c.trim());
+      const cells = splitLine(line);
       const row = {};
       const errs = [];
       columns.forEach((col, i) => {
-        const raw = cells[i] || '';
+        const raw = cells[indexFor(i)] || '';
         row[col.key] = raw;
         if (col.required && !raw) errs.push(`${col.label}: ว่าง`);
       });
+      // Guard: a stray header row pasted mid-data (every cell equals its
+      // expected label) should never be imported as a record.
+      const looksLikeHeader = columns.every((col, i) => norm(row[col.key]) === labels[i] || !row[col.key]);
+      if (looksLikeHeader && columns.some((col) => norm(row[col.key]))) {
+        errs.unshift('แถวหัวตาราง — ข้าม');
+      }
       return { lineNo: idx + 1, row, err: errs.length ? errs.join(' · ') : null };
     });
   }, [text, columns]);
@@ -564,8 +617,18 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
     onDone?.({ ok: validRows.length - errors.length, fail: errors.length, errors });
   }
 
+  const uploadingNow = progress && progress.done < progress.total;
+  const uploadDone   = progress && progress.done >= progress.total;
+  // Editing the data after a completed run re-arms the import button
+  // (e.g. fixing the rows that failed) — without this the modal would have
+  // to be closed and reopened.
+  useEffect(() => {
+    if (uploadDone) setProgress(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+
   return (
-    <div onClick={onClose} style={{
+    <div onClick={uploadingNow ? undefined : onClose} style={{
       position:'fixed', inset:0, background:'rgba(20,18,14,0.32)',
       display:'grid', placeItems:'center', zIndex:50,
     }}>
@@ -704,13 +767,13 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
               : 'พร้อมนำเข้า'}
           </div>
           <div style={{ display:'flex', gap:8 }}>
-            <button className="btn ghost" onClick={onClose} disabled={progress && progress.done < progress.total}>
-              {progress && progress.done === progress.total ? 'ปิด' : 'ยกเลิก'}
+            <button className="btn ghost" onClick={onClose} disabled={uploadingNow}>
+              {uploadDone ? 'ปิด' : 'ยกเลิก'}
             </button>
             <button className="btn primary"
-              disabled={busy || validRows.length === 0 || (progress && progress.done < progress.total)}
+              disabled={busy || validRows.length === 0 || uploadingNow || uploadDone}
               onClick={upload}>
-              {Icons.upload} นำเข้า {validRows.length > 0 ? `${validRows.length} รายการ` : ''}
+              {Icons.upload} {uploadDone ? 'นำเข้าแล้ว' : `นำเข้า ${validRows.length > 0 ? `${validRows.length} รายการ` : ''}`}
             </button>
           </div>
         </div>

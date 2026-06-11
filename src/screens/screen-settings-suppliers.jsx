@@ -261,7 +261,13 @@ export function ScreenSettingsSuppliers({ go }) {
             const allCodes = [...items.map(s => s.code).filter(Boolean), ...ctx.usedCodes];
             const code = nextSupplierCode(allCodes);
             const days = parseInt(row.credit_days, 10);
-            const status = ['Active','Non-Active','Blacklist'].includes(row.status) ? row.status : 'Active';
+            // Case/format-insensitive status mapping — "blacklist" or
+            // "BLACKLIST" must never silently import as Active (that would
+            // make a blacklisted vendor orderable).
+            const statusKey = String(row.status || '').trim().toLowerCase().replace(/[\s_-]/g, '');
+            const status = statusKey === 'blacklist' ? 'Blacklist'
+                         : (statusKey === 'nonactive' || statusKey === 'inactive') ? 'Non-Active'
+                         : 'Active';
             return {
               code,
               name: row.name,
@@ -298,14 +304,15 @@ function nextSupplierCode(existing) {
   return `SUP-${String(max + 1).padStart(5, '0')}`;
 }
 
-// Parse a payment_terms string back to {has, days} for the toggle UI.
-// We store as either '' (no credit) or 'NN วัน'. Old data with values
-// like 'เงินสด' / 'งวด' falls through to has=false.
+// Parse a payment_terms string back to {has, days, legacy} for the toggle
+// UI. We store as either '' (no credit) or 'NN วัน'. Old data with values
+// like 'เงินสด' / 'งวด 30/60' is flagged `legacy` so an edit-save preserves
+// the original string instead of silently wiping it to ''.
 function parsePaymentTerms(str) {
-  if (!str) return { has: false, days: '' };
+  if (!str) return { has: false, days: '', legacy: '' };
   const m = /(\d+)\s*วัน/.exec(String(str));
-  if (m) return { has: true, days: m[1] };
-  return { has: false, days: '' };
+  if (m) return { has: true, days: m[1], legacy: '' };
+  return { has: false, days: '', legacy: String(str) };
 }
 
 // Parse the comma-separated `type` field into a {material, subcontract} pair.
@@ -366,7 +373,12 @@ function SupplierModal({ item, existingCodes, onClose, onSaved }) {
       phone:         form.phone,
       address:       form.address,
       tax_id:        form.tax_id,
-      payment_terms: form.hasCredit ? `${parseInt(form.creditDays, 10)} วัน` : '',
+      // When the user never touched the credit toggle and the row carried a
+      // legacy free-text term ('เงินสด', 'งวด 30/60'), keep that original
+      // string — don't silently destroy it with ''.
+      payment_terms: form.hasCredit
+        ? `${parseInt(form.creditDays, 10)} วัน`
+        : (initialTerms.legacy || ''),
       notes:         form.notes,
       status:        form.status,
       // Keep legacy boolean in sync — old screens / queries that look at

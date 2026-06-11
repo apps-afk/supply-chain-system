@@ -22,8 +22,14 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
   const [suppliers, setSuppliers] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr]   = useState('');
+  // The route renders this screen without props, so resolve the comparison
+  // from the id stashed by the list-row click (same pattern as RFQ/contract).
+  const [cmpId, setCmpId] = useState(comparisonId || '');
 
   useEffect(() => {
+    if (!comparisonId && typeof window !== 'undefined') {
+      try { setCmpId(window.localStorage.getItem('cmp.currentId') || ''); } catch {}
+    }
     (async () => {
       try {
         const r = await fetch('/api/suppliers');
@@ -36,7 +42,7 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
         setErr('เครือข่ายขัดข้อง');
       }
     })();
-  }, []);
+  }, [comparisonId]);
 
   const canSave = file && selectedSupplier && approvedBy && approvedDate && !busy;
 
@@ -49,11 +55,26 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
       fd.append('file', file);
       fd.append('category', 'compare_report');
       fd.append('entity_type', 'comparison');
-      if (comparisonId) fd.append('entity_id', comparisonId);
+      if (cmpId) fd.append('entity_id', cmpId);
       fd.append('entity_ref', `${selectedSupplier}|${approvedBy}|${approvedDate}|${notes}`);
       const res = await fetch('/api/upload', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) { setErr(data.error || 'อัปโหลดไม่สำเร็จ'); setBusy(false); return; }
+      // Record the decision on the comparison row — finalized is the real
+      // schema status (draft|finalized|archived); "Decided" is UI copy only.
+      if (cmpId) {
+        try {
+          await fetch('/api/comparisons', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: cmpId,
+              status: 'finalized',
+              notes: `เลือก ${selectedSupplier} · อนุมัติโดย ${approvedBy} เมื่อ ${approvedDate}${notes ? ' · ' + notes : ''}`,
+            }),
+          });
+        } catch { /* upload already succeeded; status update is best-effort */ }
+      }
       setUploaded(true);
     } catch {
       setErr('เครือข่ายขัดข้อง');

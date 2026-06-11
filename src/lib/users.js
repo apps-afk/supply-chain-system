@@ -249,7 +249,12 @@ export async function forceResetPassword(email, newPassword) {
 
 export async function listUsers() {
   const reg = await listRegistered();
-  return [...BUILTIN.map(applyBuiltinMeta), ...reg];
+  // Strip credential material before this ever reaches a route handler —
+  // password hashes/salts must never be serialized to the browser, even
+  // for admins.
+  return [...BUILTIN.map(applyBuiltinMeta), ...reg].map(
+    ({ hash, salt, password, ...safe }) => safe
+  );
 }
 
 export async function getProfile(email) {

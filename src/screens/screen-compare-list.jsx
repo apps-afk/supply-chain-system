@@ -177,7 +177,12 @@ export function ScreenCompareList({ go }) {
               const suppliersList = Array.isArray(d.suppliers_json?.list) ? d.suppliers_json.list : [];
               const selectedSup   = d.suppliers_json?.selectedSupplier || '';
               return (
-                <tr key={d.id || d.no} onClick={() => go('compare-detail')} style={{ cursor:'pointer' }}>
+                <tr key={d.id || d.no} onClick={() => {
+                    // Stash the id so detail/upload-ref screens know which
+                    // comparison they're working on (same pattern as RFQ).
+                    try { window.localStorage.setItem('cmp.currentId', d.id); } catch {}
+                    go('compare-detail');
+                  }} style={{ cursor:'pointer' }}>
                   <td>
                     <div className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{d.no}</div>
                   </td>

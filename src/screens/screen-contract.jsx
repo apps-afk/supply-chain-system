@@ -69,24 +69,28 @@ function parseWarrantyDays(text) {
   if (!text) return null;
   const t = String(text).toLowerCase();
   let days = 0;
-  const yr = t.match(/(\d+)\s*(?:ปี|year)/);
-  const mo = t.match(/(\d+)\s*(?:เดือน|month)/);
-  const dy = t.match(/(\d+)\s*(?:วัน|day)/);
-  if (yr) days += parseInt(yr[1], 10) * 365;
-  if (mo) days += parseInt(mo[1], 10) * 30;
-  if (dy) days += parseInt(dy[1], 10);
+  // Decimal-aware: "1.5 ปี" must read 1.5, not pick up the "5" next to ปี.
+  const yr = t.match(/(\d+(?:\.\d+)?)\s*(?:ปี|year)/);
+  const mo = t.match(/(\d+(?:\.\d+)?)\s*(?:เดือน|month)/);
+  const dy = t.match(/(\d+(?:\.\d+)?)\s*(?:วัน|day)/);
+  if (yr) days += parseFloat(yr[1]) * 365;
+  if (mo) days += parseFloat(mo[1]) * 30;
+  if (dy) days += parseFloat(dy[1]);
+  days = Math.round(days);
   return days > 0 ? days : null;
 }
 
 /**
  * Compute retention release status for a contract: when can the supplier
  * come back and reclaim their retention money?
- * Base date = signed_at or end_date; release = base + warranty days.
+ * Base date = end_date (work handover) — falling back to signed_at only when
+ * no end date is recorded. Counting from signing would mark retention "due"
+ * while the work is still ongoing.
  * Returns { state: 'due' | 'soon' | 'pending' | 'unknown', releaseDate, daysLeft }
  */
 function retentionStatus(contract) {
   const warrantyDays = parseWarrantyDays(contract?.warranty);
-  const baseStr = contract?.signed_at || contract?.end_date;
+  const baseStr = contract?.end_date || contract?.signed_at;
   if (!warrantyDays || !baseStr) return { state: 'unknown' };
   const base = new Date(baseStr);
   if (Number.isNaN(base.getTime())) return { state: 'unknown' };
@@ -1164,6 +1168,13 @@ export function ScreenContract({ go }) {
           suppliers={suppliers}
           projects={projects}
           go={go}
+          onSelect={(c) => {
+            try { window.localStorage.setItem('contract.currentId', c.id); } catch {}
+            setContract(c);
+            setPhase(DB_TO_BUCKET[c.status] || 'Uploaded');
+            setAttachments(allAttachments[c.id] || []);
+            if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' });
+          }}
         />
       )}
     </div>
@@ -1171,7 +1182,7 @@ export function ScreenContract({ go }) {
 }
 
 /* =================== Contract Archive (mini list) =================== */
-function ContractArchive({ contracts, currentId, attachmentsByContract, suppliers, projects, go }) {
+function ContractArchive({ contracts, currentId, attachmentsByContract, suppliers, projects, go, onSelect }) {
   // O(1) name lookups (was .find() per row × per render)
   const supById = useMemo(() => {
     const m = new Map();
@@ -1232,13 +1243,9 @@ function ContractArchive({ contracts, currentId, attachmentsByContract, supplier
                 <tr key={c.id}
                   onClick={() => {
                     if (isCurrent) return;
-                    try { window.localStorage.setItem('contract.currentId', c.id); } catch {}
-                    // Switch in-place instead of full page reload — keeps the
-                    // already-fetched suppliers/projects/attachments warm.
-                    setContract(c);
-                    setPhase(DB_TO_BUCKET[c.status] || 'Uploaded');
-                    setAttachments(allAttachments[c.id] || []);
-                    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' });
+                    // Parent owns the detail state — switch in-place via the
+                    // callback (keeps fetched suppliers/projects warm).
+                    onSelect?.(c);
                   }}
                   style={{
                     cursor: isCurrent ? 'default' : 'pointer',

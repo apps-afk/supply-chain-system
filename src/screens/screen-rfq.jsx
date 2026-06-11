@@ -164,7 +164,13 @@ export function ScreenRFQ({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn" onClick={() => go('rfq-confirm')}>{Icons.upload} Upload Quote</button>
+          <button className="btn" onClick={() => {
+            // Clear any stale stashed id so the confirm screen opens the most
+            // recent RFQ deterministically — not whichever row was viewed last
+            // session (risk: quote attached to the wrong RFQ).
+            try { window.localStorage.removeItem('rfq.currentId'); } catch {}
+            go('rfq-confirm');
+          }}>{Icons.upload} Upload Quote</button>
           <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้าง RFQ ใหม่</button>
         </div>
       </div>
@@ -703,7 +709,7 @@ export function ScreenRFQConfirm({ go }) {
             {items.length === 0 ? (
               <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล — อัพโหลด Quote ก่อน · ฟีเจอร์เปรียบเทียบราคารายตัวจะเชื่อม API ในขั้นถัดไป</td></tr>
             ) : items.map((it) => {
-              const delta = it.oldP == null ? null : ((it.newP - it.oldP) / it.oldP) * 100;
+              const delta = (it.oldP == null || Number(it.oldP) === 0) ? null : ((it.newP - it.oldP) / it.oldP) * 100;
               const dir = delta == null ? 'new' : delta > 0.5 ? 'up' : delta < -0.5 ? 'down' : 'flat';
               return (
                 <tr key={it.id} className={it.outlier ? 'row-flag-err' : ''}>

@@ -2,7 +2,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Av, money } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
-import { getActiveApprovalRoles } from './screen-settings-approval-roles';
 
 /*
   Compare Create — Mode A: From Price Database
@@ -1041,6 +1040,20 @@ export function GeneratedCompare({ go, rfqMode, source, items, suppliers, suppli
 export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mode, cmpNo }) {
   const savingsPct = aiBest?.worstTotal ? ((aiBest.savings / aiBest.worstTotal) * 100).toFixed(1) : 0;
   const displayNo = cmpNo || NEXT_CMP_NO || 'CMP-YYYY-XXXX';
+  // Sign-off slots come from the approval_roles master. The old
+  // getActiveApprovalRoles() import was an empty stub, so configured roles
+  // never appeared on the PDF.
+  const [signRoles, setSignRoles] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/approval-roles');
+        if (!r.ok) return;
+        const d = await r.json();
+        setSignRoles((d.items || []).filter(x => x.active).sort((a, b) => (a.level || 0) - (b.level || 0)));
+      } catch { /* keep placeholder slots */ }
+    })();
+  }, []);
 
   return (
     <div className="card" style={{ padding:0, overflow:'hidden', boxShadow:'0 8px 32px -16px rgba(20,18,14,0.18)' }}>
@@ -1111,8 +1124,8 @@ export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mo
                         padding:'10px', textAlign:'right',
                         background: isMin ? '#DCE6E1' : 'transparent',
                       }}>
-                        <div className="num" style={{ fontWeight: isMin ? 600 : 500 }}>{money(p)}</div>
-                        <div style={{ fontSize:10, color:'var(--ink-3)', marginTop:2 }}>{money(p * (Number(it.qty)||1))}</div>
+                        <div className="num" style={{ fontWeight: isMin ? 600 : 500 }}>{p != null ? money(p) : '—'}</div>
+                        <div style={{ fontSize:10, color:'var(--ink-3)', marginTop:2 }}>{p != null ? money(p * (Number(it.qty)||1)) : ''}</div>
                       </td>
                     );
                   })}
@@ -1260,8 +1273,8 @@ export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mo
 
         {/* Sign-off — slots driven by Approval Roles master data */}
         {(() => {
-          const roles = getActiveApprovalRoles() || [];
-          const cols = Math.max(roles.length, 4);
+          const roles = signRoles;
+          const cols = Math.max(roles.length, 3);
           return (
             <div style={{ marginTop:48, display:'grid', gridTemplateColumns:`repeat(${cols}, 1fr)`, gap:24 }}>
               {[...Array(cols)].map((_,i) => {

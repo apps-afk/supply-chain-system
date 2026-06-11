@@ -106,16 +106,16 @@ export async function uploadToCategory({ categoryKey, filename, mimeType, body, 
   if (!label) throw new Error(`หมวดหมู่ไม่ถูกต้อง: ${categoryKey}`);
 
   const drive = getClient();
-  const folderId = await findOrCreateSubfolder(label);
 
   const safeFilename = (entityRef ? `${entityRef}_` : '') +
                        `${Date.now()}_${filename}`.replace(/[\/\\?%*:|"<>]/g, '_');
 
-  // Buffer → stream (Drive media body expects a Readable or string path)
-  const stream = Buffer.isBuffer(body) ? Readable.from(body) : body;
-
-  try {
-    const res = await drive.files.create({
+  const attempt = async () => {
+    const folderId = await findOrCreateSubfolder(label);
+    // Buffer → stream per attempt — a Readable can't be replayed once
+    // consumed by a failed create call.
+    const stream = Buffer.isBuffer(body) ? Readable.from(body) : body;
+    return drive.files.create({
       requestBody: {
         name: safeFilename,
         parents: [folderId],
@@ -124,8 +124,23 @@ export async function uploadToCategory({ categoryKey, filename, mimeType, body, 
       fields: 'id, name, webViewLink, webContentLink, size, parents',
       supportsAllDrives: true,
     });
+  };
+
+  try {
+    const res = await attempt();
     return res.data;
   } catch (e) {
+    // If the cached subfolder was deleted in Drive, the create 404s forever
+    // until redeploy — evict the cache entry and retry once with a fresh
+    // (re-created) folder. Only Buffers can be retried safely.
+    const status = e?.code ?? e?.response?.status;
+    if (status === 404 && Buffer.isBuffer(body)) {
+      delete _folderCache[label];
+      try {
+        const res = await attempt();
+        return res.data;
+      } catch (e2) { e = e2; }
+    }
     // Surface Google's actual error (rate-limit, permission, etc.) instead of
     // a generic "upload failed" — the upload route returns this back to the UI
     const detail = e?.response?.data?.error?.message || e?.errors?.[0]?.message || e.message;
