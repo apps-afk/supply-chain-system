@@ -90,6 +90,9 @@ export function ScreenCompareCreateRFQ({ go }) {
               supplierId: parsed?.supplier_id || `rfq_${x.id}`,
               supName:    parsed?.supplier_name || x.title || x.no || '—',
               supKind:    'company',
+              // The supplier's actual quoted conditions (parsed/edited on
+              // the RFQ-confirm screen) — shown on the Compare PDF.
+              terms:      parsed?.conditions || null,
               category:   x.project_id || 'ทั่วไป',
               project:    x.project_id || '',
               credit:     '—',
@@ -182,7 +185,7 @@ export function ScreenCompareCreateRFQ({ go }) {
         mode: 'RFQ',
         category: categories[0] || '',
         rfqNos: picked,
-        list: pickedRfqs.map(r => ({ id: r.supplierId, name: r.supName, kind: r.supKind, rfqNo: r.no })),
+        list: pickedRfqs.map(r => ({ id: r.supplierId, name: r.supName, kind: r.supKind, rfqNo: r.no, terms: r.terms || null })),
         selectedSupplier: aiBest ? (pickedRfqs.find(r => r.supplierId === aiBest.winnerId)?.supName || '') : '',
       },
       total_low, total_high,
@@ -220,7 +223,7 @@ export function ScreenCompareCreateRFQ({ go }) {
       source={categories[0] || 'RFQ'}
       items={mergedItems}
       suppliers={supplierIds}
-      supplierObjs={pickedRfqs.map(r => ({ id:r.supplierId, name:r.supName, kind:r.supKind }))}
+      supplierObjs={pickedRfqs.map(r => ({ id:r.supplierId, name:r.supName, kind:r.supKind, terms:r.terms || null }))}
       totals={totals}
       aiBest={aiBest}
       cmpNo={generatedNo} />;

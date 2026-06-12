@@ -1198,42 +1198,16 @@ export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mo
             </thead>
             <tbody>
               {(() => {
-                // Synthetic per-supplier text — represents what Supplier wrote in their RFQ reply
-                const synth = (sId, options) => {
-                  const h = [...sId].reduce((a,c) => a + c.charCodeAt(0), 0);
-                  return options[h % options.length];
-                };
+                // Real quoted terms only — parsed from the supplier's Excel
+                // (or typed in on the RFQ-confirm screen) and carried on the
+                // supplier object as `terms`. Never fabricate text in an
+                // approval document; missing answers render as —.
                 const conds = [
-                  { icon:'💳', label:'การชำระเงิน',
-                    pick: (s) => synth(s.id, [
-                      'เครดิต 30 วัน นับจากวันที่ออกใบกำกับภาษี · โอนเข้าบัญชีนิติบุคคล',
-                      'เครดิต 45 วัน · ชำระโดยเช็คสั่งจ่ายในนามบริษัท',
-                      'เครดิต 60 วัน นับจากวันส่งมอบ · โอนเข้าบัญชี',
-                    ]) },
-                  { icon:'🚚', label:'การจัดส่ง',
-                    pick: (s) => synth(s.id, [
-                      'ฟรีค่าขนส่งหน้างาน ทุกการสั่งซื้อ',
-                      'ฟรีค่าขนส่งเฉพาะคำสั่งซื้อ ≥ 50,000 บาท · ต่ำกว่านั้นคิด 1,500 บาท/เที่ยว',
-                      'ลูกค้ารับเองที่คลังสินค้า หรือบริการขนส่งคิดตามระยะทาง',
-                    ]) },
-                  { icon:'⏱',  label:'การยืนราคา',
-                    pick: (s) => synth(s.id, [
-                      'ยืนราคา 30 วัน นับจากวันที่ใบเสนอราคา',
-                      'ยืนราคา 45 วัน · อาจเปลี่ยนแปลงตามราคาวัตถุดิบ',
-                      'ยืนราคา 60 วัน เต็มทุกรายการ',
-                    ]) },
-                  { icon:'🛡️', label:'การรับประกัน',
-                    pick: (s) => synth(s.id, [
-                      'รับประกันคุณภาพตามมาตรฐาน มอก. · ไม่ครอบคลุมความเสียหายจากการใช้งานผิดวิธี',
-                      'รับประกันสินค้า 1 ปี · เปลี่ยนสินค้าใหม่หากพบความบกพร่องจากการผลิต',
-                      'รับประกัน 2 ปี · มีบริการหลังการขายและทีมช่างประจำ',
-                    ]) },
-                  { icon:'📦', label:'Lead Time',
-                    pick: (s) => synth(s.id, [
-                      '7–10 วันทำการ หลังได้รับ PO',
-                      '10–14 วันทำการ · ขึ้นอยู่กับปริมาณสั่งซื้อ',
-                      '14–21 วันทำการ · สำหรับรายการพิเศษอาจนานกว่านี้',
-                    ]) },
+                  { icon:'💳', label:'การชำระเงิน', pick: (s) => s.terms?.payment },
+                  { icon:'🚚', label:'การจัดส่ง',   pick: (s) => s.terms?.delivery },
+                  { icon:'⏱',  label:'การยืนราคา',  pick: (s) => s.terms?.validity },
+                  { icon:'🛡️', label:'การรับประกัน', pick: (s) => s.terms?.warranty },
+                  { icon:'📦', label:'Lead Time',   pick: (s) => s.terms?.leadtime },
                 ];
                 return conds.map((c, ci) => (
                   <tr key={c.label} style={{
@@ -1256,7 +1230,7 @@ export function ComparePDFPreview({ items, suppliers, totals, aiBest, winner, mo
                           background: isWinner ? 'rgba(220,230,225,0.4)' : 'transparent',
                           color:'var(--ink-2)', lineHeight:1.6, fontSize:11,
                         }}>
-                          {c.pick(s)}
+                          {c.pick(s) || <span style={{ color:'var(--ink-4)', fontStyle:'italic' }}>— ไม่ได้ระบุในใบเสนอราคา —</span>}
                         </td>
                       );
                     })}

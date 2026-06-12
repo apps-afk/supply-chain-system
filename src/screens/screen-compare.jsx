@@ -231,6 +231,41 @@ export function ScreenCompare({ go }) {
         </table>
       </div>
 
+      {/* Supplier quoted terms — only when at least one supplier carries them */}
+      {suppliers.some(s => s.terms && Object.values(s.terms).some(Boolean)) && (
+        <section style={{ marginTop: 32 }}>
+          <h3 className="h-section" style={{ marginBottom: 12 }}>เงื่อนไขจากใบเสนอราคา</h3>
+          <div className="card" style={{ padding: 0, overflow: 'auto' }}>
+            <table className="tbl" style={{ minWidth: 640 }}>
+              <thead>
+                <tr>
+                  <th style={{ width: '18%' }}>เงื่อนไข</th>
+                  {suppliers.map(s => <th key={s.id}>{s.name}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { icon:'💳', label:'การชำระเงิน', key:'payment' },
+                  { icon:'🚚', label:'การจัดส่ง',   key:'delivery' },
+                  { icon:'⏱',  label:'การยืนราคา',  key:'validity' },
+                  { icon:'🛡️', label:'การรับประกัน', key:'warranty' },
+                  { icon:'📦', label:'Lead Time',   key:'leadtime' },
+                ].map(c => (
+                  <tr key={c.key}>
+                    <td style={{ fontWeight: 500, fontSize: 12.5 }}>{c.icon} {c.label}</td>
+                    {suppliers.map(s => (
+                      <td key={s.id} style={{ fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.6 }}>
+                        {s.terms?.[c.key] || <span style={{ color: 'var(--ink-4)', fontStyle: 'italic' }}>—</span>}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* Attachments (signed ref docs) */}
       <section style={{ marginTop: 32 }}>
         <h3 className="h-section" style={{ marginBottom: 12 }}>เอกสารอ้างอิง (Ref) · {attachments.length} ไฟล์</h3>

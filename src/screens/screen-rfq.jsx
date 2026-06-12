@@ -46,6 +46,17 @@ async function parseQuoteExcel(file, itemCodes) {
     return String(v);
   };
   let matched = 0;
+  // The 5 condition rows in the generated workbook: label in col A (merged
+  // A:B), the supplier's answer in col C (merged C:H). Answers still equal
+  // to the "(hint)" placeholder are treated as blank.
+  const conditions = {};
+  const COND_PATTERNS = [
+    [/เงื่อนไขการชำระเงิน/, 'payment'],
+    [/เงื่อนไขการจัดส่ง/,   'delivery'],
+    [/เงื่อนไขการยืนราคา/,  'validity'],
+    [/เงื่อนไขการรับประกัน/,'warranty'],
+    [/lead\s*time/i,        'leadtime'],
+  ];
   ws?.eachRow((row) => {
     const code  = txt(row.getCell(2).value).trim();            // col B
     if (codeSet.has(code)) {
@@ -55,8 +66,15 @@ async function parseQuoteExcel(file, itemCodes) {
     const labelA = txt(row.getCell(1).value);
     if (/overhead/i.test(labelA)) { const v = num(row.getCell(7).value); if (!Number.isNaN(v)) overheadPct = v; }
     else if (/vat/i.test(labelA)) { const v = num(row.getCell(7).value); if (!Number.isNaN(v)) vatPct = v; }
+    for (const [re, key] of COND_PATTERNS) {
+      if (re.test(labelA)) {
+        const ans = txt(row.getCell(3).value).trim();
+        if (ans && !/^\(.*\)$/.test(ans)) conditions[key] = ans;
+        break;
+      }
+    }
   });
-  return { priceByCode, overheadPct, vatPct, matched, total: itemCodes.length };
+  return { priceByCode, overheadPct, vatPct, conditions, matched, total: itemCodes.length };
 }
 
 /*
@@ -321,6 +339,11 @@ export function ScreenRFQConfirm({ go }) {
   const [savePxBusy, setSavePxBusy] = useState(false);
   const [savePxMsg,  setSavePxMsg]  = useState('');
   const [pricesSaved, setPricesSaved] = useState(false);
+  // Supplier's quoted conditions (5 ข้อ) — parsed from the uploaded Excel,
+  // editable here, persisted into the RFQ notes payload.
+  const [conds, setConds] = useState({ payment:'', delivery:'', validity:'', warranty:'', leadtime:'' });
+  const [condsBusy, setCondsBusy] = useState(false);
+  const [condsMsg, setCondsMsg]   = useState('');
 
   useEffect(() => {
     (async () => {
@@ -358,6 +381,7 @@ export function ScreenRFQConfirm({ go }) {
           try {
             const parsed = JSON.parse(picked.notes);
             setParsed(parsed);
+            if (parsed?.conditions) setConds(c => ({ ...c, ...parsed.conditions }));
             if (parsed && Array.isArray(parsed.items)) {
               setItems(parsed.items.map(it => ({
                 ...it,
@@ -422,7 +446,7 @@ export function ScreenRFQConfirm({ go }) {
       // `items` closure after the table was edited.
       let codes = [];
       setItems(its => { codes = its.map(it => it.itemCode).filter(Boolean); return its; });
-      const { priceByCode, matched, total } = await parseQuoteExcel(file, codes);
+      const { priceByCode, conditions, matched, total } = await parseQuoteExcel(file, codes);
       setItems(its => its.map(it => {
         const px = priceByCode[it.itemCode];
         const mat = matByCode[it.itemCode];
@@ -430,6 +454,13 @@ export function ScreenRFQConfirm({ go }) {
         if (px == null) return { ...it, oldP };
         return { ...it, newP: px, oldP, save: true };
       }));
+      // Merge the parsed quote conditions into the editable card + persist
+      // them so they survive into the Compare flow.
+      if (conditions && Object.keys(conditions).length > 0) {
+        const merged = { ...conds, ...conditions };
+        setConds(merged);
+        await persistConditions(merged, /*silent*/ true);
+      }
       if (matched === 0) {
         setUploadErr(`อ่านไฟล์แล้ว แต่ไม่พบราคาที่ตรงกับรหัสรายการ (0/${total}) — ตรวจสอบว่าใช้ไฟล์ Template ของ RFQ นี้และไม่ได้แก้คอลัมน์รหัส`);
       } else {
@@ -439,6 +470,30 @@ export function ScreenRFQConfirm({ go }) {
       setUploadErr('อ่านไฟล์ Excel ไม่สำเร็จ: ' + (e?.message || ''));
     }
     setReadBusy(false);
+  }
+
+  // Persist the conditions card into the RFQ's notes payload so the Compare
+  // flow (and future viewers) can read the supplier's actual quoted terms.
+  async function persistConditions(values, silent = false) {
+    if (!rfq) return;
+    if (!silent) { setCondsBusy(true); setCondsMsg(''); }
+    try {
+      const nextNotes = JSON.stringify({ ...(parsed || {}), conditions: values });
+      const r = await fetch('/api/rfqs', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: rfq.id, notes: nextNotes }),
+      });
+      if (r.ok) {
+        setParsed(p => ({ ...(p || {}), conditions: values }));
+        if (!silent) setCondsMsg('บันทึกเงื่อนไขแล้ว');
+      } else if (!silent) {
+        const d = await r.json().catch(() => ({}));
+        setCondsMsg(d.error || 'บันทึกไม่สำเร็จ');
+      }
+    } catch {
+      if (!silent) setCondsMsg('เครือข่ายขัดข้อง');
+    }
+    if (!silent) setCondsBusy(false);
   }
 
   // Save the reviewed prices into the Price DB (Material items only — the
@@ -638,6 +693,45 @@ export function ScreenRFQConfirm({ go }) {
           </div>
         )}
       </div>
+
+      {/* Supplier's quoted conditions — parsed from the uploaded Excel,
+          editable, persisted into rfq.notes and carried into Compare */}
+      {rfq && (
+        <div className="card" style={{ padding:'20px 24px', marginBottom:24 }}>
+          <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', marginBottom:14 }}>
+            <div>
+              <h3 className="h-card">เงื่อนไขจากใบเสนอราคา · 5 ข้อ</h3>
+              <p style={{ fontSize:12, color:'var(--ink-3)', margin:'4px 0 0' }}>
+                อ่านอัตโนมัติจากไฟล์ Excel ที่อัพโหลด — แก้ไขได้ · ใช้แสดงในใบเปรียบเทียบราคา
+              </p>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              {condsMsg && <span style={{ fontSize:12, color: condsMsg.includes('แล้ว') ? 'var(--moss)' : 'var(--clay)' }}>{condsMsg}</span>}
+              <button className="btn sm" onClick={() => persistConditions(conds)} disabled={condsBusy}>
+                {condsBusy ? 'กำลังบันทึก…' : 'บันทึกเงื่อนไข'}
+              </button>
+            </div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            {[
+              { key:'payment',  icon:'💳', label:'การชำระเงิน',   hint:'เครดิตเทอม · ช่องทาง · งวด' },
+              { key:'delivery', icon:'🚚', label:'การจัดส่ง',      hint:'ค่าขนส่ง · จุดส่งมอบ' },
+              { key:'validity', icon:'⏱',  label:'การยืนราคา',     hint:'จำนวนวันที่ราคามีผล' },
+              { key:'warranty', icon:'🛡️', label:'การรับประกัน',   hint:'ระยะเวลา · ขอบเขต' },
+              { key:'leadtime', icon:'📦', label:'Lead Time',      hint:'จำนวนวันหลังออก PO' },
+            ].map(c => (
+              <label key={c.key} style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                <span style={{ fontSize:11.5, color:'var(--ink-3)', fontWeight:500 }}>{c.icon} {c.label}</span>
+                <input value={conds[c.key] || ''}
+                  onChange={e => setConds(prev => ({ ...prev, [c.key]: e.target.value }))}
+                  placeholder={c.hint}
+                  style={{ padding:'8px 11px', fontSize:12.5, border:'1px solid var(--rule-2)', borderRadius:6,
+                           background: conds[c.key] ? 'var(--paper)' : '#FFFBEB', outline:'none', fontFamily:'inherit' }} />
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Preview of the RFQ document that gets exported to Excel (collapsible) */}
       {parsed && Array.isArray(parsed.items) && parsed.items.length > 0 && (
