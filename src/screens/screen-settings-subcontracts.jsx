@@ -28,7 +28,6 @@ function nextSubcontractCode(existing) {
 }
 
 // NOTE: stub kept for backwards compatibility.
-export const SUBCONTRACT_CATEGORIES = [];
 
 export function ScreenSettingsSubcontracts({ go }) {
   const [items, setItems]     = useState([]);

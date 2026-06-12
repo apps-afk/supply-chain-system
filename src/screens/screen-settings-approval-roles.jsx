@@ -12,11 +12,6 @@ import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, Se
   - Data is now stored in DB and fetched from /api/approval-roles.
 */
 
-// NOTE: stubs kept for backwards compatibility.
-// APPROVAL_ROLES_DATA is now stored in the DB; consumers should migrate to
-// fetching from `/api/approval-roles` directly instead of importing this constant.
-export const APPROVAL_ROLES_DATA = [];
-export const getActiveApprovalRoles = () => [];
 
 export function ScreenSettingsApprovalRoles({ go }) {
   const [items, setItems]     = useState([]);

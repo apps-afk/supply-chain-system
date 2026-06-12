@@ -1,42 +1,120 @@
 'use client';
-import React, { useState } from 'react';
-import { Icons, Chip, Av, Delta, Spark, money } from '../lib/shell';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Icons, Chip, Av, money, Delta } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
-/*
-  Supplier Database — Module 5
-  Concept: see what each Supplier sells and their quotation statistics.
 
-  Routes:
-    #supplierdb        → list (matrix of all suppliers + summary stats)
-    #supplierdb-detail → one supplier's "card": products sold + quote history + KPIs
+/*
+  Supplier Database — intelligence view over the supplier master.
+
+  Built live from:
+    /api/suppliers   — roster (name, type, payment_terms, status)
+    /api/prices      — price points per supplier (what they sell, quote count)
+    /api/rfqs        — RFQs sent to each supplier (parsed from notes payload)
+    /api/materials   — material names for the price list
+  The "win" signal = RFQ reached 'closed' (prices were saved to the DB).
 */
 
-/* =================== Synthetic supplier roster + stats =================== */
-const SUPPLIER_DB = [];
+function fmtDate(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' }); }
+  catch { return iso; }
+}
+
+// Shared loader — both screens need the same joined view.
+function useSupplierIntel() {
+  const [suppliers, setSuppliers] = useState([]);
+  const [prices, setPrices]       = useState([]);
+  const [rfqs, setRfqs]           = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [err, setErr]             = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [rS, rP, rR, rM] = await Promise.all([
+          fetch('/api/suppliers'), fetch('/api/prices'), fetch('/api/rfqs'), fetch('/api/materials'),
+        ]);
+        const dS = await rS.json();
+        if (!rS.ok) { setErr(dS.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
+        setSuppliers(dS.items || []);
+        if (rP.ok) setPrices((await rP.json()).items || []);
+        if (rR.ok) setRfqs((await rR.json()).items || []);
+        if (rM.ok) setMaterials((await rM.json()).items || []);
+      } catch { setErr('เครือข่ายขัดข้อง'); }
+      setLoading(false);
+    })();
+  }, []);
+
+  const intel = useMemo(() => {
+    const matById = new Map(materials.map(m => [m.id, m]));
+    // RFQs per supplier — supplier_id lives inside the notes JSON
+    const rfqsBySup = new Map();
+    for (const r of rfqs) {
+      let sid = null;
+      try { sid = JSON.parse(r.notes)?.supplier_id || null; } catch {}
+      if (!sid) continue;
+      if (!rfqsBySup.has(sid)) rfqsBySup.set(sid, []);
+      rfqsBySup.get(sid).push(r);
+    }
+    // Price points per supplier
+    const pxBySup = new Map();
+    for (const p of prices) {
+      if (!p.supplier_id) continue;
+      if (!pxBySup.has(p.supplier_id)) pxBySup.set(p.supplier_id, []);
+      pxBySup.get(p.supplier_id).push(p);
+    }
+    const rows = suppliers.map(s => {
+      const px = pxBySup.get(s.id) || [];
+      const supRfqs = rfqsBySup.get(s.id) || [];
+      const wins = supRfqs.filter(r => r.status === 'closed').length;
+      const distinctMats = new Set(px.map(p => p.material_id)).size;
+      const lastQuote = px.length ? px[0].captured_at : null; // prices ordered desc
+      return {
+        ...s,
+        status3: s.status || (s.active === false ? 'Non-Active' : 'Active'),
+        pricePoints: px,
+        itemsSold: distinctMats,
+        quotes: px.length,
+        rfqCount: supRfqs.length,
+        wins,
+        winRate: supRfqs.length ? (wins / supRfqs.length) * 100 : null,
+        lastQuote,
+        rfqList: supRfqs,
+      };
+    });
+    return { rows, matById };
+  }, [suppliers, prices, rfqs, materials]);
+
+  return { ...intel, loading, err };
+}
 
 /* =================== List screen =================== */
 export function ScreenSupplierDB({ go }) {
   const [q, setQ] = useState('');
-  const [cat, setCat] = useState('ทั้งหมด');
+  const [typeFilter, setTypeFilter] = useState('ทั้งหมด');
+  const { rows, loading, err } = useSupplierIntel();
 
-  const cats = ['ทั้งหมด','งานโครงสร้าง','งานก่ออิฐ-ฉาบปูน','งานหลังคา','งานพื้น-ผนัง','งานสุขภัณฑ์','งานสี','งานระบบไฟฟ้า'];
+  const filtered = useMemo(() => {
+    const v = q.toLowerCase();
+    return rows.filter(s => {
+      if (typeFilter !== 'ทั้งหมด' && !(s.type || '').toLowerCase().includes(typeFilter.toLowerCase())) return false;
+      if (s.status3 === 'Blacklist') return true; // still visible — flagged in row
+      if (q && !((s.name || '').toLowerCase().includes(v) || (s.code || '').toLowerCase().includes(v))) return false;
+      return true;
+    }).filter(s => !q || (s.name || '').toLowerCase().includes(v) || (s.code || '').toLowerCase().includes(v));
+  }, [rows, typeFilter, q]);
 
-  const filtered = SUPPLIER_DB.filter(s => {
-    if (cat !== 'ทั้งหมด' && !s.categories.includes(cat)) return false;
-    if (q) {
-      const v = q.toLowerCase();
-      // Lowercased compare across all 3 fields (was case-sensitive on the
-      // categories branch, so searching "งานไฟฟ้า" missed "งานระบบไฟฟ้า"
-      // entries when the user's case didn't match exactly).
-      if (!(s.name.toLowerCase().includes(v) || s.id.toLowerCase().includes(v) || s.categories.some(c => c.toLowerCase().includes(v)))) return false;
-    }
-    return true;
-  });
-
-  const totalItems    = SUPPLIER_DB.reduce((a,s) => a + s.items, 0);
-  const totalQuotes30 = SUPPLIER_DB.reduce((a,s) => a + s.quotes, 0);
-  const avgWin        = SUPPLIER_DB.length ? (SUPPLIER_DB.reduce((a,s) => a + s.winRate, 0) / SUPPLIER_DB.length).toFixed(1) : '0.0';
-  const avgResp       = SUPPLIER_DB.length ? (SUPPLIER_DB.reduce((a,s) => a + s.avgResp, 0) / SUPPLIER_DB.length).toFixed(1) : '0.0';
+  const stats = useMemo(() => {
+    const active = rows.filter(s => s.status3 === 'Active');
+    const totalQuotes = rows.reduce((a, s) => a + s.quotes, 0);
+    const withRfq = rows.filter(s => s.rfqCount > 0);
+    const avgWin = withRfq.length
+      ? withRfq.reduce((a, s) => a + (s.winRate || 0), 0) / withRfq.length
+      : null;
+    const itemsSold = rows.reduce((a, s) => a + s.itemsSold, 0);
+    return { total: rows.length, active: active.length, totalQuotes, avgWin, itemsSold };
+  }, [rows]);
 
   return (
     <div className="page">
@@ -46,23 +124,22 @@ export function ScreenSupplierDB({ go }) {
           <h1 className="h-display">Supplier Database</h1>
           <p style={{ fontSize:14, color:'var(--ink-3)', margin:'6px 0 0', maxWidth:640 }}>
             สำรวจดูว่า Supplier แต่ละเจ้าขายอะไรบ้าง · เคยเสนอราคามาแล้วกี่ครั้ง ·
-            อัตราชนะ RFQ · เวลาตอบกลับเฉลี่ย — ใช้ประกอบการตัดสินใจ
+            อัตราชนะ RFQ — ใช้ประกอบการตัดสินใจ
           </p>
         </div>
+        <button className="btn" onClick={() => go('suppliers')}>{Icons.edit} จัดการ Supplier Master</button>
       </div>
 
-      {/* Top stats */}
       <div style={{
-        display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:0,
+        display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:0,
         borderTop:'1px solid var(--rule)', borderBottom:'1px solid var(--rule)',
         padding:'24px 0', marginBottom:32,
       }}>
         {[
-          { label:'Supplier ทั้งหมด',  value: SUPPLIER_DB.length, sub:'ในระบบและพร้อมใช้' },
-          { label:'รายการที่ขาย',       value: totalItems.toLocaleString(), sub: SUPPLIER_DB.length ? ('รายการเฉลี่ย/เจ้า ' + Math.round(totalItems/SUPPLIER_DB.length)) : 'ยังไม่มีข้อมูล' },
-          { label:'ใบเสนอราคา 12 ด.',   value: totalQuotes30.toLocaleString(), sub:'จากทุก Supplier' },
-          { label:'อัตราชนะเฉลี่ย',      value: avgWin + '%', sub:'การชนะ RFQ ที่ส่งให้' },
-          { label:'ตอบกลับเฉลี่ย',       value: avgResp + ' วัน', sub:'หลังส่ง RFQ' },
+          { label:'Supplier ทั้งหมด', value: loading ? '…' : stats.total, sub:`${stats.active} Active` },
+          { label:'รายการที่เคยเสนอราคา', value: loading ? '…' : stats.itemsSold, sub:'distinct วัสดุ' },
+          { label:'ราคาในระบบ', value: loading ? '…' : stats.totalQuotes, sub:'price points ทั้งหมด' },
+          { label:'อัตราชนะเฉลี่ย', value: loading ? '…' : (stats.avgWin == null ? '—' : stats.avgWin.toFixed(0) + '%'), sub:'RFQ → ปิดงาน' },
         ].map((s, i) => (
           <div key={i} style={{ paddingLeft: i === 0 ? 0 : 28, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
             <div className="stat-label">{s.label}</div>
@@ -72,14 +149,13 @@ export function ScreenSupplierDB({ go }) {
         ))}
       </div>
 
-      {/* Filters */}
       <div style={{ display:'flex', gap:8, alignItems:'center', marginBottom:16, flexWrap:'wrap' }}>
-        <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-          {cats.map(c => (
-            <button key={c} onClick={() => setCat(c)} className="btn sm" style={{
-              background: cat === c ? 'var(--ink)' : 'transparent',
-              color: cat === c ? 'var(--paper)' : 'var(--ink-2)',
-              borderColor: cat === c ? 'var(--ink)' : 'var(--rule)',
+        <div style={{ display:'flex', gap:4 }}>
+          {['ทั้งหมด','Material','SubContract'].map(c => (
+            <button key={c} onClick={() => setTypeFilter(c)} className="btn sm" style={{
+              background: typeFilter === c ? 'var(--ink)' : 'transparent',
+              color: typeFilter === c ? 'var(--paper)' : 'var(--ink-2)',
+              borderColor: typeFilter === c ? 'var(--ink)' : 'var(--rule)',
               padding:'5px 12px',
             }}>{c}</button>
           ))}
@@ -92,65 +168,77 @@ export function ScreenSupplierDB({ go }) {
         </div>
       </div>
 
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
+
       <div className="card" style={{ padding:0 }}>
         <table className="tbl">
           <thead>
             <tr>
               <th style={{ width:'10%' }}>รหัส</th>
-              <th>Supplier · หมวด</th>
-              <th className="num-col">รายการที่ขาย</th>
-              <th className="num-col">ใบเสนอราคา 12 ด.</th>
+              <th>Supplier · ประเภท</th>
+              <th className="num-col">รายการที่เสนอ</th>
+              <th className="num-col">ราคาในระบบ</th>
+              <th className="num-col">RFQ · ชนะ</th>
               <th className="num-col">Win Rate</th>
-              <th className="num-col">ตอบกลับ</th>
               <th>เครดิตเทอม</th>
-              <th>ราคา MoM</th>
+              <th>เสนอราคาล่าสุด</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {loading ? (
+              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+            ) : filtered.length === 0 ? (
               <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
-                ยังไม่มีข้อมูล
+                ยังไม่มี Supplier — เพิ่มได้ที่ Settings → ผู้ขาย/ผู้รับเหมา
               </td></tr>
             ) : filtered.map(s => (
-              <tr key={s.id} onClick={() => go('supplierdb-detail')} style={{ cursor:'pointer' }}>
-                <td className="font-mono" style={{ fontSize:11.5, color:'var(--ink-2)', fontWeight:500 }}>{s.id}</td>
+              <tr key={s.id} onClick={() => {
+                  try { window.localStorage.setItem('supplierdb.currentId', s.id); } catch {}
+                  go('supplierdb-detail');
+                }} style={{ cursor:'pointer' }}>
+                <td className="font-mono" style={{ fontSize:11.5, color:'var(--ink-2)', fontWeight:500 }}>{s.code}</td>
                 <td>
                   <div style={{ display:'inline-flex', gap:10, alignItems:'center' }}>
-                    <Av initials={s.name.slice(0,2)} kind={s.kind} />
+                    <Av initials={(s.name || '').slice(0,2)} kind="default" />
                     <div>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                         <span style={{ fontWeight:500 }}>{s.name}</span>
-                        {s.statusBadge && (
-                          <span style={{
-                            display:'inline-block', padding:'1px 7px', borderRadius:3,
-                            background: s.statusBadge === 'พรีเมียม' ? 'var(--teal-soft)' : 'var(--paper-2)',
-                            color: s.statusBadge === 'พรีเมียม' ? 'var(--teal-ink)' : 'var(--ink-2)',
-                            fontSize:10, fontWeight:600, letterSpacing:0.04,
-                          }}>{s.statusBadge}</span>
+                        {s.status3 === 'Blacklist' && (
+                          <span style={{ display:'inline-block', padding:'1px 7px', borderRadius:3,
+                            background:'var(--clay-soft)', color:'#6B2D1A', fontSize:10, fontWeight:600 }}>Blacklist</span>
+                        )}
+                        {s.status3 === 'Non-Active' && (
+                          <span style={{ display:'inline-block', padding:'1px 7px', borderRadius:3,
+                            background:'var(--paper-2)', color:'var(--ink-3)', fontSize:10, fontWeight:600 }}>Non-Active</span>
                         )}
                       </div>
-                      <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>{s.categories.join(' · ')}</div>
+                      <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>
+                        {(s.type || '—').split(',').map(t => t.trim()).filter(Boolean).join(' · ')}
+                      </div>
                     </div>
                   </div>
                 </td>
-                <td className="num-col num" style={{ color:'var(--ink-2)' }}>{s.items}</td>
+                <td className="num-col num" style={{ color:'var(--ink-2)' }}>{s.itemsSold || '—'}</td>
+                <td className="num-col num" style={{ color:'var(--ink-2)' }}>{s.quotes || '—'}</td>
                 <td className="num-col">
-                  <div className="num" style={{ color:'var(--ink-2)' }}>{s.quotes}</div>
-                  <div style={{ fontSize:10.5, color:'var(--ink-3)', marginTop:2 }}>RFQ {s.rfqs} · ชนะ {s.wins}</div>
+                  {s.rfqCount
+                    ? <span className="num">{s.rfqCount} · {s.wins}</span>
+                    : <span style={{ color:'var(--ink-4)' }}>—</span>}
                 </td>
                 <td className="num-col">
-                  <div style={{ display:'inline-flex', alignItems:'center', gap:6, justifyContent:'flex-end' }}>
-                    <div style={{ width:54, height:5, background:'var(--rule)', borderRadius:999, overflow:'hidden' }}>
-                      <div style={{ width:`${s.winRate}%`, height:'100%', background:'var(--teal)' }} />
+                  {s.winRate == null ? <span style={{ color:'var(--ink-4)' }}>—</span> : (
+                    <div style={{ display:'inline-flex', alignItems:'center', gap:6, justifyContent:'flex-end' }}>
+                      <div style={{ width:54, height:5, background:'var(--rule)', borderRadius:999, overflow:'hidden' }}>
+                        <div style={{ width:`${s.winRate}%`, height:'100%', background:'var(--teal)' }} />
+                      </div>
+                      <span className="num" style={{ fontSize:12, fontWeight:500, minWidth:42 }}>{s.winRate.toFixed(0)}%</span>
                     </div>
-                    <span className="num" style={{ fontSize:12, fontWeight:500, minWidth:42 }}>{s.winRate.toFixed(1)}%</span>
-                  </div>
+                  )}
                 </td>
-                <td className="num-col num" style={{ color: s.avgResp < 1 ? 'var(--moss)' : s.avgResp > 1.5 ? 'var(--ochre)' : 'var(--ink-2)' }}>
-                  {s.avgResp} วัน
-                </td>
-                <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{s.credit}</td>
-                <td><Delta pct={s.avgDelta} dir={s.avgDeltaDir} /></td>
+                <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{s.payment_terms || '—'}</td>
+                <td style={{ fontSize:12, color:'var(--ink-3)' }}>{fmtDate(s.lastQuote)}</td>
               </tr>
             ))}
           </tbody>
@@ -162,8 +250,45 @@ export function ScreenSupplierDB({ go }) {
 
 /* =================== Detail screen =================== */
 export function ScreenSupplierDBDetail({ go }) {
-  const tabs = ['ภาพรวม','รายการที่ขาย','ประวัติการเสนอราคา','RFQ ที่เกี่ยวข้อง'];
-  const [tab, setTab] = useState('ภาพรวม');
+  const { rows, matById, loading, err } = useSupplierIntel();
+  const [supId, setSupId] = useState(null);
+
+  useEffect(() => {
+    try { setSupId(window.localStorage.getItem('supplierdb.currentId')); } catch {}
+  }, []);
+
+  const sup = useMemo(
+    () => rows.find(s => s.id === supId) || rows[0] || null,
+    [rows, supId]
+  );
+
+  // Latest price per material this supplier quoted
+  const priceRows = useMemo(() => {
+    if (!sup) return [];
+    const seen = new Set();
+    const out = [];
+    for (const p of sup.pricePoints) {        // ordered captured_at desc
+      if (seen.has(p.material_id)) continue;
+      seen.add(p.material_id);
+      const m = matById.get(p.material_id);
+      out.push({
+        id: p.id, name: m?.name || p.material_id, code: m?.code || '',
+        price: Number(p.price), at: p.captured_at, source: p.source, sourceId: p.source_id,
+      });
+    }
+    return out;
+  }, [sup, matById]);
+
+  if (loading) {
+    return (
+      <div className="page">
+        <button className="btn ghost sm" onClick={() => go('supplierdb')} style={{ marginBottom:20, marginLeft:-8 }}>
+          {Icons.back} กลับไป Supplier Database
+        </button>
+        <div style={{ padding:40, textAlign:'center', color:'var(--ink-3)' }}>กำลังโหลด…</div>
+      </div>
+    );
+  }
 
   return (
     <div className="page">
@@ -171,39 +296,39 @@ export function ScreenSupplierDBDetail({ go }) {
         {Icons.back} กลับไป Supplier Database
       </button>
 
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
+
       <div className="page-head" style={{ alignItems:'flex-start' }}>
         <div className="page-title">
           <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6 }}>
-            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>—</span>
-            <Chip kind="active">Active</Chip>
+            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{sup?.code || '—'}</span>
+            <Chip kind={sup?.status3 === 'Active' ? 'active' : 'draft'}>{sup?.status3 || '—'}</Chip>
           </div>
-          <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-            <h1 className="h-display" style={{ margin:0 }}>ยังไม่มีข้อมูล</h1>
-          </div>
+          <h1 className="h-display" style={{ margin:0 }}>{sup?.name || 'ยังไม่มีข้อมูล'}</h1>
           <div style={{ display:'flex', gap:24, marginTop:12, fontSize:13, color:'var(--ink-3)', flexWrap:'wrap' }}>
-            <span>หมวด <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
-            <span>เครดิตเทอม <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
-            <span>ผู้ติดต่อ <strong style={{ color:'var(--ink-2)' }}>—</strong></span>
+            <span>ประเภท <strong style={{ color:'var(--ink-2)' }}>{(sup?.type || '—').split(',').map(t=>t.trim()).filter(Boolean).join(' · ') || '—'}</strong></span>
+            <span>เครดิตเทอม <strong style={{ color:'var(--ink-2)' }}>{sup?.payment_terms || '—'}</strong></span>
+            <span>ผู้ติดต่อ <strong style={{ color:'var(--ink-2)' }}>{sup?.contact_name || '—'}</strong>{sup?.phone ? ` · ${sup.phone}` : ''}</span>
           </div>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn">{Icons.edit} แก้ไขข้อมูล Master</button>
+          <button className="btn" onClick={() => go('suppliers')}>{Icons.edit} แก้ไขข้อมูล Master</button>
           <button className="btn primary" onClick={() => go('rfq-create')}>สร้าง RFQ ให้ Supplier นี้</button>
         </div>
       </div>
 
-      {/* Stats grid */}
       <div style={{
-        display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:0,
+        display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:0,
         borderTop:'1px solid var(--rule)', borderBottom:'1px solid var(--rule)',
         padding:'24px 0', marginBottom:32,
       }}>
         {[
-          { label:'รายการที่ขาย',     value: 0,        sub:'ใน Material/SubContract' },
-          { label:'ใบเสนอราคา 12 ด.', value: 0,        sub:'ยังไม่มีข้อมูล' },
-          { label:'RFQ ที่ได้รับ',     value: 0,        sub:'ยังไม่มีข้อมูล' },
-          { label:'ตอบกลับเฉลี่ย',     value: '— วัน',  sub:'หลังส่ง RFQ' },
-          { label:'ยอดสั่งซื้อ YTD',    value: money(0), sub:'12 เดือนล่าสุด' },
+          { label:'รายการที่เคยเสนอ', value: sup?.itemsSold ?? 0, sub:'distinct วัสดุ' },
+          { label:'ราคาในระบบ', value: sup?.quotes ?? 0, sub:'price points' },
+          { label:'RFQ ที่ได้รับ', value: sup?.rfqCount ?? 0, sub:`ปิดงาน ${sup?.wins ?? 0} ใบ` },
+          { label:'Win Rate', value: sup?.winRate == null ? '—' : sup.winRate.toFixed(0) + '%', sub:'RFQ → ปิดงาน' },
         ].map((stat, i) => (
           <div key={i} style={{ paddingLeft: i === 0 ? 0 : 28, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
             <div className="stat-label">{stat.label}</div>
@@ -213,271 +338,69 @@ export function ScreenSupplierDBDetail({ go }) {
         ))}
       </div>
 
-      <div className="tabs" style={{ marginBottom:24 }}>
-        {tabs.map(t => (
-          <div key={t} className={"tab" + (tab === t ? " active" : "")} onClick={() => setTab(t)}>{t}</div>
-        ))}
-      </div>
-
-      {tab === 'ภาพรวม' && <OverviewTab />}
-      {tab === 'รายการที่ขาย' && <ProductsTab />}
-      {tab === 'ประวัติการเสนอราคา' && <QuoteHistoryTab />}
-      {tab === 'RFQ ที่เกี่ยวข้อง' && <RFQRelatedTab />}
-    </div>
-  );
-}
-
-function OverviewTab() {
-  const topItems = [];
-  const performance = [];
-  const activities = [];
-
-  return (
-    <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:32 }}>
-      <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
-
-        {/* Quote frequency chart */}
+      <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:32, alignItems:'flex-start' }}>
+        {/* Latest price per material */}
         <div className="card" style={{ padding:0 }}>
-          <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)', display:'flex', alignItems:'baseline', justifyContent:'space-between' }}>
-            <div>
-              <h3 className="h-card">การเสนอราคาย้อนหลัง 12 เดือน</h3>
-              <p style={{ fontSize:11.5, color:'var(--ink-3)', margin:'4px 0 0' }}>จำนวนใบเสนอราคา · แยกเป็นที่ชนะและไม่ชนะ</p>
-            </div>
-          </div>
-          <div style={{ padding:40, textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
-            ยังไม่มีข้อมูล
-          </div>
-        </div>
-
-        {/* Top items */}
-        <div className="card" style={{ padding:0 }}>
-          <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
-            <h3 className="h-card">รายการที่เสนอบ่อยที่สุด</h3>
+          <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--rule)' }}>
+            <h3 className="h-card">ราคาล่าสุดที่เคยเสนอ · {priceRows.length} รายการ</h3>
           </div>
           <table className="tbl">
             <thead>
               <tr>
-                <th style={{ width:'16%' }}>รหัส</th>
-                <th>รายการ</th>
-                <th className="num-col">จำนวนครั้ง</th>
-                <th className="num-col">ราคาเฉลี่ย</th>
-                <th>เทรนด์ 6 ด.</th>
+                <th>วัสดุ</th>
+                <th className="num-col">ราคา</th>
+                <th>ที่มา</th>
+                <th>เมื่อ</th>
               </tr>
             </thead>
             <tbody>
-              {topItems.length === 0 ? (
-                <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
-                  ยังไม่มีข้อมูล
+              {priceRows.length === 0 ? (
+                <tr><td colSpan={4} style={{ textAlign:'center', padding:32, color:'var(--ink-3)' }}>
+                  ยังไม่มีราคาจาก Supplier นี้
                 </td></tr>
-              ) : topItems.map(r => (
-                <tr key={r.code}>
-                  <td className="font-mono" style={{ fontSize:11.5, color:'var(--ink-2)' }}>{r.code}</td>
-                  <td style={{ fontWeight:500 }}>{r.name}</td>
-                  <td className="num-col num" style={{ color:'var(--ink-2)' }}>{r.n}</td>
-                  <td className="num-col num" style={{ fontWeight:500 }}>{money(r.avg)}</td>
-                  <td><Spark data={r.spark} w={120} h={26} color="var(--clay)" /></td>
+              ) : priceRows.map(p => (
+                <tr key={p.id}>
+                  <td>
+                    <div style={{ fontWeight:500, fontSize:13 }}>{p.name}</div>
+                    {p.code && <div className="font-mono" style={{ fontSize:10.5, color:'var(--ink-4)', marginTop:2 }}>{p.code}</div>}
+                  </td>
+                  <td className="num-col num" style={{ fontWeight:500 }}>{money(p.price)}</td>
+                  <td style={{ fontSize:11.5 }}>
+                    <span style={{ padding:'1px 8px', borderRadius:3,
+                      background: p.source === 'RFQ' ? 'var(--teal-soft)' : 'var(--paper-2)',
+                      color: p.source === 'RFQ' ? 'var(--teal-ink)' : 'var(--ink-2)', fontWeight:500 }}>
+                      {p.source === 'RFQ' ? (p.sourceId || 'RFQ') : 'Manual'}
+                    </span>
+                  </td>
+                  <td style={{ fontSize:12, color:'var(--ink-3)' }}>{fmtDate(p.at)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </div>
 
-      {/* Right rail */}
-      <aside style={{ display:'flex', flexDirection:'column', gap:16 }}>
-        <div className="card">
-          <div className="eyebrow" style={{ marginBottom:12 }}>Performance Score</div>
-          <div style={{ fontFamily:'var(--font-serif)', fontSize:42, lineHeight:1, color:'var(--teal-ink)' }}>
-            —<span style={{ fontSize:18, color:'var(--ink-3)', marginLeft:6 }}>/ 10</span>
+        {/* RFQ history */}
+        <div className="card" style={{ padding:0 }}>
+          <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--rule)' }}>
+            <h3 className="h-card">RFQ ที่ส่งให้ · {sup?.rfqCount ?? 0} ใบ</h3>
           </div>
-          {performance.length === 0 ? (
-            <div style={{ marginTop:14, fontSize:12, color:'var(--ink-3)', textAlign:'center', padding:'12px 0' }}>
-              ยังไม่มีข้อมูล
+          {(!sup || sup.rfqList.length === 0) ? (
+            <div style={{ padding:32, textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
+              ยังไม่เคยส่ง RFQ ให้ Supplier นี้
             </div>
-          ) : (
-            <div style={{ marginTop:14, display:'flex', flexDirection:'column', gap:10 }}>
-              {performance.map(r => (
-                <div key={r.label}>
-                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:11.5, marginBottom:4 }}>
-                    <span style={{ color:'var(--ink-3)' }}>{r.label}</span>
-                    <span className="num" style={{ fontWeight:500 }}>{r.score.toFixed(1)}</span>
-                  </div>
-                  <div style={{ height:4, background:'var(--rule)', borderRadius:999, overflow:'hidden' }}>
-                    <div style={{ width:`${r.score*10}%`, height:'100%', background:'var(--teal)' }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="card">
-          <div className="eyebrow" style={{ marginBottom:10 }}>กิจกรรมล่าสุด</div>
-          {activities.length === 0 ? (
-            <div style={{ textAlign:'center', padding:20, color:'var(--ink-3)', fontSize:12 }}>
-              ยังไม่มีข้อมูล
-            </div>
-          ) : activities.map((a, i) => (
-            <div key={i} style={{ display:'flex', gap:10, padding:'10px 0', borderBottom: i < activities.length - 1 ? '1px solid var(--rule)' : 'none' }}>
-              <span style={{ fontFamily:'var(--font-mono)', fontSize:10.5, color:'var(--ink-3)', minWidth:50 }}>{a.d}</span>
-              <span style={{ fontSize:12, color:a.tone === 'moss' ? 'var(--moss)' : 'var(--ink-2)', lineHeight:1.5 }}>{a.what}</span>
+          ) : sup.rfqList.map((r, i) => (
+            <div key={r.id} onClick={() => { try { localStorage.setItem('rfq.currentId', r.id); } catch {} go('rfq-confirm'); }}
+              style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 20px',
+                       borderTop: i ? '1px solid var(--rule)' : 'none', cursor:'pointer' }}>
+              <span className="font-mono" style={{ fontSize:11.5, fontWeight:500, color:'var(--ink-2)' }}>{r.no}</span>
+              <span style={{ flex:1, fontSize:12.5, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.title}</span>
+              <span style={{ fontSize:11, color:'var(--ink-3)' }}>
+                {{ draft:'ร่าง', sent:'ส่งแล้ว', received:'ได้ Quote', closed:'ปิดงาน', cancelled:'ยกเลิก' }[r.status] || r.status}
+              </span>
             </div>
           ))}
         </div>
-      </aside>
-    </div>
-  );
-}
-
-function ProductsTab() {
-  const products = [];
-  return (
-    <div className="card" style={{ padding:0 }}>
-      <div style={{ padding:'14px 24px', borderBottom:'1px solid var(--rule)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <div>
-          <h3 className="h-card">รายการที่ Supplier เคยขาย / เสนอราคา</h3>
-          <p style={{ fontSize:11.5, color:'var(--ink-3)', margin:'4px 0 0' }}>ราคาแสดงเป็น net · ไม่รวม VAT/Overhead</p>
-        </div>
-        <span style={{ fontSize:12.5, color:'var(--ink-3)' }}>
-          <strong style={{ color:'var(--ink)' }}>{products.length}</strong> รายการ
-        </span>
       </div>
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th style={{ width:'16%' }}>รหัส</th>
-            <th>รายการ</th>
-            <th>หน่วย</th>
-            <th className="num-col">เสนอมาแล้ว</th>
-            <th className="num-col">ราคาล่าสุด (net)</th>
-            <th>วันที่เสนอ</th>
-          </tr>
-        </thead>
-        <tbody>
-          {products.length === 0 ? (
-            <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
-              ยังไม่มีข้อมูล
-            </td></tr>
-          ) : products.map(p => (
-            <tr key={p.code}>
-              <td className="font-mono" style={{ fontSize:11.5, color:'var(--ink-2)' }}>{p.code}</td>
-              <td>
-                <div style={{ fontWeight:500 }}>{p.name}</div>
-                <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>{p.spec}</div>
-              </td>
-              <td style={{ fontSize:12.5, color:'var(--ink-3)' }}>{p.unit}</td>
-              <td className="num-col num" style={{ color:'var(--ink-2)' }}>{p.n} ครั้ง</td>
-              <td className="num-col num" style={{ fontWeight:500 }}>{money(p.lastP)}</td>
-              <td style={{ fontSize:12, color:'var(--ink-3)' }}>{p.lastDate}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
-
-function QuoteHistoryTab() {
-  const quotes = [];
-  const RES_PILL = {
-    won:     { bg:'var(--moss-soft)',    fg:'#2F4A1A',        dot:'var(--moss)', label:'ชนะ' },
-    lost:    { bg:'var(--clay-soft)',    fg:'#6B2D1A',        dot:'var(--clay)', label:'แพ้' },
-    pending: { bg:'var(--chip-recv-bg)', fg:'var(--chip-recv-fg)', dot:'var(--ochre)', label:'รอผล' },
-  };
-  return (
-    <div className="card" style={{ padding:0 }}>
-      <div style={{ padding:'14px 24px', borderBottom:'1px solid var(--rule)' }}>
-        <h3 className="h-card">ประวัติการเสนอราคา</h3>
-        <p style={{ fontSize:11.5, color:'var(--ink-3)', margin:'4px 0 0' }}>ทุกใบเสนอราคาที่ Supplier เคยตอบกลับ RFQ ของเรา</p>
-      </div>
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>วันที่เสนอ</th>
-            <th>RFQ</th>
-            <th>รายการ</th>
-            <th className="num-col">จำนวน</th>
-            <th className="num-col">ราคา (net)</th>
-            <th className="num-col">มูลค่ารวม</th>
-            <th>ผลการตัดสิน</th>
-          </tr>
-        </thead>
-        <tbody>
-          {quotes.length === 0 ? (
-            <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
-              ยังไม่มีข้อมูล
-            </td></tr>
-          ) : quotes.map(q => {
-            const p = RES_PILL[q.result];
-            return (
-              <tr key={q.rfq + q.item}>
-                <td style={{ fontSize:12, color:'var(--ink-2)' }}>{q.date}</td>
-                <td className="font-mono" style={{ fontSize:11.5, color:'var(--ink-2)' }}>{q.rfq}</td>
-                <td>{q.item}</td>
-                <td className="num-col num" style={{ color:'var(--ink-3)' }}>{q.qty.toLocaleString()} {q.unit}</td>
-                <td className="num-col num">{money(q.price)}</td>
-                <td className="num-col num" style={{ fontWeight:500 }}>{money(q.qty * q.price)}</td>
-                <td>
-                  <span style={{
-                    display:'inline-flex', alignItems:'center', gap:6,
-                    fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
-                    background: p.bg, color: p.fg,
-                  }}>
-                    <span style={{ width:6, height:6, borderRadius:999, background: p.dot }} />
-                    {p.label}
-                  </span>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function RFQRelatedTab() {
-  const rfqs = [];
-  return (
-    <div className="card" style={{ padding:0 }}>
-      <div style={{ padding:'14px 24px', borderBottom:'1px solid var(--rule)' }}>
-        <h3 className="h-card">RFQ ที่เกี่ยวข้องกับ Supplier นี้</h3>
-      </div>
-      <table className="tbl">
-        <thead>
-          <tr>
-            <th>RFQ No.</th>
-            <th>วันที่ส่ง</th>
-            <th className="num-col">รายการ</th>
-            <th className="num-col">มูลค่ารวม</th>
-            <th>สถานะ</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rfqs.length === 0 ? (
-            <tr><td colSpan={5} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
-              ยังไม่มีข้อมูล
-            </td></tr>
-          ) : rfqs.map(r => (
-            <tr key={r.no}>
-              <td className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500 }}>{r.no}</td>
-              <td style={{ fontSize:12.5, color:'var(--ink-2)' }}>{r.date}</td>
-              <td className="num-col num" style={{ color:'var(--ink-2)' }}>{r.items}</td>
-              <td className="num-col num" style={{ fontWeight:500 }}>{money(r.total)}</td>
-              <td>
-                {r.status === 'wait'
-                  ? <span style={{ display:'inline-flex', alignItems:'center', gap:6, fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999, background:'var(--ochre-soft)', color:'#6B5121' }}>
-                      <span style={{ width:6, height:6, borderRadius:999, background:'var(--ochre)' }} />Wait
-                    </span>
-                  : <span style={{ display:'inline-flex', alignItems:'center', gap:6, fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999, background:'var(--moss-soft)', color:'#2F4A1A' }}>
-                      <span style={{ width:6, height:6, borderRadius:999, background:'var(--moss)' }} />Received
-                    </span>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-

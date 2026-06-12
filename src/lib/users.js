@@ -1,11 +1,22 @@
 import { createHash } from 'crypto';
+import bcrypt from 'bcryptjs';
 import { supabase, isSupabaseConfigured } from './supabase';
 
+// Legacy scheme: single-round SHA-256(salt+password) — fast to brute-force.
+// New hashes use bcrypt (cost 10) and are recognizable by their $2 prefix.
+// verifyPassword() accepts both and transparently upgrades legacy hashes to
+// bcrypt on the next successful login.
 function hash(salt, password) {
   return createHash('sha256').update(salt + password).digest('hex');
 }
-function newSalt() {
-  return `ie_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+function makeHash(password) {
+  return bcrypt.hashSync(password, 10);
+}
+function checkPassword(user, password) {
+  if (typeof user?.hash === 'string' && user.hash.startsWith('$2')) {
+    return bcrypt.compareSync(password, user.hash);
+  }
+  return hash(user.salt, password) === user.hash;
 }
 const NOW = () => new Date().toISOString();
 
@@ -159,8 +170,13 @@ export async function validateUser(email, password) {
 
   const u = await findByEmail(key);
   if (!u) return null;
-  if (hash(u.salt, password) !== u.hash) return null;
-  await updateUser(key, { lastLogin: NOW() }).catch(() => {});
+  if (!checkPassword(u, password)) return null;
+  // Transparent upgrade: legacy SHA-256 hashes get re-written as bcrypt on
+  // a successful login, so the weak hashes age out without user action.
+  const upgrade = (typeof u.hash === 'string' && !u.hash.startsWith('$2'))
+    ? { hash: makeHash(password), salt: '' }
+    : {};
+  await updateUser(key, { lastLogin: NOW(), ...upgrade }).catch(() => {});
   return { id: u.id, email: u.email, name: u.name, role: u.role };
 }
 
@@ -172,11 +188,10 @@ export async function registerUser(name, email, password) {
   if (await findByEmail(key)) {
     throw new Error('อีเมลนี้มีผู้ใช้งานแล้ว');
   }
-  const salt = newSalt();
   const newUser = {
     id: `user_${Date.now()}`,
     name, email: key, role: 'user', phone: '',
-    salt, hash: hash(salt, password),
+    salt: '', hash: makeHash(password),
     createdAt: NOW(), lastLogin: null, verified: true,
   };
   await insertUser(newUser);
@@ -190,11 +205,10 @@ export async function updatePassword(email, oldPassword, newPassword) {
   }
   const u = await findByEmail(key);
   if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
-  if (hash(u.salt, oldPassword) !== u.hash) {
+  if (!checkPassword(u, oldPassword)) {
     throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง');
   }
-  const salt = newSalt();
-  await updateUser(key, { salt, hash: hash(salt, newPassword) });
+  await updateUser(key, { salt: '', hash: makeHash(newPassword) });
   return true;
 }
 
@@ -240,8 +254,7 @@ export async function forceResetPassword(email, newPassword) {
   }
   const u = await findByEmail(key);
   if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
-  const salt = newSalt();
-  await updateUser(key, { salt, hash: hash(salt, newPassword) });
+  await updateUser(key, { salt: '', hash: makeHash(newPassword) });
   return true;
 }
 
@@ -306,11 +319,10 @@ export async function adminCreateUser(name, email, password, role = 'user') {
   if (BUILTIN.find(b => b.email.toLowerCase() === key) || await findByEmail(key)) {
     throw new Error('อีเมลนี้มีผู้ใช้งานแล้ว');
   }
-  const salt = newSalt();
   const u = {
     id: `user_${Date.now()}`,
     name, email: key, role, phone: '',
-    salt, hash: hash(salt, password),
+    salt: '', hash: makeHash(password),
     createdAt: NOW(), lastLogin: null, verified: true,
   };
   await insertUser(u);
@@ -324,7 +336,6 @@ export async function adminResetPassword(email, newPassword) {
   }
   const u = await findByEmail(key);
   if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
-  const salt = newSalt();
-  await updateUser(key, { salt, hash: hash(salt, newPassword) });
+  await updateUser(key, { salt: '', hash: makeHash(newPassword) });
   return true;
 }

@@ -31,8 +31,6 @@ function nextMaterialCode(existing) {
   return `MAT-${String(max + 1).padStart(5, '0')}`;
 }
 
-// NOTE: stub kept for backwards compatibility.
-export const MATERIAL_CATEGORIES = [];
 
 export function ScreenSettingsMaterials({ go }) {
   const [items, setItems]     = useState([]);

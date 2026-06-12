@@ -52,7 +52,23 @@ export const authOptions = {
     },
     async jwt({ token, user }) {
       // Persist role from the authorize() return value into the JWT
-      if (user) token.role = user.role;
+      if (user) {
+        token.role = user.role;
+        token.roleCheckedAt = Date.now();
+        return token;
+      }
+      // Refresh the role from the user store every 5 minutes so an admin's
+      // role change takes effect without forcing a re-login (JWTs otherwise
+      // pin the role for their whole 30-day life).
+      const STALE_MS = 5 * 60 * 1000;
+      if (token.email && (!token.roleCheckedAt || Date.now() - token.roleCheckedAt > STALE_MS)) {
+        try {
+          const { getProfile } = await import('./users');
+          const p = await getProfile(token.email);
+          if (p?.role) token.role = p.role;
+        } catch { /* keep the cached role on transient DB errors */ }
+        token.roleCheckedAt = Date.now();
+      }
       return token;
     },
     async session({ session, token }) {
