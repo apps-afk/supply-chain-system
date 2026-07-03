@@ -37,6 +37,16 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   );
 }
 
+// Server-side role cache (email → { role, at }). getServerSession() runs the
+// jwt callback on every API request but can't persist a mutated token back to
+// the cookie, so a `roleCheckedAt` stored on the token would stay stale and
+// trigger a DB lookup on EVERY request once the cookie ages past the window.
+// Caching here bounds it to at most one lookup per email per window per
+// serverless instance. Lives on globalThis so all route modules share it.
+const ROLE_TTL_MS = 5 * 60 * 1000;
+if (!globalThis.__ieRoleCache) globalThis.__ieRoleCache = new Map();
+const roleCache = globalThis.__ieRoleCache;
+
 export const authOptions = {
   providers,
   callbacks: {
@@ -51,23 +61,30 @@ export const authOptions = {
       return true;
     },
     async jwt({ token, user }) {
-      // Persist role from the authorize() return value into the JWT
+      // Fresh sign-in — trust authorize()'s role and prime the cache.
       if (user) {
         token.role = user.role;
-        token.roleCheckedAt = Date.now();
+        if (token.email) roleCache.set(token.email.toLowerCase(), { role: user.role, at: Date.now() });
         return token;
       }
-      // Refresh the role from the user store every 5 minutes so an admin's
-      // role change takes effect without forcing a re-login (JWTs otherwise
-      // pin the role for their whole 30-day life).
-      const STALE_MS = 5 * 60 * 1000;
-      if (token.email && (!token.roleCheckedAt || Date.now() - token.roleCheckedAt > STALE_MS)) {
-        try {
-          const { getProfile } = await import('./users');
-          const p = await getProfile(token.email);
-          if (p?.role) token.role = p.role;
-        } catch { /* keep the cached role on transient DB errors */ }
-        token.roleCheckedAt = Date.now();
+      // Subsequent requests: refresh the role from the store at most once per
+      // TTL per email (so an admin's role change applies without re-login,
+      // but we don't hammer the DB on every API call).
+      if (token.email) {
+        const key = token.email.toLowerCase();
+        const cached = roleCache.get(key);
+        if (cached && Date.now() - cached.at < ROLE_TTL_MS) {
+          token.role = cached.role;               // cache hit — no DB
+        } else {
+          let role = token.role;
+          try {
+            const { getProfile } = await import('./users');
+            const p = await getProfile(token.email);
+            if (p?.role) role = p.role;
+          } catch { /* keep the last known role on transient DB errors */ }
+          token.role = role;
+          roleCache.set(key, { role, at: Date.now() });
+        }
       }
       return token;
     },

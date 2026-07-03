@@ -289,17 +289,26 @@ export async function getProfile(email) {
   };
 }
 
+// Drop the auth role cache for one email so a role change is reflected on
+// the next request served by THIS instance (other instances refresh within
+// the TTL). Shares the globalThis key set in lib/auth.js.
+function bustRoleCache(emailLower) {
+  try { globalThis.__ieRoleCache?.delete(emailLower); } catch {}
+}
+
 export async function updateUserRole(email, newRole) {
   if (!ROLES.find(r => r.value === newRole)) throw new Error('บทบาทไม่ถูกต้อง');
   const key = email.toLowerCase();
   const builtin = BUILTIN.find(b => b.email.toLowerCase() === key);
   if (builtin) {
     memBuiltinMeta[key] = { ...(memBuiltinMeta[key] || {}), role: newRole };
+    bustRoleCache(key);
     return true;
   }
   const u = await findByEmail(key);
   if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
   await updateUser(key, { role: newRole });
+  bustRoleCache(key);
   return true;
 }
 
@@ -311,6 +320,7 @@ export async function deleteUser(email) {
   const u = await findByEmail(key);
   if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
   await deleteByEmail(key);
+  bustRoleCache(key);
   return true;
 }
 
