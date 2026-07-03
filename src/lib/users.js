@@ -242,7 +242,8 @@ export async function updateProfile(currentEmail, patch) {
     if (patch.name      !== undefined) dbPatch.name  = patch.name;
     if (patch.phone     !== undefined) dbPatch.phone = patch.phone;
     if (emailChanged)                  dbPatch.email = patch.email.toLowerCase();
-    await updateUser(key, dbPatch);
+    // PostgREST rejects an empty update({}) — skip when nothing changed.
+    if (Object.keys(dbPatch).length > 0) await updateUser(key, dbPatch);
   }
   return { emailChanged };
 }

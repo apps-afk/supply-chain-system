@@ -8,11 +8,30 @@ import { SettingsSearchBox } from '../lib/settings-shared';
   Flow: Source (MAT/SUB) → pick Items → pick Suppliers (≥2) → live compare
 */
 
-// Auto comparison number — generated on submit
-function makeCmpNo() {
+// Auto comparison number — first free CMP-YYYY-#### slot from the existing
+// comparisons (mirrors the RFQ numbering). Time-derived fallback if the
+// list can't be fetched.
+async function makeCmpNo() {
   const y = new Date().getFullYear();
-  const seq = Math.floor(Math.random() * 9000 + 1000);
-  return `CMP-${y}-${seq}`;
+  const prefix = `CMP-${y}-`;
+  try {
+    const r = await fetch('/api/comparisons');
+    if (r.ok) {
+      const d = await r.json();
+      const used = new Set();
+      for (const c of (d.items || [])) {
+        const no = String(c?.no || '').trim();
+        if (no.startsWith(prefix)) {
+          const n = parseInt(no.slice(prefix.length), 10);
+          if (!Number.isNaN(n)) used.add(n);
+        }
+      }
+      let n = 1;
+      while (used.has(n)) n++;
+      return `${prefix}${String(n).padStart(4, '0')}`;
+    }
+  } catch { /* fall through */ }
+  return `${prefix}${String(Date.now() % 10000).padStart(4, '0')}`;
 }
 export const NEXT_CMP_NO = '';
 
@@ -209,7 +228,7 @@ export function ScreenCompareCreatePriceDB({ go }) {
   async function submitComparison() {
     setSubmitErr('');
     setSubmitting(true);
-    const cmpNo = makeCmpNo();
+    const cmpNo = await makeCmpNo();
     // Compute total_low / total_high from per-supplier totals
     const totalVals = Object.values(totals).filter(v => v > 0);
     const total_low  = totalVals.length ? Math.min(...totalVals) : 0;

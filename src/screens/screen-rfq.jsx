@@ -147,7 +147,7 @@ export function ScreenRFQ({ go }) {
   const projName = (id) => projById.get(id)?.name || '—';
 
   // Past-due heuristic: due_date in the past + status 'sent'
-  const today = new Date().toISOString().slice(0,10);
+  const today = new Date().toLocaleDateString('sv-SE'); // local YYYY-MM-DD (not UTC)
 
   // status counts + overdue computed in one pass (was 6 .filter() calls per render)
   const { statusCounts, overdue } = useMemo(() => {
@@ -430,7 +430,11 @@ export function ScreenRFQConfirm({ go }) {
       } catch {}
       setUploadOk(d.file);
       // Read the just-uploaded workbook and pull the supplier's prices in.
-      await readQuoteIntoItems(quoteFile);
+      // Only Excel files can be parsed for prices/conditions — a PDF or
+      // photo quote uploads fine to Drive but has nothing machine-readable.
+      if (/\.(xlsx|xls)$/i.test(quoteFile.name || '')) {
+        await readQuoteIntoItems(quoteFile);
+      }
     } catch {
       setUploadErr('เครือข่ายขัดข้อง');
     }
@@ -455,11 +459,13 @@ export function ScreenRFQConfirm({ go }) {
         return { ...it, newP: px, oldP, save: true };
       }));
       // Merge the parsed quote conditions into the editable card + persist
-      // them so they survive into the Compare flow.
+      // them so they survive into the Compare flow. Functional merge so any
+      // edits the user typed while the parse was running are kept (file
+      // values still win for keys the file actually provided).
       if (conditions && Object.keys(conditions).length > 0) {
-        const merged = { ...conds, ...conditions };
-        setConds(merged);
-        await persistConditions(merged, /*silent*/ true);
+        let merged = null;
+        setConds(prev => { merged = { ...prev, ...conditions }; return merged; });
+        if (merged) await persistConditions(merged, /*silent*/ true);
       }
       if (matched === 0) {
         setUploadErr(`อ่านไฟล์แล้ว แต่ไม่พบราคาที่ตรงกับรหัสรายการ (0/${total}) — ตรวจสอบว่าใช้ไฟล์ Template ของ RFQ นี้และไม่ได้แก้คอลัมน์รหัส`);
@@ -478,13 +484,33 @@ export function ScreenRFQConfirm({ go }) {
     if (!rfq) return;
     if (!silent) { setCondsBusy(true); setCondsMsg(''); }
     try {
-      const nextNotes = JSON.stringify({ ...(parsed || {}), conditions: values });
+      // Re-fetch the row and merge into its CURRENT notes — writing from the
+      // possibly-stale `parsed` state could wipe the items/supplier payload
+      // (last-writer-wins) if another tab saved after we loaded, or if our
+      // hydration parse failed while the row actually has data.
+      let current = parsed || {};
+      try {
+        const rNow = await fetch('/api/rfqs');
+        if (rNow.ok) {
+          const dNow = await rNow.json();
+          const rowNow = (dNow.items || []).find(x => x.id === rfq.id);
+          if (rowNow?.notes) {
+            try { current = JSON.parse(rowNow.notes) || {}; }
+            catch {
+              // Row has notes we can't parse — refuse to overwrite them.
+              if (!silent) { setCondsMsg('บันทึกไม่ได้ — ข้อมูล RFQ ในระบบอ่านไม่ออก'); setCondsBusy(false); }
+              return;
+            }
+          }
+        }
+      } catch { /* network hiccup — fall back to local snapshot */ }
+      const nextNotes = JSON.stringify({ ...current, conditions: values });
       const r = await fetch('/api/rfqs', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: rfq.id, notes: nextNotes }),
       });
       if (r.ok) {
-        setParsed(p => ({ ...(p || {}), conditions: values }));
+        setParsed({ ...current, conditions: values });
         if (!silent) setCondsMsg('บันทึกเงื่อนไขแล้ว');
       } else if (!silent) {
         const d = await r.json().catch(() => ({}));
@@ -652,19 +678,26 @@ export function ScreenRFQConfirm({ go }) {
             display:'flex', gap:12, alignItems:'center',
           }}>
             <span style={{ color:'var(--moss)' }}>{Icons.check}</span>
+            {(() => { const isExcel = /\.(xlsx|xls)$/i.test(quoteFile?.name || uploadOk.name || ''); return (
+            <>
             <div style={{ flex:1 }}>
               <div style={{ fontSize:13, fontWeight:500, color:'#2F4A1A' }}>
-                อัปโหลดสำเร็จ {readBusy ? '· กำลังอ่านราคา…' : '· อ่านราคาจากไฟล์แล้ว'}
+                อัปโหลดสำเร็จ {isExcel ? (readBusy ? '· กำลังอ่านราคา…' : '· อ่านราคาจากไฟล์แล้ว') : ''}
               </div>
               <div style={{ fontSize:11.5, color:'#2F4A1A', marginTop:2 }}>
-                {uploadOk.name} · เก็บเข้า Google Drive แล้ว · ตรวจสอบราคาด้านล่างก่อนบันทึกเข้า Price DB
+                {uploadOk.name} · เก็บเข้า Google Drive แล้ว
+                {isExcel
+                  ? ' · ตรวจสอบราคาด้านล่างก่อนบันทึกเข้า Price DB'
+                  : ' · ไฟล์นี้อ่านราคาอัตโนมัติไม่ได้ (ไม่ใช่ Excel) — กรอกราคาในตารางเองได้'}
               </div>
             </div>
-            {quoteFile && (
+            {quoteFile && isExcel && (
               <button className="btn sm" onClick={() => readQuoteIntoItems(quoteFile)} disabled={readBusy}>
                 {readBusy ? 'อ่าน…' : 'อ่านไฟล์อีกครั้ง'}
               </button>
             )}
+            </>
+            ); })()}
             {uploadOk.viewLink && (
               <a href={uploadOk.viewLink} target="_blank" rel="noreferrer" className="btn sm">
                 {Icons.external} เปิดดู

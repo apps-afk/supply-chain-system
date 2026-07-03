@@ -15,10 +15,30 @@ import {
   Flow: Pick ≥2 received RFQs (same category) → merge items → live compare with terms
 */
 
-function makeCmpNo() {
+// Running CMP number CMP-YYYY-#### — first free slot for the current year
+// based on the existing comparisons (same approach as RFQ numbers). Falls
+// back to a time-derived suffix if the list can't be fetched.
+async function makeCmpNo() {
   const y = new Date().getFullYear();
-  const seq = Math.floor(Math.random() * 9000 + 1000);
-  return `CMP-${y}-${seq}`;
+  const prefix = `CMP-${y}-`;
+  try {
+    const r = await fetch('/api/comparisons');
+    if (r.ok) {
+      const d = await r.json();
+      const used = new Set();
+      for (const c of (d.items || [])) {
+        const no = String(c?.no || '').trim();
+        if (no.startsWith(prefix)) {
+          const n = parseInt(no.slice(prefix.length), 10);
+          if (!Number.isNaN(n)) used.add(n);
+        }
+      }
+      let n = 1;
+      while (used.has(n)) n++;
+      return `${prefix}${String(n).padStart(4, '0')}`;
+    }
+  } catch { /* fall through */ }
+  return `${prefix}${String(Date.now() % 10000).padStart(4, '0')}`;
 }
 
 export function ScreenCompareCreateRFQ({ go }) {
@@ -51,14 +71,12 @@ export function ScreenCompareCreateRFQ({ go }) {
         if (rM.ok)  { try { materials   = (await rM.json()).items  || []; } catch {} }
         const matIdByCode = new Map(materials.map(m => [m.code, m.id]));
 
-        // Latest price per (material_id, source_id) and per material —
-        // pricePoints come ordered captured_at desc, so first match wins.
+        // Latest price per (material_id, source_id) — pricePoints come
+        // ordered captured_at desc, so first match wins.
         const byRfq = new Map();    // `${material_id}|${source_id}` → price
-        const latest = new Map();   // material_id → price
         for (const p of pricePoints) {
           const k = `${p.material_id}|${p.source_id || ''}`;
           if (!byRfq.has(k)) byRfq.set(k, Number(p.price));
-          if (!latest.has(p.material_id)) latest.set(p.material_id, Number(p.price));
         }
 
         // Include both 'received' and 'closed' RFQs — saving prices closes
@@ -71,8 +89,11 @@ export function ScreenCompareCreateRFQ({ go }) {
             const rawItems = Array.isArray(parsed?.items) ? parsed.items : [];
             const items = rawItems.map(it => {
               const matId = matIdByCode.get(it.itemCode);
+              // Only the price recorded for THIS RFQ counts — falling back to
+              // "latest from any supplier" would attribute someone else's
+              // price to this supplier on an approval document.
               const price = matId != null
-                ? (byRfq.get(`${matId}|${x.no || ''}`) ?? latest.get(matId) ?? null)
+                ? (byRfq.get(`${matId}|${x.no || ''}`) ?? null)
                 : null;
               return {
                 code: it.itemCode,
@@ -169,7 +190,7 @@ export function ScreenCompareCreateRFQ({ go }) {
   async function submitComparison() {
     setSubmitErr('');
     setSubmitting(true);
-    const cmpNo = makeCmpNo();
+    const cmpNo = await makeCmpNo();
     const totalVals = Object.values(totals).filter(v => v > 0);
     const total_low  = totalVals.length ? Math.min(...totalVals) : 0;
     const total_high = totalVals.length ? Math.max(...totalVals) : 0;
@@ -446,8 +467,7 @@ export function ScreenCompareCreateRFQ({ go }) {
         </div>
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
           <button className="btn ghost" onClick={() => go('compare')}>ยกเลิก</button>
-          <button className="btn" disabled={!canCompare || submitting} onClick={submitComparison}>บันทึกร่าง</button>
-          <button className="btn primary" disabled={!canCompare || submitting}
+          <button className="btn primary" disabled={!canCompare || submitting || generated}
             onClick={submitComparison}
             style={{ padding:'10px 20px', opacity: (canCompare && !submitting) ? 1 : 0.5, cursor: (canCompare && !submitting) ? 'pointer' : 'not-allowed' }}>
             {Icons.check} {submitting ? 'กำลังบันทึก…' : 'Compare & สร้างเอกสาร'}

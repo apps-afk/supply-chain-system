@@ -99,10 +99,9 @@ export function ScreenSupplierDB({ go }) {
     const v = q.toLowerCase();
     return rows.filter(s => {
       if (typeFilter !== 'ทั้งหมด' && !(s.type || '').toLowerCase().includes(typeFilter.toLowerCase())) return false;
-      if (s.status3 === 'Blacklist') return true; // still visible — flagged in row
       if (q && !((s.name || '').toLowerCase().includes(v) || (s.code || '').toLowerCase().includes(v))) return false;
       return true;
-    }).filter(s => !q || (s.name || '').toLowerCase().includes(v) || (s.code || '').toLowerCase().includes(v));
+    });
   }, [rows, typeFilter, q]);
 
   const stats = useMemo(() => {
@@ -258,7 +257,9 @@ export function ScreenSupplierDBDetail({ go }) {
   }, []);
 
   const sup = useMemo(
-    () => rows.find(s => s.id === supId) || rows[0] || null,
+    // No silent fallback to rows[0] — a stale/deleted id must show "not
+    // found" rather than a different supplier's data.
+    () => (supId ? rows.find(s => s.id === supId) || null : rows[0] || null),
     [rows, supId]
   );
 

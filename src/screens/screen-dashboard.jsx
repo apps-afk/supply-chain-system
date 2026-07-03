@@ -77,7 +77,7 @@ export function ScreenDashboard({ go }) {
 
     const openStatuses = new Set(['draft', 'sent', 'received']);
     const openRfqs = rfqs.filter(r => openStatuses.has(r.status));
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString('sv-SE'); // local YYYY-MM-DD (not UTC)
     const overdue = openRfqs.filter(r => r.status === 'sent' && r.due_date && r.due_date < today).length;
 
     const active = contracts.filter(c => c.status === 'active');
@@ -101,7 +101,7 @@ export function ScreenDashboard({ go }) {
   // Actionable items for "ต้องดูวันนี้"
   const todos = useMemo(() => {
     const out = [];
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString('sv-SE'); // local YYYY-MM-DD (not UTC)
     for (const r of rfqs) {
       if (r.status === 'sent' && r.due_date && r.due_date < today) {
         out.push({ icon: '⏰', tone: 'var(--clay)', text: `RFQ ${r.no} เกินกำหนดเสนอราคา (${fmtDate(r.due_date)})`, nav: () => { try { localStorage.setItem('rfq.currentId', r.id); } catch {} go('rfq-confirm'); } });
