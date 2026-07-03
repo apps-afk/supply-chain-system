@@ -26,6 +26,8 @@ const ScreenPriceDB                = dynamic(() => import('./screens/screen-pric
 const ScreenPriceDBDetail          = dynamic(() => import('./screens/screen-pricedb').then(m => ({ default: m.ScreenPriceDBDetail })), { loading: LoadingPage });
 const ScreenContractList           = dynamic(() => import('./screens/screen-contract').then(m => ({ default: m.ScreenContractList })), { loading: LoadingPage });
 const ScreenContract               = dynamic(() => import('./screens/screen-contract').then(m => ({ default: m.ScreenContract })), { loading: LoadingPage });
+const ScreenPOList                 = dynamic(() => import('./screens/screen-po').then(m => ({ default: m.ScreenPOList })), { loading: LoadingPage });
+const ScreenPODetail               = dynamic(() => import('./screens/screen-po').then(m => ({ default: m.ScreenPODetail })), { loading: LoadingPage });
 const ScreenSupplierDB             = dynamic(() => import('./screens/screen-supplierdb').then(m => ({ default: m.ScreenSupplierDB })), { loading: LoadingPage });
 const ScreenSupplierDBDetail       = dynamic(() => import('./screens/screen-supplierdb').then(m => ({ default: m.ScreenSupplierDBDetail })), { loading: LoadingPage });
 const ScreenSettingsProjects       = dynamic(() => import('./screens/screen-settings-projects').then(m => ({ default: m.ScreenSettingsProjects })), { loading: LoadingPage });
@@ -55,6 +57,8 @@ const CRUMBS = {
   'compare-upload-ref':     ['งานหลัก', 'เปรียบเทียบราคา', 'อัปโหลดข้อมูลอ้างอิง'],
   'pricedb':                ['งานหลัก', 'ฐานข้อมูลราคา'],
   'pricedb-detail':         ['งานหลัก', 'ฐานข้อมูลราคา', 'เหล็กเส้น DB12'],
+  'po':                     ['งานหลัก', 'ใบสั่งซื้อ'],
+  'po-detail':              ['งานหลัก', 'ใบสั่งซื้อ', 'รายละเอียด'],
   'contract':               ['งานหลัก', 'เอกสาร'],
   'contract-detail':        ['งานหลัก', 'เอกสาร', 'รายละเอียดเอกสาร'],
   'supplierdb':             ['ข้อมูล', 'ฐานข้อมูลผู้ขาย'],
@@ -87,6 +91,8 @@ const ACTIVE_NAV = {
   'compare-upload-ref':     'compare',
   'pricedb':                'pricedb',
   'pricedb-detail':         'pricedb',
+  'po':                     'po',
+  'po-detail':              'po',
   'contract':               'contract',
   'contract-detail':        'contract',
   'supplierdb':             'supplierdb',
@@ -156,6 +162,8 @@ export default function App() {
       case 'pricedb-detail':         return <ScreenPriceDBDetail go={go} />;
       case 'contract':               return <ScreenContractList go={go} />;
       case 'contract-detail':        return <ScreenContract go={go} />;
+      case 'po':                     return <ScreenPOList go={go} />;
+      case 'po-detail':              return <ScreenPODetail go={go} />;
       case 'supplierdb':             return <ScreenSupplierDB go={go} />;
       case 'supplierdb-detail':      return <ScreenSupplierDBDetail go={go} />;
       case 'settings-projects':       return <ScreenSettingsProjects go={go} />;
@@ -186,6 +194,7 @@ export default function App() {
       'rfq':            'rfq',
       'pricedb':        'pricedb',
       'compare':        'compare',
+      'po':             'po',
       'contract':       'contract-detail',
       'supplierdb':     'supplierdb',
       'projects':       'settings-projects',

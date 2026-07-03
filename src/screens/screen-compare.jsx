@@ -1,6 +1,8 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, money } from '../lib/shell';
+import { printDoc } from './screen-compare-create-pricedb';
+import { nextPoNo } from './screen-po';
 
 /*
   Compare detail — renders a saved comparison from /api/comparisons.
@@ -31,6 +33,7 @@ export function ScreenCompare({ go }) {
   const [loading, setLoading]   = useState(true);
   const [err, setErr]           = useState('');
   const [statusBusy, setStatusBusy] = useState(false);
+  const [poBusy, setPoBusy] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -83,6 +86,48 @@ export function ScreenCompare({ go }) {
     const p = projects.find(x => x.id === cmp?.project_id);
     return p ? (p.code ? `${p.code} · ${p.name}` : p.name) : '—';
   }, [projects, cmp]);
+
+  // Turn the approved comparison into a Purchase Order: winner supplier +
+  // that supplier's prices per line, running PO number, status 'ordered'.
+  async function createPO() {
+    if (!cmp) return;
+    const winnerName = cmp.suppliers_json?.selectedSupplier || '';
+    const winner = suppliers.find(s => s.name === winnerName) || suppliers.find(s => s.id === bestId) || suppliers[0];
+    if (!winner) { setErr('ไม่พบ Supplier ในเอกสารนี้'); return; }
+    if (!confirm(`สร้างใบสั่งซื้อกับ "${winner.name}"?`)) return;
+    setPoBusy(true); setErr('');
+    try {
+      const poItems = items.map(it => ({
+        code: it.code, name: it.name, unit: it.unit || '',
+        qty: Number(it.qty) || 1,
+        price: it.prices?.[winner.id] != null ? Number(it.prices[winner.id]) : null,
+      }));
+      const amount = poItems.reduce((s2, it) => s2 + (it.price != null ? it.price * it.qty : 0), 0);
+      const no = await nextPoNo();
+      const r = await fetch('/api/purchase-orders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          no,
+          comparison_id: cmp.id,
+          project_id: cmp.project_id || null,
+          // pseudo ids (rfq_*) aren't real supplier rows — keep the name only
+          supplier_id: String(winner.id || '').startsWith('rfq_') ? null : (winner.id || null),
+          supplier_name: winner.name,
+          title: `สั่งซื้อตาม ${cmp.no} · ${winner.name}`,
+          status: 'ordered',
+          items_json: poItems,
+          amount,
+          notes: '',
+          ordered_at: new Date().toLocaleDateString('sv-SE'),
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'สร้างใบสั่งซื้อไม่สำเร็จ'); setPoBusy(false); return; }
+      try { localStorage.setItem('po.currentId', d.item.id); } catch {}
+      go('po-detail');
+    } catch { setErr('เครือข่ายขัดข้อง'); }
+    setPoBusy(false);
+  }
 
   async function changeStatus(next) {
     if (!cmp || next === cmp.status) return;
@@ -151,7 +196,15 @@ export function ScreenCompare({ go }) {
             {selectedName && <span>เลือกแล้ว <strong style={{ color: 'var(--teal-ink)' }}>{selectedName}</strong></span>}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {cmp.status === 'finalized' && (
+            <button className="btn primary" onClick={createPO} disabled={poBusy}>
+              {poBusy ? 'กำลังสร้าง…' : <>{Icons.plus} สร้างใบสั่งซื้อ</>}
+            </button>
+          )}
+          <button className={cmp.status === 'finalized' ? 'btn' : 'btn primary'} onClick={() => printDoc(`${cmp.no}_Compare`)}>
+            {Icons.download} พิมพ์ / PDF
+          </button>
           <button className="btn" onClick={() => {
             try { window.localStorage.setItem('cmp.currentId', cmp.id); } catch {}
             go('compare-upload-ref');
@@ -164,7 +217,7 @@ export function ScreenCompare({ go }) {
       </div>
 
       {/* Comparison table */}
-      <div className="card" style={{ padding: 0, overflow: 'auto' }}>
+      <div className="card print-area" style={{ padding: 0, overflow: 'auto' }}>
         <table className="tbl" style={{ minWidth: 640 }}>
           <thead>
             <tr>

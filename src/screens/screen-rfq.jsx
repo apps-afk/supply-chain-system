@@ -607,6 +607,16 @@ export function ScreenRFQConfirm({ go }) {
         overheadHint: parsed?.overheadHint || '',
         notes: parsed?.memo || '',
       });
+      // Draft → sent on download (same behaviour as the create screen).
+      if (rfq.status === 'draft') {
+        try {
+          const r2 = await fetch('/api/rfqs', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: rfq.id, status: 'sent' }),
+          });
+          if (r2.ok) setRfq(rf => ({ ...rf, status: 'sent' }));
+        } catch { /* best-effort */ }
+      }
     } catch (e) {
       setErr('สร้างไฟล์ Excel ไม่สำเร็จ: ' + (e?.message || ''));
     }

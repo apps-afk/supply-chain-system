@@ -1004,6 +1004,23 @@ export function Row({ label, value, last }) {
 }
 
 /* =================== Generated success view (shared by Mode A + Mode B) =================== */
+// Browser print-to-PDF: hide everything except the .print-area, open the
+// print dialog (user picks "Save as PDF"), then restore. Reliable Thai
+// rendering with zero PDF-library weight.
+export function printDoc(title) {
+  const prev = document.title;
+  if (title) document.title = title;
+  document.body.classList.add('print-doc-mode');
+  const cleanup = () => {
+    document.body.classList.remove('print-doc-mode');
+    document.title = prev;
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+  setTimeout(cleanup, 2000); // fallback for browsers that skip afterprint
+}
+
 export function GeneratedCompare({ go, rfqMode, source, items, suppliers, supplierObjs, totals, aiBest, cmpNo }) {
   // supplierObjs: provided when caller has full supplier rows ({id,name,kind}); fallback to ID-only stubs
   const suppObjs = Array.isArray(supplierObjs) && supplierObjs.length
@@ -1031,8 +1048,10 @@ export function GeneratedCompare({ go, rfqMode, source, items, suppliers, suppli
           </p>
 
           <div style={{ display:'flex', gap:8, marginTop:24, flexWrap:'wrap' }}>
-            <button className="btn primary">{Icons.download} ดาวน์โหลด PDF</button>
-            <button className="btn">{Icons.upload} Upload Ref เอกสาร</button>
+            <button className="btn primary" onClick={() => printDoc(`${displayNo}_Compare`)}>
+              {Icons.download} ดาวน์โหลด PDF
+            </button>
+            <button className="btn" onClick={() => go('compare-upload-ref')}>{Icons.upload} Upload Ref เอกสาร</button>
             <button className="btn ghost" onClick={() => go('compare')}>ดูเอกสารทั้งหมด</button>
           </div>
         </div>
@@ -1061,7 +1080,9 @@ export function GeneratedCompare({ go, rfqMode, source, items, suppliers, suppli
       </div>
 
       <h3 className="h-section" style={{ marginBottom:16 }}>ตัวอย่างเอกสาร PDF</h3>
-      <ComparePDFPreview items={items} suppliers={suppObjs} totals={totals} aiBest={aiBest} winner={winner} mode={rfqMode ? 'RFQ' : 'PriceDB'} cmpNo={displayNo} />
+      <div className="print-area">
+        <ComparePDFPreview items={items} suppliers={suppObjs} totals={totals} aiBest={aiBest} winner={winner} mode={rfqMode ? 'RFQ' : 'PriceDB'} cmpNo={displayNo} />
+      </div>
     </div>
   );
 }

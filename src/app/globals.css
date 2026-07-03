@@ -500,3 +500,17 @@ input, textarea, select { font-family: inherit; }
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ---- Print mode: expose only the marked document area (Compare PDF, PO) ---- */
+@media print {
+  body.print-doc-mode { background: #fff; }
+  body.print-doc-mode .side,
+  body.print-doc-mode .topbar { display: none !important; }
+  body.print-doc-mode .app { display: block !important; }
+  body.print-doc-mode .main { display: block !important; }
+  body.print-doc-mode .page > *:not(.print-area) { display: none !important; }
+  body.print-doc-mode .print-area {
+    box-shadow: none !important;
+    border: none !important;
+  }
+}

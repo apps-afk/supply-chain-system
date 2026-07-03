@@ -318,3 +318,30 @@ create table if not exists file_attachments (
 );
 create index if not exists attachments_entity_idx on file_attachments (entity_type, entity_id);
 create index if not exists attachments_category_idx on file_attachments (category);
+
+-- ============================================================
+-- Purchase Orders — created from a finalized comparison (P1)
+-- ============================================================
+create table if not exists purchase_orders (
+  id            text primary key,
+  no            text unique not null,
+  comparison_id text references comparisons(id) on delete set null,
+  project_id    text references projects(id) on delete set null,
+  supplier_id   text references suppliers(id) on delete set null,
+  supplier_name text default '',
+  title         text default '',
+  status        text default 'ordered' check (status in ('ordered','received','closed','cancelled')),
+  items_json    jsonb default '[]',
+  amount        numeric default 0,
+  notes         text default '',
+  created_by    text default '',
+  ordered_at    date,
+  received_at   date,
+  closed_at     date,
+  created_at    timestamptz default now()
+);
+create index if not exists po_status_idx on purchase_orders (status);
+
+-- Retention release tracking (P1): who closed out the retention and when.
+alter table contracts add column if not exists retention_released_at date;
+alter table contracts add column if not exists retention_released_by text default '';

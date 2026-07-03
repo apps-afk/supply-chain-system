@@ -11,7 +11,8 @@ export const runtime = 'nodejs';   // googleapis (used in cascade delete) needs 
 const h = createCrudRoutes('contracts', {
   fields: ['no', 'project_id', 'supplier_id', 'type_id', 'title',
            'amount', 'currency', 'status', 'start_date', 'end_date',
-           'signed_at', 'warranty', 'notes'],
+           'signed_at', 'warranty', 'notes',
+           'retention_released_at', 'retention_released_by'],
   orderBy: 'created_at',
   orderDir: 'desc',
   idPrefix: 'ct',

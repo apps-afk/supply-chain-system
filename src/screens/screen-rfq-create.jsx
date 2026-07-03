@@ -865,6 +865,18 @@ function GeneratedView({ go, rfqNo, title, supplier, project, projects, items, c
         return { code: it.itemCode, name: m.name || '', spec: m.spec || '', qty: it.qty, unit: it.unit };
       });
       await downloadRfqExcel({ rfqNo, supplier, project: projectObj, title, due, contact, items: rows, overheadHint, notes });
+      // Downloading the RFQ file = it's about to go to the supplier. Flip
+      // draft → sent automatically so the overdue stats work without the
+      // user remembering to change status by hand.
+      try {
+        const id = window.localStorage.getItem('rfq.currentId');
+        if (id) {
+          await fetch('/api/rfqs', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, status: 'sent' }),
+          });
+        }
+      } catch { /* status bump is best-effort */ }
     } catch (e) {
       setDlErr('สร้างไฟล์ Excel ไม่สำเร็จ: ' + (e?.message || ''));
     }

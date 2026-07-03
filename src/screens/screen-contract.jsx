@@ -89,6 +89,10 @@ function parseWarrantyDays(text) {
  * Returns { state: 'due' | 'soon' | 'pending' | 'unknown', releaseDate, daysLeft }
  */
 function retentionStatus(contract) {
+  // Already closed out — released beats every other state.
+  if (contract?.retention_released_at) {
+    return { state: 'released', releasedAt: contract.retention_released_at };
+  }
   const warrantyDays = parseWarrantyDays(contract?.warranty);
   const baseStr = contract?.end_date || contract?.signed_at;
   if (!warrantyDays || !baseStr) return { state: 'unknown' };
@@ -125,6 +129,27 @@ export function ScreenContractList({ go }) {
   const [projectFilter, setProjectFilter] = useState('all');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Close out the retention: stamp released date + who recorded it. The
+  // list refreshes so the row flips to "คืนแล้ว" and the dashboard todo
+  // for this contract disappears.
+  async function releaseRetention(c) {
+    if (!confirm(`บันทึกว่าคืนเงินประกันของ "${c.title || c.no}" แล้ว?`)) return;
+    try {
+      const me = await fetch('/api/account/profile').then(r => r.ok ? r.json() : null).catch(() => null);
+      const r = await fetch('/api/contracts', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: c.id,
+          retention_released_at: new Date().toLocaleDateString('sv-SE'),
+          retention_released_by: me?.profile?.email || me?.email || '',
+        }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'บันทึกไม่สำเร็จ'); return; }
+      setContracts(cs => cs.map(x => x.id === c.id
+        ? { ...x, retention_released_at: new Date().toLocaleDateString('sv-SE') } : x));
+    } catch { alert('เครือข่ายขัดข้อง'); }
+  }
 
   async function deleteContract(c, fileCount) {
     const msg = `ลบเอกสาร "${c.title || c.no}"?` +
@@ -305,11 +330,14 @@ export function ScreenContractList({ go }) {
               const atts = attachmentsByContract[c.id] || [];
               const latest = atts[0];
               const ret = retentionStatus(c);
-              const retColor = ret.state === 'due' ? '#8B2A1A'
+              const retColor = ret.state === 'released' ? '#2F4A1A'
+                             : ret.state === 'due' ? '#8B2A1A'
                              : ret.state === 'soon' ? '#6B5121'
                              : ret.state === 'pending' ? 'var(--ink-3)'
                              : 'var(--ink-4)';
-              const retLabel = ret.state === 'due'
+              const retLabel = ret.state === 'released'
+                  ? `✓ คืนแล้ว ${fmtDate(ret.releasedAt)}`
+                : ret.state === 'due'
                   ? `🔔 ถึงกำหนดเก็บคืน${ret.releaseDate ? ` (${fmtDate(ret.releaseDate.toISOString())})` : ''}`
                 : ret.state === 'soon'
                   ? `⚠ อีก ${ret.daysLeft} วัน · ${fmtDate(ret.releaseDate.toISOString())}`
@@ -348,6 +376,12 @@ export function ScreenContractList({ go }) {
                     </div>
                     {ret.state !== 'unknown' && (
                       <div style={{ color: retColor, marginTop:2, fontSize:11 }}>{retLabel}</div>
+                    )}
+                    {(ret.state === 'due' || ret.state === 'soon') && (
+                      <button className="btn sm" onClick={e => { e.stopPropagation(); releaseRetention(c); }}
+                        style={{ marginTop:6, padding:'2px 8px', fontSize:10.5 }}>
+                        บันทึกคืนเงินประกัน
+                      </button>
                     )}
                   </td>
                   <td onClick={e => e.stopPropagation()}>

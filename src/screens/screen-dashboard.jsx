@@ -25,6 +25,7 @@ function warrantyDays(text) {
   return days > 0 ? days : null;
 }
 function retentionInfo(c) {
+  if (c?.retention_released_at) return { released: true, daysLeft: Infinity };
   const wd = warrantyDays(c?.warranty);
   const baseStr = c?.end_date || c?.signed_at;
   if (!wd || !baseStr) return null;
@@ -97,6 +98,7 @@ export function ScreenDashboard({ go }) {
       if (!pct) continue;
       const amt = (Number(c.amount) || 0) * pct / 100;
       const info = retentionInfo(c);
+      if (info?.released) continue;                 // paid back — no exposure
       if (!info) { retentionUnknownCount++; retentionUnknownAmt += amt; continue; }
       if (info.daysLeft <= 0) continue; // already releasable
       retentionHeld += amt;
@@ -119,7 +121,7 @@ export function ScreenDashboard({ go }) {
     for (const c of contracts) {
       if (c.status !== 'active') continue;
       const info = retentionInfo(c);
-      if (!info) continue;
+      if (!info || info.released) continue;
       if (info.daysLeft <= 0) {
         out.push({ icon: '💰', tone: 'var(--clay)', text: `${c.no || c.title} — ครบกำหนดคืนเงินประกันแล้ว (${fmtDate(info.release.toISOString())})`, nav: () => { try { localStorage.setItem('contract.currentId', c.id); } catch {} go('contract'); } });
       } else if (info.daysLeft <= 30) {
