@@ -84,18 +84,25 @@ export function ScreenDashboard({ go }) {
     const activeValue = active.reduce((s, c) => s + (Number(c.amount) || 0), 0);
 
     // Retention exposure: amount × retention% of the contract's document
-    // type, summed over active contracts whose retention isn't released yet.
+    // type, over active contracts whose retention isn't released yet.
+    // Contracts with no parsable warranty have no release date — count them
+    // separately as "กำหนดคืนไม่ทราบ" instead of holding them in the total
+    // forever with no way to age out.
     const pctByType = Object.fromEntries(ctypes.map(t => [t.id, Number(t.retention_pct) || 0]));
     let retentionHeld = 0;
+    let retentionUnknownCount = 0;
+    let retentionUnknownAmt = 0;
     for (const c of active) {
       const pct = pctByType[c.type_id] || 0;
       if (!pct) continue;
+      const amt = (Number(c.amount) || 0) * pct / 100;
       const info = retentionInfo(c);
-      if (info && info.daysLeft <= 0) continue; // already releasable
-      retentionHeld += (Number(c.amount) || 0) * pct / 100;
+      if (!info) { retentionUnknownCount++; retentionUnknownAmt += amt; continue; }
+      if (info.daysLeft <= 0) continue; // already releasable
+      retentionHeld += amt;
     }
 
-    return { pricesTotal: prices.length, recentPrices, openRfqs: openRfqs.length, overdue, activeContracts: active.length, activeValue, retentionHeld };
+    return { pricesTotal: prices.length, recentPrices, openRfqs: openRfqs.length, overdue, activeContracts: active.length, activeValue, retentionHeld, retentionUnknownCount, retentionUnknownAmt };
   }, [prices, rfqs, contracts, ctypes]);
 
   // Actionable items for "ต้องดูวันนี้"
@@ -174,7 +181,9 @@ export function ScreenDashboard({ go }) {
           { label: 'สัญญาที่ใช้งานอยู่', value: loading ? '…' : String(stats.activeContracts), unit: 'ฉบับ',
             sub: stats.activeValue ? `มูลค่ารวม ${money(stats.activeValue)}` : 'ยังไม่มีรายการ' },
           { label: 'เงินประกันที่ถือไว้', value: loading ? '…' : money(stats.retentionHeld), unit: '',
-            sub: 'จาก % เก็บไว้ของประเภทเอกสาร' },
+            sub: stats.retentionUnknownCount
+              ? `+ ${money(stats.retentionUnknownAmt)} (${stats.retentionUnknownCount} สัญญา · ไม่ทราบกำหนดคืน)`
+              : 'จาก % เก็บไว้ของประเภทเอกสาร' },
         ].map((s, i) => (
           <div key={i} style={{ paddingLeft: i === 0 ? 0 : 32, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
             <Stat {...s} />

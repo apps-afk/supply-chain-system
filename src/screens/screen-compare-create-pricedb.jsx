@@ -70,6 +70,7 @@ export function ScreenCompareCreatePriceDB({ go }) {
   const [suppliers, setSuppliers] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [priceRows, setPriceRows] = useState([]);
+  const [units, setUnits] = useState([]);
   const [loading, setLoading]    = useState(true);
   const [loadErr, setLoadErr]    = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -79,14 +80,16 @@ export function ScreenCompareCreatePriceDB({ go }) {
     (async () => {
       setLoading(true); setLoadErr('');
       try {
-        const [sR, mR, pR] = await Promise.all([
+        const [sR, mR, pR, uR] = await Promise.all([
           fetch('/api/suppliers').then(r => r.json()),
           fetch('/api/materials').then(r => r.json()),
           fetch('/api/prices').then(r => r.json()),
+          fetch('/api/units').then(r => r.json()),
         ]);
         setSuppliers(sR.items || []);
         setMaterials(mR.items || []);
         setPriceRows(pR.items || []);
+        setUnits(uR.items || []);
       } catch {
         setLoadErr('โหลดข้อมูลไม่สำเร็จ');
       }
@@ -104,6 +107,14 @@ export function ScreenCompareCreatePriceDB({ go }) {
     return map;
   }, [priceRows]);
 
+  // Resolve unit_id → readable code (falls back to name, then blank) so the
+  // picker/PDF never shows a raw "unit_..." id.
+  const unitLabelById = useMemo(() => {
+    const m = new Map();
+    for (const u of units) m.set(u.id, u.code || u.name || '');
+    return m;
+  }, [units]);
+
   // Categories derived from materials in DB
   const categories = useMemo(() => {
     const byCat = new Map();
@@ -114,12 +125,12 @@ export function ScreenCompareCreatePriceDB({ go }) {
         code: m.code || m.id,
         name: m.name,
         spec: m.spec || '',
-        unit: m.unit_id || '',
+        unit: unitLabelById.get(m.unit_id) || '',
         id:   m.id,
       });
     }
     return [...byCat.values()];
-  }, [materials]);
+  }, [materials, unitLabelById]);
 
   // Suppliers that can be added (with kind hint based on type)
   const supplierOptions = useMemo(() =>
