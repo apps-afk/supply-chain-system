@@ -35,7 +35,11 @@ export function roleLabel(value) {
 
 /* ============================================================
    BUILTIN admin — exists as code, never stored in DB.
-   Password derived from ADMIN_PASSWORD env var (default Admin1234!).
+   SECURITY: logins are only accepted when ADMIN_PASSWORD is explicitly
+   set — a well-known default password on the most privileged account is
+   a takeover waiting to happen. With the env unset the account still
+   exists (listings don't break) but hash is null so validateUser rejects
+   every password. Real admins live in the users table (e.g. pasit@).
    ============================================================ */
 const BUILTIN = [
   {
@@ -45,7 +49,9 @@ const BUILTIN = [
     phone: '',
     role: 'admin',
     salt: 'ie_admin_salt_2025',
-    hash: hash('ie_admin_salt_2025', process.env.ADMIN_PASSWORD || 'Admin1234!'),
+    hash: process.env.ADMIN_PASSWORD
+      ? hash('ie_admin_salt_2025', process.env.ADMIN_PASSWORD)
+      : null,
     createdAt: '2025-01-01T00:00:00.000Z',
     verified: true,
     lastLogin: null,
@@ -163,7 +169,7 @@ export async function validateUser(email, password) {
   // BUILTIN first — never hits DB
   const b = BUILTIN.find(u => u.email.toLowerCase() === key);
   if (b) {
-    if (hash(b.salt, password) !== b.hash) return null;
+    if (!b.hash || hash(b.salt, password) !== b.hash) return null;
     memBuiltinMeta[key] = { ...(memBuiltinMeta[key] || {}), lastLogin: NOW() };
     return { id: b.id, email: b.email, name: b.name, role: (memBuiltinMeta[key]?.role || b.role) };
   }

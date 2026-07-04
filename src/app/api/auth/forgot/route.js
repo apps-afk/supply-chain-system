@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase, isSupabaseConfigured } from '../../../../lib/supabase';
+import { rateLimit, clientKey } from '../../../../lib/rate-limit';
 
 const DOMAIN = 'initialestate.com';
 
@@ -7,6 +8,10 @@ const DOMAIN = 'initialestate.com';
 // We enqueue the request and admin can action it from the workspace settings page.
 export async function POST(request) {
   try {
+    // Unauthenticated write endpoint — throttle per client to stop queue spam.
+    if (!rateLimit(`forgot:${clientKey(request)}`, { limit: 5, windowMs: 10 * 60 * 1000 })) {
+      return NextResponse.json({ error: 'ส่งคำขอบ่อยเกินไป — กรุณารอสักครู่' }, { status: 429 });
+    }
     const { email } = await request.json();
     if (!email || typeof email !== 'string') {
       return NextResponse.json({ error: 'กรุณาระบุอีเมล' }, { status: 400 });

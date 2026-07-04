@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
 import { forceResetPassword } from '../../../../lib/users';
+import { appendAudit } from '../../../../lib/workspace';
 
 // Reset the logged-in user's password without requiring the old one.
 // We rely on the session cookie as proof of identity — the user has
@@ -20,6 +21,7 @@ export async function POST(request) {
       );
     }
     await forceResetPassword(session.user.email, newPassword);
+    await appendAudit({ actor: session.user.email, action: 'auth.password_reset_self', target: 'self' });
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ error: e.message || 'เกิดข้อผิดพลาด' }, { status: 400 });

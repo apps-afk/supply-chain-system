@@ -27,6 +27,11 @@ async function requireSession() {
   if (!s?.user) {
     return { err: NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 }) };
   }
+  // role === null means the account was deleted after this JWT was issued
+  // (see lib/auth.js jwt callback) — revoke instead of serving stale access.
+  if (!s.user.role) {
+    return { err: NextResponse.json({ error: 'บัญชีนี้ถูกปิดการใช้งาน — กรุณาเข้าสู่ระบบใหม่' }, { status: 401 }) };
+  }
   return { session: s };
 }
 

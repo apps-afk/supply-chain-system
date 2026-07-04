@@ -2,6 +2,8 @@ import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { validateUser } from './users';
 import { NEXTAUTH_SECRET } from './auth-config';
+import { rateLimit } from './rate-limit';
+import { appendAudit } from './workspace';
 
 const DOMAIN = 'initialestate.com';
 
@@ -20,8 +22,17 @@ const providers = [
       if (!credentials.email.toLowerCase().endsWith(`@${DOMAIN}`)) {
         throw new Error(`อนุญาตเฉพาะบัญชี @${DOMAIN} เท่านั้น`);
       }
+      const key = credentials.email.toLowerCase();
+      // Brute-force brake: 8 attempts per 5 minutes per email.
+      if (!rateLimit(`login:${key}`, { limit: 8, windowMs: 5 * 60 * 1000 })) {
+        throw new Error('พยายามเข้าสู่ระบบบ่อยเกินไป — กรุณารอ 5 นาทีแล้วลองใหม่');
+      }
       const user = await validateUser(credentials.email, credentials.password);
-      if (!user) throw new Error('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      if (!user) {
+        await appendAudit({ actor: key, action: 'auth.login_failed', target: 'credentials' }).catch(() => {});
+        throw new Error('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      }
+      await appendAudit({ actor: key, action: 'auth.login', target: 'credentials' }).catch(() => {});
       return user;
     },
   }),
@@ -62,9 +73,19 @@ export const authOptions = {
     },
     async jwt({ token, user }) {
       // Fresh sign-in — trust authorize()'s role and prime the cache.
+      // Google sign-ins carry no role on the user object; resolve it from
+      // the store right away (fall back to read-only 'user') so the first
+      // requests aren't rejected by the role check in the API guards.
       if (user) {
-        token.role = user.role;
-        if (token.email) roleCache.set(token.email.toLowerCase(), { role: user.role, at: Date.now() });
+        let role = user.role;
+        if (!role && token.email) {
+          try {
+            const { getProfile } = await import('./users');
+            role = (await getProfile(token.email))?.role;
+          } catch { /* transient */ }
+        }
+        token.role = role || 'user';
+        if (token.email) roleCache.set(token.email.toLowerCase(), { role: token.role, at: Date.now() });
         return token;
       }
       // Subsequent requests: refresh the role from the store at most once per
@@ -80,7 +101,10 @@ export const authOptions = {
           try {
             const { getProfile } = await import('./users');
             const p = await getProfile(token.email);
-            if (p?.role) role = p.role;
+            // p === null means the account was DELETED — revoke the session's
+            // capabilities (role null fails every API guard) instead of
+            // coasting on the last-known role until the JWT expires.
+            role = p === null ? null : (p?.role || role);
           } catch { /* keep the last known role on transient DB errors */ }
           token.role = role;
           roleCache.set(key, { role, at: Date.now() });
@@ -97,6 +121,8 @@ export const authOptions = {
     },
   },
   pages: { signIn: '/login', error: '/login' },
+  // Cap how long a stolen/forgotten session stays valid.
+  session: { maxAge: 7 * 24 * 60 * 60 },
   // Use the SAME secret as the middleware — see lib/auth-config.js
   secret: NEXTAUTH_SECRET,
 };

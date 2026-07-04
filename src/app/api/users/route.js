@@ -4,6 +4,7 @@ import { authOptions } from '../../../lib/auth';
 import {
   listUsers, updateUserRole, deleteUser, adminCreateUser, adminResetPassword,
 } from '../../../lib/users';
+import { appendAudit } from '../../../lib/workspace';
 
 const DOMAIN = 'initialestate.com';
 
@@ -41,7 +42,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
-  const { err } = await requireAdmin();
+  const { err, session } = await requireAdmin();
   if (err) return err;
   try {
     const { name, email, password, role } = await request.json();
@@ -58,6 +59,7 @@ export async function POST(request) {
       return NextResponse.json({ error: 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' }, { status: 400 });
     }
     const user = await adminCreateUser(name.trim(), email.toLowerCase(), password, role || 'user');
+    await appendAudit({ actor: session.user.email, action: 'users.create', target: `${email.toLowerCase()} (${role || 'user'})` });
     return NextResponse.json({ ok: true, user });
   } catch (e) {
     return NextResponse.json({ error: e.message || 'เกิดข้อผิดพลาด' }, { status: 400 });
@@ -65,7 +67,7 @@ export async function POST(request) {
 }
 
 export async function PATCH(request) {
-  const { err } = await requireAdmin();
+  const { err, session } = await requireAdmin();
   if (err) return err;
   try {
     const body = await request.json();
@@ -73,12 +75,16 @@ export async function PATCH(request) {
     if (!email) {
       return NextResponse.json({ error: 'กรุณาระบุ email' }, { status: 400 });
     }
-    if (role) await updateUserRole(email, role);
+    if (role) {
+      await updateUserRole(email, role);
+      await appendAudit({ actor: session.user.email, action: 'users.role_change', target: `${email} → ${role}` });
+    }
     if (password) {
       if (password.length < 8) {
         return NextResponse.json({ error: 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร' }, { status: 400 });
       }
       await adminResetPassword(email, password);
+      await appendAudit({ actor: session.user.email, action: 'users.password_reset', target: email });
     }
     return NextResponse.json({ ok: true });
   } catch (e) {
@@ -98,6 +104,7 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'ไม่สามารถลบบัญชีตัวเองได้' }, { status: 400 });
     }
     await deleteUser(email);
+    await appendAudit({ actor: session.user.email, action: 'users.delete', target: email });
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ error: e.message || 'เกิดข้อผิดพลาด' }, { status: 400 });

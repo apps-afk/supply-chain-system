@@ -191,7 +191,9 @@ export default function App() {
       'pricedb':        'pricedb',
       'compare':        'compare',
       'po':             'po',
-      'contract':       'contract-detail',
+      // Sidebar "เอกสาร" lands on the LIST — the detail is reached from a row
+      // (previously it jumped straight into contract-detail, hiding the list).
+      'contract':       'contract',
       'supplierdb':     'supplierdb',
       'projects':       'settings-projects',
       'project-types':  'settings-project-types',

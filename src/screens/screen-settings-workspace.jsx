@@ -182,6 +182,19 @@ export function ScreenSettingsWorkspace({ go }) {
       {/* Row 2: Security & Data Protection */}
       <Card title="ความปลอดภัยและการปกป้องข้อมูล" subtitle="ตั้งค่าการป้องกันข้อมูลรั่วไหล และการเข้าถึงระบบ" style={{ marginTop: 24 }}>
         <SecuritySection s={settings.security} on={(k, v) => patch(`security.${k}`, v)} />
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--rule)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>สำรองข้อมูลทั้งระบบ</div>
+            <div style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
+              ดาวน์โหลดข้อมูลทุกตารางเป็นไฟล์ JSON (ไม่รวมรหัสผ่าน · ไฟล์แนบอยู่ใน Google Drive ตาม manifest)
+              — ควรทำเป็นประจำทุกสัปดาห์
+            </div>
+          </div>
+          <a className="btn" href="/api/workspace/export" download>
+            ดาวน์โหลด Backup (JSON)
+          </a>
+        </div>
       </Card>
 
       {/* Row 3: AI Usage Controls */}

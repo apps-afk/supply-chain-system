@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
 import { updatePassword } from '../../../../lib/users';
+import { appendAudit } from '../../../../lib/workspace';
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
@@ -20,6 +21,7 @@ export async function POST(request) {
       );
     }
     await updatePassword(session.user.email, oldPassword, newPassword);
+    await appendAudit({ actor: session.user.email, action: 'auth.password_change', target: 'self' });
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json({ error: err.message || 'เกิดข้อผิดพลาด' }, { status: 400 });

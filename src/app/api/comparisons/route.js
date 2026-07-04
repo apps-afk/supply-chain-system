@@ -21,7 +21,29 @@ const h = createCrudRoutes('comparisons', {
 
 export const GET    = h.list;
 export const POST   = h.create;
-export const PATCH  = h.update;
+
+// PATCH wrapper: "finalized" is an approval outcome, not an editable field.
+// When an active approval chain exists, the ONLY paths to finalized are the
+// /approve endpoint (chain complete) or an admin override — otherwise any
+// writer could skip the whole chain (the old Upload-Ref side door).
+export async function PATCH(request) {
+  let body;
+  try { body = await request.clone().json(); } catch { body = null; }
+  if (body?.status === 'finalized') {
+    const session = await getServerSession(authOptions);
+    if (session?.user && session.user.role !== 'admin' && isSupabaseConfigured) {
+      const { count } = await supabase
+        .from('approval_roles').select('id', { count: 'exact', head: true }).eq('active', true);
+      if ((count || 0) > 0) {
+        return NextResponse.json(
+          { error: 'ต้องอนุมัติผ่านลำดับผู้อนุมัติในหน้าใบเปรียบเทียบ (หรือให้ผู้ดูแลระบบยืนยัน)' },
+          { status: 403 }
+        );
+      }
+    }
+  }
+  return h.update(request);
+}
 
 // Custom DELETE — cascades into file_attachments + Drive. Previously the
 // shared CRUD remove() would leave file_attachments rows orphaned (entity_id

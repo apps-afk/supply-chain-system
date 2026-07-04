@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
 import { registerUser } from '../../../../lib/users';
+import { rateLimit, clientKey } from '../../../../lib/rate-limit';
 
 const DOMAIN = 'initialestate.com';
 
 export async function POST(request) {
   try {
+    // Unauthenticated write endpoint — throttle per client to stop spam.
+    if (!rateLimit(`register:${clientKey(request)}`, { limit: 5, windowMs: 10 * 60 * 1000 })) {
+      return NextResponse.json({ error: 'สมัครบ่อยเกินไป — กรุณารอสักครู่' }, { status: 429 });
+    }
     const { name, email, password } = await request.json();
 
     if (!name?.trim() || !email?.trim() || !password) {
