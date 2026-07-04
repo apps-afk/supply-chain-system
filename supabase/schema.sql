@@ -362,3 +362,15 @@ alter table purchase_orders add column if not exists payment_status text default
 
 -- Blacklist audit trail on suppliers (P3): [{action:'ban'|'unban', reason, by, at}]
 alter table suppliers add column if not exists blacklist_json jsonb default '[]';
+
+-- Security hardening: enable RLS on every table (no policies). The app uses
+-- the service_role key exclusively (bypasses RLS); this blocks all direct
+-- PostgREST access with anon/publishable keys.
+do $$
+declare t record;
+begin
+  for t in select tablename from pg_tables where schemaname = 'public'
+  loop
+    execute format('alter table public.%I enable row level security', t.tablename);
+  end loop;
+end $$;
