@@ -20,6 +20,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { appendAudit } from './workspace';
+import { canWrite, READ_ONLY_MSG } from './permissions';
 
 async function requireSession() {
   const s = await getServerSession(authOptions);
@@ -37,6 +38,20 @@ async function requireAdmin() {
   }
   return { session };
 }
+
+// Logged in AND a role that may write documents (admin/procurement/manager).
+// Read-only roles (accountant, hr_manager, user) get a clear 403.
+async function requireWriter() {
+  const { session, err } = await requireSession();
+  if (err) return { err };
+  if (!canWrite(session.user.role)) {
+    return { err: NextResponse.json({ error: READ_ONLY_MSG }, { status: 403 }) };
+  }
+  return { session };
+}
+
+// Exported for custom routes (upload, approvals, …) that don't use the factory.
+export { requireSession, requireAdmin, requireWriter };
 
 function notConfigured() {
   return NextResponse.json(
@@ -63,9 +78,10 @@ export function createCrudRoutes(table, opts = {}) {
   const orderDir      = opts.orderDir || 'asc';
   const idPrefix      = opts.idPrefix || table;
   // Default: writes are admin-only (safe default for master data). Pass
-  // `writeRole: 'session'` for tables like rfqs/comparisons that any
-  // authenticated user must be able to write.
-  const writeGuard    = opts.writeRole === 'session' ? requireSession : requireAdmin;
+  // `writeRole: 'session'` for document tables (rfqs/comparisons/…) — since
+  // P2 that means "any WRITER role" (admin/procurement/manager); read-only
+  // roles get 403 from requireWriter.
+  const writeGuard    = opts.writeRole === 'session' ? requireWriter : requireAdmin;
 
   async function list() {
     const { err } = await requireSession();

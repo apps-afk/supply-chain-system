@@ -56,7 +56,7 @@ const CRUMBS = {
   'compare-create-rfq':     ['งานหลัก', 'เปรียบเทียบราคา', 'สร้างจากใบขอเสนอราคา'],
   'compare-upload-ref':     ['งานหลัก', 'เปรียบเทียบราคา', 'อัปโหลดข้อมูลอ้างอิง'],
   'pricedb':                ['งานหลัก', 'ฐานข้อมูลราคา'],
-  'pricedb-detail':         ['งานหลัก', 'ฐานข้อมูลราคา', 'เหล็กเส้น DB12'],
+  'pricedb-detail':         ['งานหลัก', 'ฐานข้อมูลราคา', 'รายละเอียดวัสดุ'],
   'po':                     ['งานหลัก', 'ใบสั่งซื้อ'],
   'po-detail':              ['งานหลัก', 'ใบสั่งซื้อ', 'รายละเอียด'],
   'contract':               ['งานหลัก', 'เอกสาร'],
@@ -219,7 +219,7 @@ export default function App() {
     <div className="app" data-screen-label={screen}>
       <Sidebar current={navActive} onNav={handleNav} />
       <div className="main">
-        <Topbar crumbs={CRUMBS[screen] || ['ภาพรวม']} onNav={handleNav} />
+        <Topbar crumbs={CRUMBS[screen] || ['ภาพรวม']} onNav={handleNav} go={go} />
         {renderScreen()}
       </div>
     </div>

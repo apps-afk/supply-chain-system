@@ -1,6 +1,8 @@
 'use client';
-import React, { useState, useId, useRef, useEffect } from 'react';
+import React, { useState, useId, useRef, useEffect, useCallback } from 'react';
 import { useSession, signOut } from 'next-auth/react';
+import { buildAlerts } from './alerts';
+import { canApprove as roleCanApprove } from './permissions';
 
 /* ----------------------- Icons (inline SVG) ----------------------- */
 const Icon = ({ d, size = 16, fill }) => (
@@ -157,6 +159,8 @@ function SideCollapse({ id, icon, label, childIds, current, onNav, children }) {
 
 function SidebarImpl({ current, onNav }) {
   const Item = (props) => <SideItem {...props} current={current} onNav={onNav} />;
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === 'admin';
   return (
     <aside className="side">
       <div className="side-brand">
@@ -191,12 +195,15 @@ function SidebarImpl({ current, onNav }) {
       </div>
 
       {/* Bottom group: admin functions — pushed to bottom via marginTop:auto.
-          User identity + logout moved to Topbar avatar dropdown (UserMenu). */}
-      <div className="side-group" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
-        <div className="side-group-label">ระบบ</div>
-        <Item id="workspace" icon="settings"  label="ตั้งค่าพื้นที่ทำงาน" />
-        <Item id="team"      icon="fileCheck" label="ทีมงานและสิทธิ์" />
-      </div>
+          User identity + logout moved to Topbar avatar dropdown (UserMenu).
+          Hidden for non-admin (the pages behind them are admin-gated anyway). */}
+      {isAdmin && (
+        <div className="side-group" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
+          <div className="side-group-label">ระบบ</div>
+          <Item id="workspace" icon="settings"  label="ตั้งค่าพื้นที่ทำงาน" />
+          <Item id="team"      icon="fileCheck" label="ทีมงานและสิทธิ์" />
+        </div>
+      )}
     </aside>
   );
 }
@@ -205,7 +212,7 @@ function SidebarImpl({ current, onNav }) {
 export const Sidebar = React.memo(SidebarImpl);
 
 /* ----------------------- Topbar ----------------------- */
-function TopbarImpl({ crumbs, onNav }) {
+function TopbarImpl({ crumbs, onNav, go }) {
   return (
     <div className="topbar">
       <div className="crumb">
@@ -222,9 +229,7 @@ function TopbarImpl({ crumbs, onNav }) {
           <input placeholder="ค้นหา RFQ, วัสดุ, ผู้ขาย…" />
           <span className="kbd">⌘K</span>
         </div>
-        <button className="btn ghost" title="แจ้งเตือน" style={{ padding: 8 }}>
-          {Icons.bell}
-        </button>
+        <NotificationBell go={go} />
         <UserMenu onNav={onNav} />
       </div>
     </div>
@@ -233,6 +238,160 @@ function TopbarImpl({ crumbs, onNav }) {
 // Memoised so it doesn't re-render when the inner screen state changes
 // (App passes stable crumbs from a module-scope object and a memoised onNav).
 export const Topbar = React.memo(TopbarImpl);
+
+/* ----------------------- Topbar notification bell ----------------- */
+// Real alerts derived from live data (same builder as the dashboard todos).
+// Read-state lives in localStorage so it survives reloads without a table.
+const BELL_READ_KEY = 'bell.read.v1';
+
+const NotificationBell = React.memo(function NotificationBell({ go }) {
+  const { data: session } = useSession();
+  const [open, setOpen]     = useState(false);
+  const [alerts, setAlerts] = useState([]);
+  const [readIds, setReadIds] = useState(() => new Set());
+  const ref = useRef(null);
+
+  useEffect(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(BELL_READ_KEY) || '[]');
+      setReadIds(new Set(Array.isArray(raw) ? raw : []));
+    } catch {}
+  }, []);
+
+  const authed   = !!session?.user;
+  const approver = roleCanApprove(session?.user?.role || '');
+
+  const load = useCallback(async () => {
+    try {
+      const rs = await Promise.all([
+        fetch('/api/rfqs'), fetch('/api/contracts'),
+        fetch('/api/comparisons'), fetch('/api/approval-roles'),
+      ]);
+      const [dR, dC, dM, dA] = await Promise.all(
+        rs.map(r => (r.ok ? r.json() : Promise.resolve({ items: [] })))
+      );
+      const signRoles = (dA.items || [])
+        .filter(x => x.active)
+        .sort((a, b) => (a.level || 0) - (b.level || 0));
+      setAlerts(buildAlerts({
+        rfqs: dR.items || [], contracts: dC.items || [],
+        comparisons: dM.items || [], signRoles, canApprove: approver,
+      }));
+    } catch { /* bell is best-effort — never break the topbar */ }
+  }, [approver]);
+
+  useEffect(() => {
+    if (!authed) return;
+    load();
+    const t = setInterval(load, 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [authed, load]);
+
+  // Refresh when opening so the list is current the moment it's seen.
+  useEffect(() => { if (open && authed) load(); }, [open, authed, load]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+
+  function persistRead(next) {
+    setReadIds(next);
+    // prune ids whose alert no longer exists so the list can't grow forever
+    try {
+      const keep = [...next].filter(id => alerts.some(a => a.id === id));
+      localStorage.setItem(BELL_READ_KEY, JSON.stringify(keep));
+    } catch {}
+  }
+
+  function openAlert(a) {
+    persistRead(new Set([...readIds, a.id]));
+    setOpen(false);
+    try { localStorage.setItem(a.storeKey, a.storeVal); } catch {}
+    if (go) go(a.screen);
+  }
+
+  const unread = alerts.filter(a => !readIds.has(a.id));
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button className="btn ghost" title="แจ้งเตือน" aria-label="แจ้งเตือน"
+        aria-expanded={open} onClick={() => setOpen(o => !o)}
+        style={{ padding: 8, position: 'relative' }}>
+        {Icons.bell}
+        {unread.length > 0 && (
+          <span style={{
+            position: 'absolute', top: 2, right: 2, minWidth: 15, height: 15,
+            padding: '0 3px', borderRadius: 8, background: 'var(--clay)',
+            color: '#fff', fontSize: 9.5, fontWeight: 700, lineHeight: '15px',
+            textAlign: 'center', pointerEvents: 'none',
+          }}>
+            {unread.length > 9 ? '9+' : unread.length}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div role="menu" style={{
+          position: 'absolute', top: 'calc(100% + 10px)', right: 0, width: 360,
+          background: 'var(--surface)', border: '1px solid var(--rule)',
+          borderRadius: 10, padding: 6, zIndex: 60,
+          boxShadow: '0 12px 32px -8px rgba(20,18,14,0.18), 0 2px 6px rgba(20,18,14,0.06)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '8px 12px 6px' }}>
+            <span style={{ fontSize: 12.5, fontWeight: 600 }}>การแจ้งเตือน</span>
+            {unread.length > 0 && (
+              <button className="btn ghost sm" style={{ fontSize: 11, padding: '2px 8px' }}
+                onClick={() => persistRead(new Set(alerts.map(a => a.id)))}>
+                อ่านทั้งหมด
+              </button>
+            )}
+          </div>
+          <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+            {alerts.length === 0 ? (
+              <div style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--ink-3)', fontSize: 12.5 }}>
+                ไม่มีงานค้าง 🎉
+              </div>
+            ) : alerts.map(a => {
+              const isRead = readIds.has(a.id);
+              return (
+                <button key={a.id} onClick={() => openAlert(a)} style={{
+                  display: 'flex', gap: 10, alignItems: 'flex-start', width: '100%',
+                  textAlign: 'left', padding: '10px 12px', border: 'none',
+                  background: 'transparent', cursor: 'pointer', borderRadius: 8,
+                  fontFamily: 'inherit',
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+                  <span style={{ fontSize: 15, lineHeight: '20px' }}>{a.icon}</span>
+                  <span style={{
+                    flex: 1, fontSize: 12.5, lineHeight: 1.5,
+                    color: isRead ? 'var(--ink-3)' : 'var(--ink-1)',
+                    fontWeight: isRead ? 400 : 500,
+                  }}>
+                    {a.text}
+                  </span>
+                  {!isRead && (
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: a.tone,
+                                   marginTop: 6, flexShrink: 0 }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
 
 /* ----------------------- Topbar user menu (avatar + dropdown) ----- */
 const ROLE_LABEL = {

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, money } from '../lib/shell';
 import { printDoc } from './screen-compare-create-pricedb';
 import { nextPoNo } from './screen-po';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Compare detail — renders a saved comparison from /api/comparisons.
@@ -30,20 +31,31 @@ export function ScreenCompare({ go }) {
   const [cmp, setCmp]           = useState(null);
   const [projects, setProjects] = useState([]);
   const [attachments, setAttachments] = useState([]);
+  const [signRoles, setSignRoles] = useState([]);
   const [loading, setLoading]   = useState(true);
   const [err, setErr]           = useState('');
   const [statusBusy, setStatusBusy] = useState(false);
   const [poBusy, setPoBusy] = useState(false);
+  const [approveBusy, setApproveBusy] = useState(false);
+  const { canWrite, canApprove, isAdmin, user } = usePermissions();
 
   useEffect(() => {
     (async () => {
       setLoading(true); setErr('');
       try {
         const stashed = (typeof window !== 'undefined') ? window.localStorage.getItem('cmp.currentId') : null;
-        const [r, rP] = await Promise.all([fetch('/api/comparisons'), fetch('/api/projects')]);
+        const [r, rP, rR] = await Promise.all([
+          fetch('/api/comparisons'), fetch('/api/projects'), fetch('/api/approval-roles'),
+        ]);
         const d = await r.json();
         if (!r.ok) { setErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
         if (rP.ok) { try { setProjects((await rP.json()).items || []); } catch {} }
+        if (rR.ok) {
+          try {
+            const roleItems = (await rR.json()).items || [];
+            setSignRoles(roleItems.filter(x => x.active).sort((a, b) => (a.level || 0) - (b.level || 0)));
+          } catch {}
+        }
         const list = d.items || [];
         const picked = (stashed && list.find(x => x.id === stashed)) || list[0] || null;
         setCmp(picked);
@@ -129,6 +141,39 @@ export function ScreenCompare({ go }) {
     setPoBusy(false);
   }
 
+  // ---- In-app approval chain (P2) -------------------------------------
+  const approvals = useMemo(
+    () => (Array.isArray(cmp?.approvals_json) ? cmp.approvals_json : []),
+    [cmp]
+  );
+  const approvedLevels = useMemo(() => new Set(approvals.map(a => a.level)), [approvals]);
+  // the lowest active level not yet approved — the only one approvable now
+  const nextLevel = useMemo(() => {
+    const pending = signRoles.filter(r => !approvedLevels.has(r.level));
+    return pending.length ? pending[0].level : null;
+  }, [signRoles, approvedLevels]);
+  // the highest approved level — the only one revocable
+  const topApproved = useMemo(() => {
+    if (!approvals.length) return null;
+    return approvals.reduce((m, a) => (a.level > m ? a.level : m), -Infinity);
+  }, [approvals]);
+
+  async function doApproval(level, action) {
+    if (!cmp || approveBusy) return;
+    if (action === 'revoke' && !confirm('ยกเลิกการอนุมัติลำดับนี้?')) return;
+    setApproveBusy(true); setErr('');
+    try {
+      const r = await fetch('/api/comparisons/approve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: cmp.id, level, action }),
+      });
+      const d = await r.json();
+      if (!r.ok) setErr(d.error || 'บันทึกการอนุมัติไม่สำเร็จ');
+      else setCmp(d.item);
+    } catch { setErr('เครือข่ายขัดข้อง'); }
+    setApproveBusy(false);
+  }
+
   async function changeStatus(next) {
     if (!cmp || next === cmp.status) return;
     setStatusBusy(true);
@@ -197,7 +242,7 @@ export function ScreenCompare({ go }) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {cmp.status === 'finalized' && (
+          {cmp.status === 'finalized' && canWrite && (
             <button className="btn primary" onClick={createPO} disabled={poBusy}>
               {poBusy ? 'กำลังสร้าง…' : <>{Icons.plus} สร้างใบสั่งซื้อ</>}
             </button>
@@ -205,16 +250,73 @@ export function ScreenCompare({ go }) {
           <button className={cmp.status === 'finalized' ? 'btn' : 'btn primary'} onClick={() => printDoc(`${cmp.no}_Compare`)}>
             {Icons.download} พิมพ์ / PDF
           </button>
-          <button className="btn" onClick={() => {
-            try { window.localStorage.setItem('cmp.currentId', cmp.id); } catch {}
-            go('compare-upload-ref');
-          }}>{Icons.upload} Upload Ref</button>
-          <select value={cmp.status || 'draft'} onChange={e => changeStatus(e.target.value)} disabled={statusBusy}
-            style={{ padding: '8px 12px', fontSize: 13, border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper)', fontFamily: 'inherit', cursor: 'pointer' }}>
-            {Object.keys(STATUS_TH).map(s => <option key={s} value={s}>{STATUS_TH[s].label}</option>)}
-          </select>
+          {canWrite && (
+            <button className="btn" onClick={() => {
+              try { window.localStorage.setItem('cmp.currentId', cmp.id); } catch {}
+              go('compare-upload-ref');
+            }}>{Icons.upload} Upload Ref</button>
+          )}
+          {/* Manual status override: admin only once an approval chain exists —
+              otherwise finalize must flow through the chain below. */}
+          {(isAdmin || (canWrite && signRoles.length === 0)) && (
+            <select value={cmp.status || 'draft'} onChange={e => changeStatus(e.target.value)} disabled={statusBusy}
+              style={{ padding: '8px 12px', fontSize: 13, border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper)', fontFamily: 'inherit', cursor: 'pointer' }}>
+              {Object.keys(STATUS_TH).map(s => <option key={s} value={s}>{STATUS_TH[s].label}</option>)}
+            </select>
+          )}
         </div>
       </div>
+
+      {/* Approval chain (P2) — sequential sign-off per approval_roles master */}
+      {signRoles.length > 0 && (
+        <div className="card print-area" style={{ padding: '16px 20px', marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div className="eyebrow">การอนุมัติ · {approvals.length}/{signRoles.length} ลำดับ</div>
+            {approvals.length === signRoles.length && (
+              <Chip kind="active">อนุมัติครบทุกลำดับ</Chip>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${signRoles.length}, minmax(140px, 1fr))`, gap: 12, overflowX: 'auto' }}>
+            {signRoles.map(r => {
+              const entry = approvals.find(a => a.level === r.level);
+              const isNext = r.level === nextLevel;
+              return (
+                <div key={r.id} style={{
+                  border: `1px solid ${entry ? 'var(--moss)' : isNext ? 'var(--teal-ink)' : 'var(--rule-2)'}`,
+                  borderRadius: 8, padding: '12px 14px',
+                  background: entry ? 'var(--moss-soft)' : 'var(--paper)',
+                }}>
+                  <div style={{ fontSize: 10.5, color: 'var(--ink-3)', marginBottom: 2 }}>ลำดับ {r.level}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{r.name}</div>
+                  {entry ? (
+                    <>
+                      <div style={{ fontSize: 12, color: 'var(--ink-2)' }}>✓ {entry.by_name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>{fmtDate(entry.at)}</div>
+                      {r.level === topApproved && canApprove &&
+                        (entry.by_email === user?.email || isAdmin) && (
+                        <button className="btn ghost sm no-print" onClick={() => doApproval(r.level, 'revoke')}
+                          disabled={approveBusy}
+                          style={{ marginTop: 8, fontSize: 11, color: 'var(--clay)', padding: '2px 8px' }}>
+                          ยกเลิก
+                        </button>
+                      )}
+                    </>
+                  ) : isNext && canApprove ? (
+                    <button className="btn primary sm no-print" onClick={() => doApproval(r.level, 'approve')}
+                      disabled={approveBusy}>
+                      {approveBusy ? 'กำลังบันทึก…' : 'อนุมัติ'}
+                    </button>
+                  ) : (
+                    <div style={{ fontSize: 11.5, color: 'var(--ink-4)' }}>
+                      {isNext ? 'รอการอนุมัติ' : 'รอลำดับก่อนหน้า'}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Comparison table */}
       <div className="card print-area" style={{ padding: 0, overflow: 'auto' }}>

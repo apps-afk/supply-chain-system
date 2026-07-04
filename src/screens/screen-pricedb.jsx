@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Stat, Spark, Delta, Av, money } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox, UnitPicker } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Price DB — list + detail.
@@ -17,6 +18,7 @@ const RECEIVED_RFQS_FOR_PRICEDB = [];
 /* =================== List =================== */
 
 export function ScreenPriceDB({ go }) {
+  const perms = usePermissions();
   const [cat, setCat] = useState('ทั้งหมด');
   const [sourceFilter, setSourceFilter] = useState('ทั้งหมด'); // ทั้งหมด | Manual | RFQ
   const [q, setQ] = useState('');
@@ -73,6 +75,7 @@ export function ScreenPriceDB({ go }) {
     const source = (p.source && p.source.toLowerCase().includes('rfq')) ? 'RFQ' : (p.source || 'Manual');
     return {
       id:        p.id,
+      materialId: p.material_id,
       code:      m.code || p.material_id,
       name:      m.name || '—',
       spec:      m.spec || '',
@@ -131,11 +134,13 @@ export function ScreenPriceDB({ go }) {
             · <strong style={{ color:'var(--ink-2)' }}>ราคาที่บันทึกเป็นราคาสุทธิ ไม่รวม VAT และ Overhead</strong>
           </p>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
-          <button className="btn" onClick={() => setRfqPullOpen(true)}>{Icons.upload} ดึงจาก RFQ</button>
-          <button className="btn primary" onClick={() => setManualOpen(true)}>{Icons.plus} เพิ่มราคา</button>
-          <button className="btn">{Icons.download} Export</button>
-        </div>
+        {perms.canWrite && (
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn" onClick={() => setRfqPullOpen(true)}>{Icons.upload} ดึงจาก RFQ</button>
+            <button className="btn primary" onClick={() => setManualOpen(true)}>{Icons.plus} เพิ่มราคา</button>
+            <button className="btn">{Icons.download} Export</button>
+          </div>
+        )}
       </div>
 
       {err && (
@@ -221,7 +226,10 @@ export function ScreenPriceDB({ go }) {
                 ยังไม่มีข้อมูล — คลิก "เพิ่มราคา" เพื่อสร้างรายการแรก
               </td></tr>
             ) : filtered.map((r) => (
-              <tr key={r.id} onClick={() => go('pricedb-detail')} style={{ cursor:'pointer' }} className={r.flag ? `row-flag-${r.flag}` : ''}>
+              <tr key={r.id} onClick={() => {
+                try { localStorage.setItem('pricedb.currentMaterialId', r.materialId); } catch {}
+                go('pricedb-detail');
+              }} style={{ cursor:'pointer' }} className={r.flag ? `row-flag-${r.flag}` : ''}>
                 <td style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'var(--ink-4)' }}>{r.code}</td>
                 <td>
                   <div style={{ fontWeight:500, display:'inline-flex', alignItems:'center', gap:8 }}>
@@ -279,9 +287,9 @@ export function ScreenPriceDB({ go }) {
 }
 
 /* =================== Manual entry modal =================== */
-function ManualPriceModal({ materials, suppliers, units, onClose, onSaved }) {
+function ManualPriceModal({ materials, suppliers, units, onClose, onSaved, initialMaterialId }) {
   const [form, setForm] = useState({
-    materialId:'', supplierId:'', price:'', unitId:'', source:'Manual', sourceId:'',
+    materialId: initialMaterialId || '', supplierId:'', price:'', unitId:'', source:'Manual', sourceId:'',
   });
   const set = (k,v) => setForm(prev => ({ ...prev, [k]:v }));
   const [busy, setBusy] = useState(false);
@@ -523,32 +531,290 @@ function PullFromRFQModal({ onClose }) {
 
 /* =================== Detail =================== */
 
+
+/*
+  Real per-material price history (P2):
+    - material picked from localStorage('pricedb.currentMaterialId') set by the
+      list row click (falls back to the newest price point's material)
+    - SVG line chart of captured price points with crosshair + tooltip
+    - per-supplier latest/avg table, 90-day stats, activity feed
+  Single-series chart → no legend; supplier identity lives in the tooltip
+  and the table (never color-alone).
+*/
+const CHART_LINE = '#0D8A62'; // validated vs white card surface (dataviz checks)
+
+function fmtThDate(d) {
+  try { return new Date(d).toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' }); }
+  catch { return '—'; }
+}
+
+function PriceChart({ points, unitLabel }) {
+  const [hover, setHover] = useState(null);
+  const W = 760, H = 260;
+  const PAD = { l: 64, r: 20, t: 18, b: 30 };
+
+  const { path, dots, yTicks, xTicks, yOf } = useMemo(() => {
+    if (!points.length) return { path: '', dots: [], yTicks: [], xTicks: [], yOf: () => 0 };
+    const ts = points.map(p => p.t);
+    const ps = points.map(p => p.price);
+    let tMin = Math.min(...ts), tMax = Math.max(...ts);
+    if (tMin === tMax) { tMin -= 86400000; tMax += 86400000; } // single point → give it room
+    let pMin = Math.min(...ps), pMax = Math.max(...ps);
+    const padP = (pMax - pMin) * 0.08 || pMax * 0.05 || 1;
+    pMin -= padP; pMax += padP;
+    if (pMin < 0) pMin = 0;
+
+    const xOf = t => PAD.l + ((t - tMin) / (tMax - tMin)) * (W - PAD.l - PAD.r);
+    const yOf = p => H - PAD.b - ((p - pMin) / (pMax - pMin)) * (H - PAD.t - PAD.b);
+
+    const dots = points.map((p, i) => ({ ...p, x: xOf(p.t), y: yOf(p.price), i }));
+    const path = dots.map((d, i) => `${i ? 'L' : 'M'}${d.x.toFixed(1)} ${d.y.toFixed(1)}`).join(' ');
+
+    const yTicks = [0, 1, 2, 3].map(i => {
+      const v = pMin + ((pMax - pMin) * i) / 3;
+      return { v, y: yOf(v) };
+    });
+    const nX = Math.min(points.length, 5);
+    const xTicks = Array.from({ length: nX }, (_, i) => {
+      const idx = Math.round((i * (points.length - 1)) / Math.max(nX - 1, 1));
+      return { label: fmtThDate(points[idx].t), x: dots[idx].x };
+    });
+    return { path, dots, yTicks, xTicks, yOf };
+  }, [points]);
+
+  if (!points.length) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
+        ยังไม่มีข้อมูลราคาในช่วงเวลานี้
+      </div>
+    );
+  }
+
+  const hv = hover != null ? dots[hover] : null;
+  const last = dots[dots.length - 1];
+
+  function onMove(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - rect.left) / rect.width) * W;
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < dots.length; i++) {
+      const d = Math.abs(dots[i].x - px);
+      if (d < bd) { bd = d; best = i; }
+    }
+    setHover(best);
+  }
+
+  return (
+    <div style={{ position: 'relative', padding: '8px 8px 4px' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}
+        onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+        {/* recessive grid + y labels */}
+        {yTicks.map((t, i) => (
+          <g key={i}>
+            <line x1={PAD.l} x2={W - PAD.r} y1={t.y} y2={t.y} stroke="var(--rule)" strokeWidth="1" />
+            <text x={PAD.l - 8} y={t.y + 3.5} textAnchor="end"
+              style={{ fontSize: 10.5, fill: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+              {money(t.v)}
+            </text>
+          </g>
+        ))}
+        {xTicks.map((t, i) => (
+          <text key={i} x={t.x} y={H - 8} textAnchor="middle"
+            style={{ fontSize: 10.5, fill: 'var(--ink-3)' }}>{t.label}</text>
+        ))}
+
+        {/* crosshair */}
+        {hv && (
+          <line x1={hv.x} x2={hv.x} y1={PAD.t} y2={H - PAD.b}
+            stroke="var(--rule-2)" strokeWidth="1" strokeDasharray="3 3" />
+        )}
+
+        {/* the series */}
+        {dots.length > 1 && (
+          <path d={path} fill="none" stroke={CHART_LINE} strokeWidth="2"
+            strokeLinejoin="round" strokeLinecap="round" />
+        )}
+        {dots.map(d => (
+          <circle key={d.i} cx={d.x} cy={d.y}
+            r={hv && hv.i === d.i ? 5 : 3}
+            fill={CHART_LINE} stroke="var(--surface)" strokeWidth="2" />
+        ))}
+
+        {/* selective direct label — latest point only */}
+        <text x={last.x} y={last.y - 10} textAnchor={last.x > W - 120 ? 'end' : 'middle'}
+          style={{ fontSize: 11, fontWeight: 600, fill: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>
+          {money(last.price)}
+        </text>
+      </svg>
+
+      {hv && (
+        <div style={{
+          position: 'absolute',
+          left: `${(hv.x / W) * 100}%`,
+          top: `${(hv.y / H) * 100}%`,
+          transform: `translate(${hv.x > W * 0.72 ? '-100%' : '-50%'}, -120%)`,
+          background: 'var(--ink)', color: 'var(--paper)', borderRadius: 6,
+          padding: '7px 10px', fontSize: 11.5, lineHeight: 1.5, pointerEvents: 'none',
+          whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(20,18,14,0.25)', zIndex: 5,
+        }}>
+          <div style={{ fontWeight: 600 }}>{money(hv.price)}{unitLabel ? ` / ${unitLabel}` : ''}</div>
+          <div style={{ opacity: 0.85 }}>{hv.supName || '—'} · {hv.source}</div>
+          <div style={{ opacity: 0.7 }}>{fmtThDate(hv.t)}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const RANGES = [
+  { label: '3 ด.',    months: 3 },
+  { label: '6 ด.',    months: 6 },
+  { label: '12 ด.',   months: 12 },
+  { label: 'ทั้งหมด', months: null },
+];
+
 export function ScreenPriceDBDetail({ go }) {
-  const tabs = ['ภาพรวม','ประวัติราคา','Supplier เปรียบเทียบ','RFQ ที่เกี่ยวข้อง'];
-  const [tab, setTab] = useState('ภาพรวม');
+  const [prices, setPrices]       = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [units, setUnits]         = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [range, setRange]         = useState(12);
+  const [manualOpen, setManualOpen] = useState(false);
+  const { canWrite } = usePermissions();
 
-  // Pull the latest material for the detail header (chart/history stays placeholder).
-  const [material, setMaterial] = useState(null);
-  const [unit, setUnit]         = useState(null);
-  useEffect(() => {
-    (async () => {
-      try {
-        const [mR, uR] = await Promise.all([
-          fetch('/api/materials').then(r => r.json()),
-          fetch('/api/units').then(r => r.json()),
-        ]);
-        const list = mR.items || [];
-        const m = list[0] || null;
-        setMaterial(m);
-        if (m && m.unit_id) {
-          setUnit((uR.items || []).find(u => u.id === m.unit_id) || null);
-        }
-      } catch {}
-    })();
-  }, []);
+  async function load() {
+    setLoading(true);
+    try {
+      const [pR, mR, sR, uR] = await Promise.all([
+        fetch('/api/prices').then(r => r.json()),
+        fetch('/api/materials').then(r => r.json()),
+        fetch('/api/suppliers').then(r => r.json()),
+        fetch('/api/units').then(r => r.json()),
+      ]);
+      setPrices(pR.items || []);
+      setMaterials(mR.items || []);
+      setSuppliers(sR.items || []);
+      setUnits(uR.items || []);
+    } catch {}
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
 
-  const supplierRows = [];
-  const activities = [];
+  const supById = useMemo(() => new Map(suppliers.map(s => [s.id, s])), [suppliers]);
+
+  // Selected material: stashed by the list row click; fall back to the
+  // material of the newest price point so the page is never an empty shell.
+  const material = useMemo(() => {
+    if (!materials.length) return null;
+    let id = null;
+    try { id = localStorage.getItem('pricedb.currentMaterialId'); } catch {}
+    return materials.find(m => m.id === id)
+        || materials.find(m => m.id === prices[0]?.material_id)
+        || materials[0];
+  }, [materials, prices]);
+
+  const unit = useMemo(
+    () => units.find(u => u.id === material?.unit_id) || null,
+    [units, material]
+  );
+  const unitLabel = unit?.name || unit?.code || '';
+
+  // All points for this material, oldest → newest
+  const allPoints = useMemo(() => {
+    if (!material) return [];
+    return prices
+      .filter(p => p.material_id === material.id && p.captured_at)
+      .map(p => ({
+        t: new Date(p.captured_at).getTime(),
+        price: Number(p.price) || 0,
+        supId: p.supplier_id,
+        supName: supById.get(p.supplier_id)?.name || '—',
+        source: (p.source && p.source.toLowerCase().includes('rfq')) ? 'RFQ' : (p.source || 'Manual'),
+        sourceRef: p.source_id || '',
+      }))
+      .sort((a, b) => a.t - b.t);
+  }, [prices, material, supById]);
+
+  const rangedPoints = useMemo(() => {
+    if (range == null) return allPoints;
+    const cutoff = Date.now() - range * 30.44 * 86400000;
+    return allPoints.filter(p => p.t >= cutoff);
+  }, [allPoints, range]);
+
+  const latest = allPoints.length ? allPoints[allPoints.length - 1] : null;
+  const prev   = allPoints.length > 1 ? allPoints[allPoints.length - 2] : null;
+  const deltaPct = latest && prev && prev.price > 0
+    ? ((latest.price - prev.price) / prev.price) * 100 : null;
+
+  const stats90 = useMemo(() => {
+    const cutoff = Date.now() - 90 * 86400000;
+    const pts = allPoints.filter(p => p.t >= cutoff).map(p => p.price);
+    if (!pts.length) return null;
+    return {
+      min: Math.min(...pts), max: Math.max(...pts),
+      avg: pts.reduce((s, v) => s + v, 0) / pts.length, n: pts.length,
+    };
+  }, [allPoints]);
+
+  // Per-supplier rollup: latest price/date, 90-day avg, count
+  const supplierRows = useMemo(() => {
+    const cutoff90 = Date.now() - 90 * 86400000;
+    const bySup = new Map();
+    for (const p of allPoints) {
+      if (!bySup.has(p.supId)) bySup.set(p.supId, []);
+      bySup.get(p.supId).push(p);
+    }
+    const rows = [...bySup.entries()].map(([supId, pts]) => {
+      const last = pts[pts.length - 1];
+      const recent = pts.filter(p => p.t >= cutoff90);
+      const master = supById.get(supId);
+      return {
+        supId,
+        sup: last.supName,
+        kind: master?.type || 'company',
+        last: last.price,
+        lastDate: fmtThDate(last.t),
+        avg: recent.length ? recent.reduce((s, p) => s + p.price, 0) / recent.length : null,
+        n: pts.length,
+        source: last.source,
+        ct: master?.payment_terms || '—',
+      };
+    });
+    rows.sort((a, b) => a.last - b.last);
+    return rows;
+  }, [allPoints, supById]);
+
+  const activities = useMemo(
+    () => [...allPoints].reverse().slice(0, 6),
+    [allPoints]
+  );
+
+  if (loading) {
+    return (
+      <div className="page">
+        <button className="btn ghost sm" onClick={() => go('pricedb')} style={{ marginBottom:20, marginLeft:-8 }}>
+          {Icons.back} กลับไป Price Database
+        </button>
+        <div style={{ padding:40, textAlign:'center', color:'var(--ink-3)' }}>กำลังโหลด…</div>
+      </div>
+    );
+  }
+
+  if (!material) {
+    return (
+      <div className="page">
+        <button className="btn ghost sm" onClick={() => go('pricedb')} style={{ marginBottom:20, marginLeft:-8 }}>
+          {Icons.back} กลับไป Price Database
+        </button>
+        <div className="card" style={{ padding:40, textAlign:'center', color:'var(--ink-3)' }}>
+          ยังไม่มีวัสดุในระบบ — เพิ่มได้ที่ ตั้งค่า → วัสดุ
+        </div>
+      </div>
+    );
+  }
+
+  const cheapest = supplierRows.length ? supplierRows[0].supId : null;
 
   return (
     <div className="page">
@@ -559,75 +825,85 @@ export function ScreenPriceDBDetail({ go }) {
       <div className="page-head" style={{ alignItems:'flex-start' }}>
         <div className="page-title">
           <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:6 }}>
-            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{material?.code || '—'}</span>
+            <span className="font-mono" style={{ fontSize:12, color:'var(--ink-3)' }}>{material.code || '—'}</span>
             <span style={{ fontSize:11, padding:'1px 8px', borderRadius:3, background:'var(--paper-2)', color:'var(--ink-3)' }}>
               ราคาทั้งหมดเป็น net · ไม่รวม VAT/Overhead
             </span>
           </div>
-          <h1 className="h-display">{material?.name || 'ยังไม่มีข้อมูล'}</h1>
-          <div style={{ display:'flex', gap:24, marginTop:12, fontSize:13, color:'var(--ink-3)' }}>
-            <span>หมวด: <strong style={{ color:'var(--ink-2)' }}>{material?.category || '—'}</strong></span>
-            <span>หน่วย: <strong style={{ color:'var(--ink-2)' }}>{unit?.name || unit?.code || '—'}</strong></span>
-            <span>Spec: <strong style={{ color:'var(--ink-2)' }}>{material?.spec || '—'}</strong></span>
+          <h1 className="h-display">{material.name}</h1>
+          <div style={{ display:'flex', gap:24, marginTop:12, fontSize:13, color:'var(--ink-3)', flexWrap:'wrap' }}>
+            <span>หมวด: <strong style={{ color:'var(--ink-2)' }}>{material.category || '—'}</strong></span>
+            <span>หน่วย: <strong style={{ color:'var(--ink-2)' }}>{unitLabel || '—'}</strong></span>
+            <span>Spec: <strong style={{ color:'var(--ink-2)' }}>{material.spec || '—'}</strong></span>
           </div>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
-          <button className="btn">{Icons.edit} แก้ไข Master</button>
-          <button className="btn">{Icons.plus} เพิ่มราคา</button>
-          <button className="btn primary" onClick={() => go('rfq-create')}>สร้าง RFQ รายการนี้</button>
-        </div>
-      </div>
-
-      <div className="tabs" style={{ marginBottom:32 }}>
-        {tabs.map(t => (
-          <div key={t} className={"tab" + (tab === t ? " active" : "")} onClick={() => setTab(t)}>{t}</div>
-        ))}
+        {canWrite && (
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn" onClick={() => setManualOpen(true)}>{Icons.plus} เพิ่มราคา</button>
+            <button className="btn primary" onClick={() => go('rfq-create')}>สร้าง RFQ รายการนี้</button>
+          </div>
+        )}
       </div>
 
       <div style={{ display:'grid', gridTemplateColumns:'1fr 320px', gap:32 }}>
         <div>
-          <div style={{ display:'flex', alignItems:'flex-end', gap:48, marginBottom:8 }}>
+          {/* Hero number + 90-day stats */}
+          <div style={{ display:'flex', alignItems:'flex-end', gap:48, marginBottom:8, flexWrap:'wrap' }}>
             <div>
               <div className="eyebrow" style={{ marginBottom:8 }}>
-                ราคาล่าสุด · <span style={{ color:'var(--ink-2)' }}>—</span>
+                ราคาล่าสุด · <span style={{ color:'var(--ink-2)' }}>{latest ? fmtThDate(latest.t) : '—'}</span>
               </div>
               <div style={{ fontFamily:'var(--font-serif)', fontSize:72, lineHeight:1, letterSpacing:'-0.02em' }}>
-                ฿0<span style={{ fontFamily:'var(--font-sans)', fontSize:18, color:'var(--ink-3)', marginLeft:8 }}>/ —</span>
+                {latest ? money(latest.price) : '฿0'}
+                <span style={{ fontFamily:'var(--font-sans)', fontSize:18, color:'var(--ink-3)', marginLeft:8 }}>
+                  / {unitLabel || '—'}
+                </span>
               </div>
               <div style={{ marginTop:12, display:'flex', gap:16, alignItems:'center' }}>
-                <span style={{ fontSize:12, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</span>
+                {deltaPct != null ? (
+                  <>
+                    <Delta pct={Math.abs(deltaPct)} dir={deltaPct > 0.05 ? 'up' : deltaPct < -0.05 ? 'down' : 'flat'} />
+                    <span style={{ fontSize:12, color:'var(--ink-3)' }}>
+                      เทียบครั้งก่อน ({money(prev.price)} · {fmtThDate(prev.t)})
+                    </span>
+                  </>
+                ) : (
+                  <span style={{ fontSize:12, color:'var(--ink-3)' }}>
+                    {latest ? `จาก ${latest.supName} · ${latest.source}` : 'ยังไม่มีข้อมูลราคา'}
+                  </span>
+                )}
               </div>
             </div>
-            <div style={{ flex:1 }}>
+            <div style={{ flex:1, minWidth:260 }}>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:0, borderTop:'1px solid var(--rule)', borderBottom:'1px solid var(--rule)', padding:'14px 0' }}>
-                <Stat label="ต่ำสุด 90 วัน" value="—" sub="ยังไม่มีข้อมูล" />
-                <Stat label="สูงสุด 90 วัน" value="—" sub="ยังไม่มีข้อมูล" />
-                <Stat label="เฉลี่ย 90 วัน" value="—" sub="ยังไม่มีข้อมูล" />
+                <Stat label="ต่ำสุด 90 วัน" value={stats90 ? money(stats90.min) : '—'} sub={stats90 ? `${stats90.n} จุดข้อมูล` : 'ยังไม่มีข้อมูล'} />
+                <Stat label="สูงสุด 90 วัน" value={stats90 ? money(stats90.max) : '—'} sub={stats90 ? 'ช่วง 90 วันล่าสุด' : 'ยังไม่มีข้อมูล'} />
+                <Stat label="เฉลี่ย 90 วัน" value={stats90 ? money(stats90.avg) : '—'} sub={stats90 ? 'net ต่อหน่วย' : 'ยังไม่มีข้อมูล'} />
               </div>
             </div>
           </div>
 
+          {/* History chart */}
           <div className="card" style={{ marginTop:32, padding:0 }}>
             <div style={{ padding:'20px 24px', display:'flex', alignItems:'baseline', justifyContent:'space-between', borderBottom:'1px solid var(--rule)' }}>
-              <h3 className="h-card">ประวัติราคา · 18 เดือน</h3>
+              <h3 className="h-card">ประวัติราคา · {rangedPoints.length} จุดข้อมูล</h3>
               <div style={{ display:'flex', gap:4 }}>
-                {['3 ด.','6 ด.','12 ด.','18 ด.','ทั้งหมด'].map((p, i) => (
-                  <button key={p} className="btn sm"
-                          style={{ background: i === 3 ? 'var(--ink)' : 'transparent',
-                                   color: i === 3 ? 'var(--paper)' : 'var(--ink-2)',
-                                   borderColor: i === 3 ? 'var(--ink)' : 'var(--rule)',
-                                   padding:'4px 10px' }}>{p}</button>
+                {RANGES.map(r => (
+                  <button key={r.label} className="btn sm" onClick={() => setRange(r.months)}
+                    style={{ background: range === r.months ? 'var(--ink)' : 'transparent',
+                             color: range === r.months ? 'var(--paper)' : 'var(--ink-2)',
+                             borderColor: range === r.months ? 'var(--ink)' : 'var(--rule)',
+                             padding:'4px 10px' }}>{r.label}</button>
                 ))}
               </div>
             </div>
-            <div style={{ padding:40, textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
-              ยังไม่มีข้อมูล
-            </div>
+            <PriceChart points={rangedPoints} unitLabel={unitLabel} />
           </div>
 
-          <div className="card" style={{ marginTop:24, padding:0 }}>
+          {/* Supplier rollup */}
+          <div className="card" style={{ marginTop:24, padding:0, overflow:'auto' }}>
             <div style={{ padding:'20px 24px', borderBottom:'1px solid var(--rule)' }}>
-              <h3 className="h-card">Supplier ที่เคยขายรายการนี้</h3>
+              <h3 className="h-card">Supplier ที่เคยขายรายการนี้ · {supplierRows.length} ราย</h3>
             </div>
             <table className="tbl">
               <thead>
@@ -636,28 +912,31 @@ export function ScreenPriceDBDetail({ go }) {
                   <th className="num-col">ราคาล่าสุด (net)</th>
                   <th className="num-col">ราคาเฉลี่ย 90 วัน</th>
                   <th className="num-col">จำนวนครั้งที่เสนอ</th>
-                  <th>ที่มา</th>
+                  <th>ที่มาล่าสุด</th>
                   <th>เครดิตเทอม</th>
                 </tr>
               </thead>
               <tbody>
                 {supplierRows.length === 0 ? (
                   <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
-                    ยังไม่มีข้อมูล
+                    ยังไม่มีข้อมูล — เพิ่มราคาจากปุ่ม "เพิ่มราคา" หรือดึงจาก RFQ
                   </td></tr>
-                ) : supplierRows.map((r, i) => (
-                  <tr key={i}>
+                ) : supplierRows.map(r => (
+                  <tr key={r.supId} style={{ background: r.supId === cheapest && supplierRows.length > 1 ? 'var(--moss-soft)' : undefined }}>
                     <td>
                       <span style={{ display:'inline-flex', gap:10, alignItems:'center' }}>
                         <Av initials={r.sup.slice(0,2)} kind={r.kind} />
                         <span style={{ fontWeight:500 }}>{r.sup}</span>
+                        {r.supId === cheapest && supplierRows.length > 1 && (
+                          <span style={{ fontSize:10, fontWeight:600, color:'var(--moss)' }}>ราคาต่ำสุด</span>
+                        )}
                       </span>
                     </td>
                     <td className="num-col">
                       <div className="num" style={{ fontWeight:500 }}>{money(r.last)}</div>
                       <div style={{ fontSize:11, color:'var(--ink-3)' }}>{r.lastDate}</div>
                     </td>
-                    <td className="num-col num">{money(r.avg)}</td>
+                    <td className="num-col num">{r.avg != null ? money(r.avg) : '—'}</td>
                     <td className="num-col num" style={{ color:'var(--ink-2)' }}>{r.n}</td>
                     <td>
                       <span style={{
@@ -675,16 +954,36 @@ export function ScreenPriceDBDetail({ go }) {
           </div>
         </div>
 
+        {/* Side column */}
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
           <div className="card" style={{ background:'var(--surface-2)' }}>
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-              <span className="eyebrow">AI Forecast</span>
-              <Chip kind="ai">3 เดือนข้างหน้า</Chip>
-            </div>
-            <div style={{ fontFamily:'var(--font-serif)', fontSize:26, letterSpacing:'-0.01em', lineHeight:1.2 }}>
-              —
-            </div>
-            <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:6 }}>ยังไม่มีข้อมูล</div>
+            <div className="eyebrow" style={{ marginBottom:12 }}>สรุปข้อมูลวัสดุนี้</div>
+            {allPoints.length === 0 ? (
+              <div style={{ fontSize:12.5, color:'var(--ink-3)' }}>ยังไม่มีข้อมูลราคา</div>
+            ) : (
+              <div style={{ display:'flex', flexDirection:'column', gap:10, fontSize:12.5 }}>
+                <div style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span style={{ color:'var(--ink-3)' }}>จุดข้อมูลทั้งหมด</span>
+                  <strong className="num">{allPoints.length}</strong>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span style={{ color:'var(--ink-3)' }}>ช่วงราคาทั้งหมด</span>
+                  <strong className="num">{money(Math.min(...allPoints.map(p => p.price)))} – {money(Math.max(...allPoints.map(p => p.price)))}</strong>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span style={{ color:'var(--ink-3)' }}>Supplier</span>
+                  <strong className="num">{supplierRows.length} ราย</strong>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span style={{ color:'var(--ink-3)' }}>ข้อมูลเก่าสุด</span>
+                  <strong>{fmtThDate(allPoints[0].t)}</strong>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span style={{ color:'var(--ink-3)' }}>อัพเดทล่าสุด</span>
+                  <strong>{fmtThDate(allPoints[allPoints.length - 1].t)}</strong>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="card">
@@ -697,10 +996,14 @@ export function ScreenPriceDBDetail({ go }) {
               <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
                 {activities.map((a, i) => (
                   <div key={i} style={{ display:'flex', gap:10, fontSize:12.5 }}>
-                    <Av initials={a.who === 'System' ? 'IE' : a.who.slice(0,1)} kind={a.kind} />
+                    <Av initials={(a.supName || '—').slice(0,2)} kind="company" />
                     <div style={{ flex:1 }}>
-                      <div style={{ color:'var(--ink-2)' }}><strong style={{ color:'var(--ink)' }}>{a.who}</strong> {a.what}</div>
-                      <div style={{ color:'var(--ink-4)', fontSize:11, marginTop:2 }}>{a.when}</div>
+                      <div style={{ color:'var(--ink-2)' }}>
+                        <strong style={{ color:'var(--ink)' }}>{a.supName}</strong>
+                        {' '}เสนอราคา <span className="num" style={{ fontWeight:600 }}>{money(a.price)}</span>
+                        {a.source === 'RFQ' && a.sourceRef ? ` (จาก ${a.sourceRef})` : ` (${a.source})`}
+                      </div>
+                      <div style={{ color:'var(--ink-4)', fontSize:11, marginTop:2 }}>{fmtThDate(a.t)}</div>
                     </div>
                   </div>
                 ))}
@@ -709,7 +1012,15 @@ export function ScreenPriceDBDetail({ go }) {
           </div>
         </div>
       </div>
+
+      {manualOpen && (
+        <ManualPriceModal
+          materials={materials} suppliers={suppliers} units={units}
+          initialMaterialId={material.id}
+          onClose={() => setManualOpen(false)}
+          onSaved={() => { setManualOpen(false); load(); }}
+        />
+      )}
     </div>
   );
 }
-

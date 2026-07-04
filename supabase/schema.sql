@@ -345,3 +345,6 @@ create index if not exists po_status_idx on purchase_orders (status);
 -- Retention release tracking (P1): who closed out the retention and when.
 alter table contracts add column if not exists retention_released_at date;
 alter table contracts add column if not exists retention_released_by text default '';
+
+-- In-app approval chain for comparisons (P2): [{level, role_code, role_name, by_name, by_email, at}]
+alter table comparisons add column if not exists approvals_json jsonb default '[]';

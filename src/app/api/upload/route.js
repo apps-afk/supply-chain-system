@@ -4,6 +4,7 @@ import { authOptions } from '../../../lib/auth';
 import { uploadToCategory, CATEGORIES, isGDriveConfigured } from '../../../lib/gdrive';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
 import { appendAudit } from '../../../lib/workspace';
+import { canWrite, READ_ONLY_MSG } from '../../../lib/permissions';
 
 const MAX_MB = 25;
 // Accept PDF, Word documents, and common image formats.
@@ -79,6 +80,9 @@ export async function POST(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
     return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
+  }
+  if (!canWrite(session.user.role)) {
+    return NextResponse.json({ error: READ_ONLY_MSG }, { status: 403 });
   }
   if (!isGDriveConfigured) {
     return NextResponse.json({

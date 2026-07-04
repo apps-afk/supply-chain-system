@@ -2,39 +2,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { Icons, Stat, InitialEstateLogo, money } from '../lib/shell';
+import { retentionInfo, buildAlerts } from '../lib/alerts';
+import { canApprove } from '../lib/permissions';
 
 const MONTHS_TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
 const RFQ_STATUS_TH = {
   draft: 'ร่าง', sent: 'ส่งแล้ว', received: 'ได้รับ Quote', closed: 'ปิดงาน', cancelled: 'ยกเลิก',
 };
-
-// Same warranty/retention logic as the Documents screen — kept inline so the
-// dashboard chunk doesn't pull the whole contract screen in.
-function warrantyDays(text) {
-  if (!text) return null;
-  const t = String(text).toLowerCase();
-  let days = 0;
-  const yr = t.match(/(\d+(?:\.\d+)?)\s*(?:ปี|year)/);
-  const mo = t.match(/(\d+(?:\.\d+)?)\s*(?:เดือน|month)/);
-  const dy = t.match(/(\d+(?:\.\d+)?)\s*(?:วัน|day)/);
-  if (yr) days += parseFloat(yr[1]) * 365;
-  if (mo) days += parseFloat(mo[1]) * 30;
-  if (dy) days += parseFloat(dy[1]);
-  days = Math.round(days);
-  return days > 0 ? days : null;
-}
-function retentionInfo(c) {
-  if (c?.retention_released_at) return { released: true, daysLeft: Infinity };
-  const wd = warrantyDays(c?.warranty);
-  const baseStr = c?.end_date || c?.signed_at;
-  if (!wd || !baseStr) return null;
-  const base = new Date(baseStr);
-  if (Number.isNaN(base.getTime())) return null;
-  const release = new Date(base.getTime() + wd * 86400000);
-  const daysLeft = Math.round((release - new Date()) / 86400000);
-  return { release, daysLeft };
-}
 
 function fmtDate(iso) {
   if (!iso) return '—';
@@ -53,20 +28,28 @@ export function ScreenDashboard({ go }) {
   const [contracts, setContracts] = useState([]);
   const [ctypes, setCtypes]       = useState([]);
   const [materials, setMaterials] = useState([]);
+  const [comparisons, setComparisons] = useState([]);
+  const [signRoles, setSignRoles] = useState([]);
   const [loading, setLoading]     = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
-        const [rPx, rR, rC, rCt, rM] = await Promise.all([
+        const [rPx, rR, rC, rCt, rM, rCmp, rAr] = await Promise.all([
           fetch('/api/prices'), fetch('/api/rfqs'), fetch('/api/contracts'),
           fetch('/api/contract-types'), fetch('/api/materials'),
+          fetch('/api/comparisons'), fetch('/api/approval-roles'),
         ]);
         if (rPx.ok) setPrices((await rPx.json()).items || []);
         if (rR.ok)  setRfqs((await rR.json()).items || []);
         if (rC.ok)  setContracts((await rC.json()).items || []);
         if (rCt.ok) setCtypes((await rCt.json()).items || []);
         if (rM.ok)  setMaterials((await rM.json()).items || []);
+        if (rCmp.ok) setComparisons((await rCmp.json()).items || []);
+        if (rAr.ok) {
+          setSignRoles(((await rAr.json()).items || [])
+            .filter(x => x.active).sort((a, b) => (a.level || 0) - (b.level || 0)));
+        }
       } catch { /* stats degrade to 0 */ }
       setLoading(false);
     })();
@@ -107,29 +90,17 @@ export function ScreenDashboard({ go }) {
     return { pricesTotal: prices.length, recentPrices, openRfqs: openRfqs.length, overdue, activeContracts: active.length, activeValue, retentionHeld, retentionUnknownCount, retentionUnknownAmt };
   }, [prices, rfqs, contracts, ctypes]);
 
-  // Actionable items for "ต้องดูวันนี้"
+  // Actionable items for "ต้องดูวันนี้" — same builder as the topbar bell.
   const todos = useMemo(() => {
-    const out = [];
-    const today = new Date().toLocaleDateString('sv-SE'); // local YYYY-MM-DD (not UTC)
-    for (const r of rfqs) {
-      if (r.status === 'sent' && r.due_date && r.due_date < today) {
-        out.push({ icon: '⏰', tone: 'var(--clay)', text: `RFQ ${r.no} เกินกำหนดเสนอราคา (${fmtDate(r.due_date)})`, nav: () => { try { localStorage.setItem('rfq.currentId', r.id); } catch {} go('rfq-confirm'); } });
-      } else if (r.status === 'received') {
-        out.push({ icon: '📥', tone: 'var(--moss)', text: `RFQ ${r.no} ได้รับ Quote แล้ว — รอตรวจสอบ/บันทึก Price DB`, nav: () => { try { localStorage.setItem('rfq.currentId', r.id); } catch {} go('rfq-confirm'); } });
-      }
-    }
-    for (const c of contracts) {
-      if (c.status !== 'active') continue;
-      const info = retentionInfo(c);
-      if (!info || info.released) continue;
-      if (info.daysLeft <= 0) {
-        out.push({ icon: '💰', tone: 'var(--clay)', text: `${c.no || c.title} — ครบกำหนดคืนเงินประกันแล้ว (${fmtDate(info.release.toISOString())})`, nav: () => { try { localStorage.setItem('contract.currentId', c.id); } catch {} go('contract'); } });
-      } else if (info.daysLeft <= 30) {
-        out.push({ icon: '🔔', tone: 'var(--ochre)', text: `${c.no || c.title} — เงินประกันครบกำหนดในอีก ${info.daysLeft} วัน`, nav: () => { try { localStorage.setItem('contract.currentId', c.id); } catch {} go('contract'); } });
-      }
-    }
-    return out.slice(0, 8);
-  }, [rfqs, contracts, go]);
+    const alerts = buildAlerts({
+      rfqs, contracts, comparisons, signRoles,
+      canApprove: canApprove(session?.user?.role || ''),
+    });
+    return alerts.slice(0, 8).map(a => ({
+      icon: a.icon, tone: a.tone, text: a.text,
+      nav: () => { try { localStorage.setItem(a.storeKey, a.storeVal); } catch {} go(a.screen); },
+    }));
+  }, [rfqs, contracts, comparisons, signRoles, session, go]);
 
   // Biggest price moves over the last 30 days: latest vs previous point per material
   const priceMoves = useMemo(() => {

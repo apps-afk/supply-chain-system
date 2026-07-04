@@ -509,6 +509,7 @@ input, textarea, select { font-family: inherit; }
   body.print-doc-mode .app { display: block !important; }
   body.print-doc-mode .main { display: block !important; }
   body.print-doc-mode .page > *:not(.print-area) { display: none !important; }
+  body.print-doc-mode .no-print { display: none !important; }
   body.print-doc-mode .print-area {
     box-shadow: none !important;
     border: none !important;
