@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Compare List — index of all เปรียบเทียบราคา documents.
@@ -21,6 +22,7 @@ const MODE_PILL = {
 };
 
 export function ScreenCompareList({ go }) {
+  const { canWrite } = usePermissions();
   const [docs, setDocs]                 = useState([]);
   const [loading, setLoading]           = useState(true);
   const [err, setErr]                   = useState('');
@@ -89,9 +91,11 @@ export function ScreenCompareList({ go }) {
             จาก <strong style={{ color:'var(--ink-2)' }}>RFQ ที่จัดทำ</strong> · AI ช่วยวิเคราะห์และเสนอแนะ
           </p>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
-          <button className="btn primary" onClick={() => setCreateOpen(true)}>{Icons.plus} สร้างเอกสารเปรียบเทียบ</button>
-        </div>
+        {canWrite && (
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn primary" onClick={() => setCreateOpen(true)}>{Icons.plus} สร้างเอกสารเปรียบเทียบ</button>
+          </div>
+        )}
       </div>
 
       {/* Summary — 3 status counts only */}

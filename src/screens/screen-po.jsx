@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, money } from '../lib/shell';
 import { printDoc } from './screen-compare-create-pricedb';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   ใบสั่งซื้อ (Purchase Orders) — closes the loop after a comparison is
@@ -66,6 +67,7 @@ function StatusPill({ status }) {
 
 /* =================== List =================== */
 export function ScreenPOList({ go }) {
+  const { canWrite } = usePermissions();
   const [pos, setPos]           = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -113,7 +115,9 @@ export function ScreenPOList({ go }) {
             สร้างจากใบเปรียบเทียบราคาที่อนุมัติแล้ว · ติดตามสถานะ สั่ง → รับของ → ปิดงาน
           </p>
         </div>
-        <button className="btn primary" onClick={() => go('compare')}>{Icons.plus} สร้างจากใบเปรียบเทียบ</button>
+        {canWrite && (
+          <button className="btn primary" onClick={() => go('compare')}>{Icons.plus} สร้างจากใบเปรียบเทียบ</button>
+        )}
       </div>
 
       <div style={{
@@ -193,6 +197,7 @@ export function ScreenPOList({ go }) {
 
 /* =================== Detail =================== */
 export function ScreenPODetail({ go }) {
+  const { canWrite } = usePermissions();
   const [po, setPo]             = useState(null);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading]   = useState(true);
@@ -274,7 +279,7 @@ export function ScreenPODetail({ go }) {
         </div>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end' }}>
           <button className="btn" onClick={() => printDoc(`${po.no}`)}>{Icons.download} พิมพ์ / PDF</button>
-          {po.status === 'ordered' && (
+          {canWrite && po.status === 'ordered' && (
             <>
               <button className="btn primary" disabled={busy}
                 onClick={() => transition({ status:'received', received_at: today() }, 'บันทึกว่ารับของครบแล้ว?')}>
@@ -286,7 +291,7 @@ export function ScreenPODetail({ go }) {
               </button>
             </>
           )}
-          {po.status === 'received' && (
+          {canWrite && po.status === 'received' && (
             <button className="btn primary" disabled={busy}
               onClick={() => transition({ status:'closed', closed_at: today() }, 'ปิดงานใบสั่งซื้อนี้?')}>
               {Icons.check} ปิดงาน

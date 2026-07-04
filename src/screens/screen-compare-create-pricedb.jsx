@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Av, money } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Compare Create — Mode A: From Price Database
@@ -56,6 +57,7 @@ export const PRICEDB_SUPPLIERS = [];
 export const BASE_PRICES = {};
 
 export function ScreenCompareCreatePriceDB({ go }) {
+  const { canWrite } = usePermissions();
   const [source, setSource] = useState('Material'); // Material | SubContract
 
   // suppliersData : [{ id, name, kind, items: [{ code, name, spec, unit, qty, price }] }]
@@ -298,6 +300,19 @@ export function ScreenCompareCreatePriceDB({ go }) {
     const already = new Set(suppliersData.map(s => s.id));
     return supplierOptions.filter(s => !already.has(s.id));
   }, [suppliersData, supplierOptions]);
+
+  if (!canWrite) {
+    return (
+      <div className="page">
+        <button className="btn ghost sm" onClick={() => go('compare')} style={{ marginBottom:20, marginLeft:-8 }}>
+          {Icons.back} กลับไป Compare
+        </button>
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)' }}>
+          สิทธิ์ของคุณเป็นแบบดูอย่างเดียว — ไม่สามารถสร้างใบเปรียบเทียบได้
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

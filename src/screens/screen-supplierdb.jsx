@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, Av, money, Delta } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Supplier Database — intelligence view over the supplier master.
@@ -94,6 +95,7 @@ export function ScreenSupplierDB({ go }) {
   const [q, setQ] = useState('');
   const [typeFilter, setTypeFilter] = useState('ทั้งหมด');
   const { rows, loading, err } = useSupplierIntel();
+  const { isAdmin } = usePermissions();
 
   const filtered = useMemo(() => {
     const v = q.toLowerCase();
@@ -126,7 +128,9 @@ export function ScreenSupplierDB({ go }) {
             อัตราชนะ RFQ — ใช้ประกอบการตัดสินใจ
           </p>
         </div>
-        <button className="btn" onClick={() => go('suppliers')}>{Icons.edit} จัดการ Supplier Master</button>
+        {isAdmin && (
+          <button className="btn" onClick={() => go('suppliers')}>{Icons.edit} จัดการ Supplier Master</button>
+        )}
       </div>
 
       <div style={{
@@ -251,6 +255,7 @@ export function ScreenSupplierDB({ go }) {
 export function ScreenSupplierDBDetail({ go }) {
   const { rows, matById, loading, err } = useSupplierIntel();
   const [supId, setSupId] = useState(null);
+  const { canWrite, isAdmin } = usePermissions();
 
   useEffect(() => {
     try { setSupId(window.localStorage.getItem('supplierdb.currentId')); } catch {}
@@ -315,8 +320,12 @@ export function ScreenSupplierDBDetail({ go }) {
           </div>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn" onClick={() => go('suppliers')}>{Icons.edit} แก้ไขข้อมูล Master</button>
-          <button className="btn primary" onClick={() => go('rfq-create')}>สร้าง RFQ ให้ Supplier นี้</button>
+          {isAdmin && (
+            <button className="btn" onClick={() => go('suppliers')}>{Icons.edit} แก้ไขข้อมูล Master</button>
+          )}
+          {canWrite && (
+            <button className="btn primary" onClick={() => go('rfq-create')}>สร้าง RFQ ให้ Supplier นี้</button>
+          )}
         </div>
       </div>
 

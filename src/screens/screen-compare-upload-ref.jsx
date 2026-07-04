@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Icons, Chip } from '../lib/shell';
 import { settingsInputStyle, SettingsField } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Compare → Upload Ref
@@ -17,6 +18,7 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
   const [approvedDate, setApprovedDate] = useState('');
   const [notes, setNotes] = useState('');
   const [uploaded, setUploaded] = useState(false);
+  const { canWrite } = usePermissions();
 
   // Suppliers dropdown
   const [suppliers, setSuppliers] = useState([]);
@@ -80,6 +82,19 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
       setErr('เครือข่ายขัดข้อง');
     }
     setBusy(false);
+  }
+
+  if (!canWrite) {
+    return (
+      <div className="page">
+        <button className="btn ghost sm" onClick={() => go('compare')} style={{ marginBottom: 20, marginLeft: -8 }}>
+          {Icons.back} กลับไป Compare
+        </button>
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)' }}>
+          สิทธิ์ของคุณเป็นแบบดูอย่างเดียว — ไม่สามารถอัพโหลดไฟล์ได้
+        </div>
+      </div>
+    );
   }
 
   if (uploaded) {

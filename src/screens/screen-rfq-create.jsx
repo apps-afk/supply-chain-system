@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Av } from '../lib/shell';
 import { UnitPicker } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Create RFQ — full build flow on one page.
@@ -286,6 +287,7 @@ export async function downloadRfqExcel({ rfqNo, supplier, project, title, due, c
 /* =================== Main screen =================== */
 
 export function ScreenRFQCreate({ go }) {
+  const { canWrite } = usePermissions();
   // Lookups
   const [suppliers, setSuppliers] = useState([]);
   const [projects,  setProjects]  = useState([]);
@@ -516,6 +518,19 @@ export function ScreenRFQCreate({ go }) {
   };
   const addRow    = () => setRows(rs => [...rs, blankRow()]);
   const removeRow = (uid) => setRows(rs => rs.length === 1 ? [blankRow()] : rs.filter(r => r.uid !== uid));
+
+  if (!canWrite) {
+    return (
+      <div className="page">
+        <button className="btn ghost sm" onClick={() => go('rfq')} style={{ marginBottom: 20, marginLeft: -8 }}>
+          {Icons.back} กลับไป RFQ
+        </button>
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)' }}>
+          สิทธิ์ของคุณเป็นแบบดูอย่างเดียว — ไม่สามารถสร้าง RFQ ได้
+        </div>
+      </div>
+    );
+  }
 
   if (generated) {
     return <GeneratedView go={go} rfqNo={rfqNo} title={title} supplier={supplier} project={project} projects={projects} items={itemsValid} catalog={catalog} approvalRoles={approvalRoles} contact={contact} due={due} overheadHint={overheadHint} vatPolicy={vatPolicy} notes={notes} />;

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, Av, Spark, Delta, money } from '../lib/shell';
 import { downloadRfqExcel, ExcelDocPreview } from './screen-rfq-create';
 import { findUnit } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 // Read the supplier's filled-in quote workbook and pull out the unit price
 // they entered per line (matched by the item code in column B → price in
@@ -106,6 +107,7 @@ function fmtDate(iso) {
 /* =================== List =================== */
 
 export function ScreenRFQ({ go }) {
+  const { canWrite } = usePermissions();
   const [rfqs,     setRfqs]     = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading,  setLoading]  = useState(true);
@@ -181,16 +183,18 @@ export function ScreenRFQ({ go }) {
             หนึ่งใบ ต่อ Supplier หนึ่งราย — สำหรับเทียบราคาให้สร้างหลายใบ
           </p>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
-          <button className="btn" onClick={() => {
-            // Clear any stale stashed id so the confirm screen opens the most
-            // recent RFQ deterministically — not whichever row was viewed last
-            // session (risk: quote attached to the wrong RFQ).
-            try { window.localStorage.removeItem('rfq.currentId'); } catch {}
-            go('rfq-confirm');
-          }}>{Icons.upload} Upload Quote</button>
-          <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้าง RFQ ใหม่</button>
-        </div>
+        {canWrite && (
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn" onClick={() => {
+              // Clear any stale stashed id so the confirm screen opens the most
+              // recent RFQ deterministically — not whichever row was viewed last
+              // session (risk: quote attached to the wrong RFQ).
+              try { window.localStorage.removeItem('rfq.currentId'); } catch {}
+              go('rfq-confirm');
+            }}>{Icons.upload} Upload Quote</button>
+            <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้าง RFQ ใหม่</button>
+          </div>
+        )}
       </div>
 
       {/* Stat strip — derived counts from data */}
@@ -319,6 +323,7 @@ export function ScreenRFQ({ go }) {
 */
 
 export function ScreenRFQConfirm({ go }) {
+  const { canWrite } = usePermissions();
   const [rfq,        setRfq]        = useState(null);
   const [parsed,     setParsed]     = useState(null); // hydrated notes payload
   const [projects,   setProjects]   = useState([]);
@@ -643,7 +648,7 @@ export function ScreenRFQConfirm({ go }) {
             อัพโหลดไฟล์ใบเสนอราคาจาก Supplier (PDF) เก็บเข้า Google Drive · จากนั้นเปรียบเทียบราคากับ Price DB
           </p>
         </div>
-        {rfq && (
+        {canWrite && rfq && (
           <div style={{ display:'flex', gap:16, alignItems:'flex-end' }}>
             <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-start' }}>
               <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>เอกสาร RFQ</span>
@@ -667,75 +672,77 @@ export function ScreenRFQConfirm({ go }) {
       )}
 
       {/* Upload section */}
-      <div className="card" style={{ padding:'20px 24px', marginBottom:24 }}>
-        <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12 }}>
-          <div>
-            <h3 className="h-card">อัพโหลด Quote PDF จาก Supplier</h3>
-            <p style={{ fontSize:12.5, color:'var(--ink-3)', margin:'4px 0 0' }}>
-              ไฟล์จะถูกเก็บเข้า Google Drive ภายใต้หมวด "ใบเสนอราคา (RFQ Quotes)"
-            </p>
-          </div>
-        </div>
-
-        {uploadErr && (
-          <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:12 }}>{uploadErr}</div>
-        )}
-
-        {uploadOk ? (
-          <div style={{
-            padding:'12px 14px', background:'var(--moss-soft)',
-            border:'1px solid var(--moss)', borderRadius:6,
-            display:'flex', gap:12, alignItems:'center',
-          }}>
-            <span style={{ color:'var(--moss)' }}>{Icons.check}</span>
-            {(() => { const isExcel = /\.(xlsx|xls)$/i.test(quoteFile?.name || uploadOk.name || ''); return (
-            <>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:13, fontWeight:500, color:'#2F4A1A' }}>
-                อัปโหลดสำเร็จ {isExcel ? (readBusy ? '· กำลังอ่านราคา…' : '· อ่านราคาจากไฟล์แล้ว') : ''}
-              </div>
-              <div style={{ fontSize:11.5, color:'#2F4A1A', marginTop:2 }}>
-                {uploadOk.name} · เก็บเข้า Google Drive แล้ว
-                {isExcel
-                  ? ' · ตรวจสอบราคาด้านล่างก่อนบันทึกเข้า Price DB'
-                  : ' · ไฟล์นี้อ่านราคาอัตโนมัติไม่ได้ (ไม่ใช่ Excel) — กรอกราคาในตารางเองได้'}
-              </div>
+      {canWrite && (
+        <div className="card" style={{ padding:'20px 24px', marginBottom:24 }}>
+          <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:12 }}>
+            <div>
+              <h3 className="h-card">อัพโหลด Quote PDF จาก Supplier</h3>
+              <p style={{ fontSize:12.5, color:'var(--ink-3)', margin:'4px 0 0' }}>
+                ไฟล์จะถูกเก็บเข้า Google Drive ภายใต้หมวด "ใบเสนอราคา (RFQ Quotes)"
+              </p>
             </div>
-            {quoteFile && isExcel && (
-              <button className="btn sm" onClick={() => readQuoteIntoItems(quoteFile)} disabled={readBusy}>
-                {readBusy ? 'อ่าน…' : 'อ่านไฟล์อีกครั้ง'}
-              </button>
-            )}
-            </>
-            ); })()}
-            {uploadOk.viewLink && (
-              <a href={uploadOk.viewLink} target="_blank" rel="noreferrer" className="btn sm">
-                {Icons.external} เปิดดู
-              </a>
-            )}
           </div>
-        ) : (
-          <div style={{ display:'flex', gap:12, alignItems:'center', flexWrap:'wrap' }}>
-            <label style={{
-              flex:'1 1 320px', padding:'18px 20px',
-              border:'2px dashed var(--rule-2)', borderRadius:8,
-              background:'var(--surface-2)', textAlign:'center', cursor:'pointer',
+  
+          {uploadErr && (
+            <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:12 }}>{uploadErr}</div>
+          )}
+  
+          {uploadOk ? (
+            <div style={{
+              padding:'12px 14px', background:'var(--moss-soft)',
+              border:'1px solid var(--moss)', borderRadius:6,
+              display:'flex', gap:12, alignItems:'center',
             }}>
-              <div style={{ fontSize:13, fontWeight:500, color:'var(--ink-2)', marginBottom:4 }}>
-                {quoteFile ? quoteFile.name : <>เลือกไฟล์ PDF ของใบเสนอราคา</>}
+              <span style={{ color:'var(--moss)' }}>{Icons.check}</span>
+              {(() => { const isExcel = /\.(xlsx|xls)$/i.test(quoteFile?.name || uploadOk.name || ''); return (
+              <>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:13, fontWeight:500, color:'#2F4A1A' }}>
+                  อัปโหลดสำเร็จ {isExcel ? (readBusy ? '· กำลังอ่านราคา…' : '· อ่านราคาจากไฟล์แล้ว') : ''}
+                </div>
+                <div style={{ fontSize:11.5, color:'#2F4A1A', marginTop:2 }}>
+                  {uploadOk.name} · เก็บเข้า Google Drive แล้ว
+                  {isExcel
+                    ? ' · ตรวจสอบราคาด้านล่างก่อนบันทึกเข้า Price DB'
+                    : ' · ไฟล์นี้อ่านราคาอัตโนมัติไม่ได้ (ไม่ใช่ Excel) — กรอกราคาในตารางเองได้'}
+                </div>
               </div>
-              <div style={{ fontSize:11, color:'var(--ink-3)' }}>
-                {quoteFile ? `${Math.round(quoteFile.size/1024)} KB` : 'รองรับ PDF, Excel (.xls/.xlsx/.csv), Word, รูป · ไม่เกิน 25 MB'}
-              </div>
-              <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display:'none' }}
-                onChange={e => setQuoteFile(e.target.files?.[0] || null)} />
-            </label>
-            <button className="btn primary" disabled={!quoteFile || uploading || !rfq} onClick={uploadQuote}>
-              {uploading ? 'กำลังอัปโหลด…' : <>{Icons.upload} อัพโหลด Quote</>}
-            </button>
-          </div>
-        )}
-      </div>
+              {quoteFile && isExcel && (
+                <button className="btn sm" onClick={() => readQuoteIntoItems(quoteFile)} disabled={readBusy}>
+                  {readBusy ? 'อ่าน…' : 'อ่านไฟล์อีกครั้ง'}
+                </button>
+              )}
+              </>
+              ); })()}
+              {uploadOk.viewLink && (
+                <a href={uploadOk.viewLink} target="_blank" rel="noreferrer" className="btn sm">
+                  {Icons.external} เปิดดู
+                </a>
+              )}
+            </div>
+          ) : (
+            <div style={{ display:'flex', gap:12, alignItems:'center', flexWrap:'wrap' }}>
+              <label style={{
+                flex:'1 1 320px', padding:'18px 20px',
+                border:'2px dashed var(--rule-2)', borderRadius:8,
+                background:'var(--surface-2)', textAlign:'center', cursor:'pointer',
+              }}>
+                <div style={{ fontSize:13, fontWeight:500, color:'var(--ink-2)', marginBottom:4 }}>
+                  {quoteFile ? quoteFile.name : <>เลือกไฟล์ PDF ของใบเสนอราคา</>}
+                </div>
+                <div style={{ fontSize:11, color:'var(--ink-3)' }}>
+                  {quoteFile ? `${Math.round(quoteFile.size/1024)} KB` : 'รองรับ PDF, Excel (.xls/.xlsx/.csv), Word, รูป · ไม่เกิน 25 MB'}
+                </div>
+                <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style={{ display:'none' }}
+                  onChange={e => setQuoteFile(e.target.files?.[0] || null)} />
+              </label>
+              <button className="btn primary" disabled={!quoteFile || uploading || !rfq} onClick={uploadQuote}>
+                {uploading ? 'กำลังอัปโหลด…' : <>{Icons.upload} อัพโหลด Quote</>}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Supplier's quoted conditions — parsed from the uploaded Excel,
           editable, persisted into rfq.notes and carried into Compare */}
@@ -750,9 +757,11 @@ export function ScreenRFQConfirm({ go }) {
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:10 }}>
               {condsMsg && <span style={{ fontSize:12, color: condsMsg.includes('แล้ว') ? 'var(--moss)' : 'var(--clay)' }}>{condsMsg}</span>}
-              <button className="btn sm" onClick={() => persistConditions(conds)} disabled={condsBusy}>
-                {condsBusy ? 'กำลังบันทึก…' : 'บันทึกเงื่อนไข'}
-              </button>
+              {canWrite && (
+                <button className="btn sm" onClick={() => persistConditions(conds)} disabled={condsBusy}>
+                  {condsBusy ? 'กำลังบันทึก…' : 'บันทึกเงื่อนไข'}
+                </button>
+              )}
             </div>
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
@@ -788,9 +797,11 @@ export function ScreenRFQConfirm({ go }) {
               <h3 className="h-section" style={{ margin:0 }}>ตัวอย่างเอกสาร RFQ (ก่อน Export)</h3>
               <span style={{ fontSize:12, color:'var(--ink-3)' }}>· {parsed.items.length} รายการ</span>
             </button>
-            <button className="btn" onClick={downloadExcel} disabled={dlBusy || !parsed}>
-              {Icons.download} {dlBusy ? 'กำลังสร้าง…' : 'ดาวน์โหลด Excel'}
-            </button>
+            {canWrite && (
+              <button className="btn" onClick={downloadExcel} disabled={dlBusy || !parsed}>
+                {Icons.download} {dlBusy ? 'กำลังสร้าง…' : 'ดาวน์โหลด Excel'}
+              </button>
+            )}
           </div>
           {previewOpen && (
             <ExcelDocPreview
@@ -823,10 +834,12 @@ export function ScreenRFQConfirm({ go }) {
               <span style={{ color: 'var(--ink-3)' }}>● {items.length - saving} รายการข้าม</span>
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn sm" onClick={() => setItems(items.map(i => ({ ...i, save: true })))}>เลือกทั้งหมด</button>
-            <button className="btn sm" onClick={() => setItems(items.map(i => ({ ...i, save: false })))}>ยกเลิกทั้งหมด</button>
-          </div>
+          {canWrite && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn sm" onClick={() => setItems(items.map(i => ({ ...i, save: true })))}>เลือกทั้งหมด</button>
+              <button className="btn sm" onClick={() => setItems(items.map(i => ({ ...i, save: false })))}>ยกเลิกทั้งหมด</button>
+            </div>
+          )}
         </div>
 
         <table className="tbl">
@@ -943,11 +956,13 @@ export function ScreenRFQConfirm({ go }) {
         )}
         <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
           <button className="btn ghost" onClick={() => go('rfq')}>กลับ</button>
-          <button className="btn primary" style={{ padding:'10px 20px' }}
-            disabled={items.length === 0 || savePxBusy || pricesSaved}
-            onClick={savePrices}>
-            {Icons.check} {savePxBusy ? 'กำลังบันทึก…' : (pricesSaved ? 'บันทึกแล้ว' : 'ยืนยันบันทึก Price DB')}
-          </button>
+          {canWrite && (
+            <button className="btn primary" style={{ padding:'10px 20px' }}
+              disabled={items.length === 0 || savePxBusy || pricesSaved}
+              onClick={savePrices}>
+              {Icons.check} {savePxBusy ? 'กำลังบันทึก…' : (pricesSaved ? 'บันทึกแล้ว' : 'ยืนยันบันทึก Price DB')}
+            </button>
+          )}
         </div>
       </div>
     </div>

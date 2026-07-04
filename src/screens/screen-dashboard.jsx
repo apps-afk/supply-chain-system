@@ -4,6 +4,7 @@ import { useSession } from 'next-auth/react';
 import { Icons, Stat, InitialEstateLogo, money } from '../lib/shell';
 import { retentionInfo, buildAlerts } from '../lib/alerts';
 import { canApprove } from '../lib/permissions';
+import { usePermissions } from '../lib/use-permissions';
 
 const MONTHS_TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
@@ -19,6 +20,7 @@ function fmtDate(iso) {
 
 export function ScreenDashboard({ go }) {
   const { data: session } = useSession();
+  const { canWrite } = usePermissions();
   const userName = session?.user?.name || session?.user?.email?.split('@')[0] || 'ผู้ใช้งาน';
   const now = new Date();
   const monthLabel = `${MONTHS_TH[now.getMonth()]} ${now.getFullYear() + 543}`;
@@ -139,9 +141,11 @@ export function ScreenDashboard({ go }) {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12 }}>
           <InitialEstateLogo width={120} style={{ opacity: 0.82 }} />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้างใบขอราคา</button>
-          </div>
+          {canWrite && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn primary" onClick={() => go('rfq-create')}>{Icons.plus} สร้างใบขอราคา</button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -237,9 +241,11 @@ export function ScreenDashboard({ go }) {
         {recentRfqs.length === 0 ? (
           <div className="card" style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--ink-3)' }}>
             <div style={{ fontSize: 14 }}>ยังไม่มีใบขอราคา</div>
-            <button className="btn primary sm" style={{ marginTop: 14 }} onClick={() => go('rfq-create')}>
-              {Icons.plus} สร้างใบขอราคาแรก
-            </button>
+            {canWrite && (
+              <button className="btn primary sm" style={{ marginTop: 14 }} onClick={() => go('rfq-create')}>
+                {Icons.plus} สร้างใบขอราคาแรก
+              </button>
+            )}
           </div>
         ) : (
           <div className="card" style={{ padding: 0 }}>

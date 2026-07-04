@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Icons, Chip, Av, money } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 /*
   Contract module — upload-driven AI review workflow.
 
@@ -129,6 +130,7 @@ export function ScreenContractList({ go }) {
   const [projectFilter, setProjectFilter] = useState('all');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { canWrite, isAdmin } = usePermissions();
 
   // Close out the retention: stamp released date + who recorded it. The
   // list refreshes so the row flips to "คืนแล้ว" and the dashboard todo
@@ -263,9 +265,11 @@ export function ScreenContractList({ go }) {
             แต่ละไฟล์อยู่ใน Google Drive และผูกกับโครงการ/คู่สัญญาในระบบ
           </p>
         </div>
-        <div style={{ display:'flex', gap:8 }}>
-          <button className="btn primary" onClick={() => setUploadOpen(true)}>{Icons.upload} อัพโหลดเอกสาร</button>
-        </div>
+        {canWrite && (
+          <div style={{ display:'flex', gap:8 }}>
+            <button className="btn primary" onClick={() => setUploadOpen(true)}>{Icons.upload} อัพโหลดเอกสาร</button>
+          </div>
+        )}
       </div>
 
       {/* Filter row — project + search */}
@@ -377,7 +381,7 @@ export function ScreenContractList({ go }) {
                     {ret.state !== 'unknown' && (
                       <div style={{ color: retColor, marginTop:2, fontSize:11 }}>{retLabel}</div>
                     )}
-                    {(ret.state === 'due' || ret.state === 'soon') && (
+                    {canWrite && (ret.state === 'due' || ret.state === 'soon') && (
                       <button className="btn sm" onClick={e => { e.stopPropagation(); releaseRetention(c); }}
                         style={{ marginTop:6, padding:'2px 8px', fontSize:10.5 }}>
                         บันทึกคืนเงินประกัน
@@ -395,17 +399,19 @@ export function ScreenContractList({ go }) {
                     )}
                   </td>
                   <td onClick={e => e.stopPropagation()} style={{ textAlign:'right' }}>
-                    <button
-                      onClick={() => deleteContract(c, atts.length)}
-                      title="ลบเอกสาร"
-                      style={{
-                        background:'none', border:'none', cursor:'pointer',
-                        color:'var(--ink-4)', fontSize:16, padding:'4px 6px',
-                        borderRadius:4,
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.background = '#FDE8E4'; e.currentTarget.style.color = 'var(--clay)'; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink-4)'; }}
-                    >🗑</button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => deleteContract(c, atts.length)}
+                        title="ลบเอกสาร"
+                        style={{
+                          background:'none', border:'none', cursor:'pointer',
+                          color:'var(--ink-4)', fontSize:16, padding:'4px 6px',
+                          borderRadius:4,
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#FDE8E4'; e.currentTarget.style.color = 'var(--clay)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink-4)'; }}
+                      >🗑</button>
+                    )}
                   </td>
                 </tr>
               );
@@ -716,6 +722,7 @@ export function ScreenContract({ go }) {
   const [attachments, setAttachments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
+  const { canWrite, isAdmin } = usePermissions();
 
   // phase: 'Uploaded' | 'Reviewing' | 'Reviewed' | 'Legal' | 'Final'
   const [phase, setPhase] = useState('Uploaded');
@@ -887,7 +894,7 @@ export function ScreenContract({ go }) {
             <span>มูลค่า <strong style={{ color:'var(--ink-2)' }}>{contract?.amount != null ? money(contract.amount) : '—'}</strong></span>
           </div>
         </div>
-        {contract && (
+        {contract && isAdmin && (
           <div>
             <button
               className="btn"
@@ -1017,9 +1024,11 @@ export function ScreenContract({ go }) {
                   <div style={{ fontSize:12, color:'var(--ink-3)', lineHeight:1.55, flex:1 }}>
                     วิเคราะห์เทียบ Template + ออก Report ประเด็นที่ต้องแก้ ใช้เวลา 1–2 นาที
                   </div>
-                  <button className="btn primary" onClick={() => setConfirmOpen(true)} disabled={!contract}>
-                    {Icons.sparkles} เริ่ม AI ตรวจ
-                  </button>
+                  {canWrite && (
+                    <button className="btn primary" onClick={() => setConfirmOpen(true)} disabled={!contract}>
+                      {Icons.sparkles} เริ่ม AI ตรวจ
+                    </button>
+                  )}
                 </div>
 
                 {/* Option B — skip AI, mark active directly */}
@@ -1038,6 +1047,7 @@ export function ScreenContract({ go }) {
                   <div style={{ fontSize:12, color:'var(--ink-3)', lineHeight:1.55, flex:1 }}>
                     สัญญาผ่านการตรวจจากภายนอกแล้ว — บันทึกเป็น "ใช้งานอยู่" ทันที, ไฟล์อยู่ใน Drive ตามเดิม
                   </div>
+                  {canWrite && (
                   <button
                     className="btn"
                     disabled={!contract}
@@ -1064,15 +1074,18 @@ export function ScreenContract({ go }) {
                   >
                     บันทึกและข้าม
                   </button>
+                  )}
                 </div>
               </div>
 
-              <button
-                className="btn ghost"
-                onClick={() => deleteCurrentContract()}
-                style={{ marginTop:18, color:'var(--clay)' }}>
-                ยกเลิก / ลบเอกสารนี้
-              </button>
+              {isAdmin && (
+                <button
+                  className="btn ghost"
+                  onClick={() => deleteCurrentContract()}
+                  style={{ marginTop:18, color:'var(--clay)' }}>
+                  ยกเลิก / ลบเอกสารนี้
+                </button>
+              )}
             </div>
           )}
 
@@ -1341,6 +1354,7 @@ function ActiveContractView({ contract, attachments, onUploadAddon }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const inputRef = React.useRef(null);
+  const { canWrite } = usePermissions();
 
   async function handleFile(f) {
     if (!f) return;
@@ -1406,20 +1420,24 @@ function ActiveContractView({ contract, attachments, onUploadAddon }) {
             </div>
           )}
 
-          <hr className="hr" style={{ margin:'22px 0 18px' }} />
+          {canWrite && (
+            <>
+              <hr className="hr" style={{ margin:'22px 0 18px' }} />
 
-          <div className="eyebrow" style={{ marginBottom:8 }}>เพิ่มไฟล์ใหม่ (Addendum / Amendment)</div>
-          <p style={{ fontSize:12.5, color:'var(--ink-3)', margin:'0 0 12px' }}>
-            อัปโหลดไฟล์เพิ่มเติม เช่น สัญญาแก้ไข, แนบเอกสารประกอบ — จะถูกเก็บใน folder เดียวกัน
-          </p>
-          {err && (
-            <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:12 }}>{err}</div>
+              <div className="eyebrow" style={{ marginBottom:8 }}>เพิ่มไฟล์ใหม่ (Addendum / Amendment)</div>
+              <p style={{ fontSize:12.5, color:'var(--ink-3)', margin:'0 0 12px' }}>
+                อัปโหลดไฟล์เพิ่มเติม เช่น สัญญาแก้ไข, แนบเอกสารประกอบ — จะถูกเก็บใน folder เดียวกัน
+              </p>
+              {err && (
+                <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:12 }}>{err}</div>
+              )}
+              <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={e => handleFile(e.target.files?.[0])}
+                disabled={busy}
+                style={{ fontSize:13 }} />
+              {busy && <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:8 }}>กำลังอัปโหลด…</div>}
+            </>
           )}
-          <input ref={inputRef} type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.webp,.heic,.heif,.gif,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            onChange={e => handleFile(e.target.files?.[0])}
-            disabled={busy}
-            style={{ fontSize:13 }} />
-          {busy && <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:8 }}>กำลังอัปโหลด…</div>}
         </div>
       </div>
 
@@ -1444,6 +1462,7 @@ function ActiveContractView({ contract, attachments, onUploadAddon }) {
 }
 
 function AIReportPanel({ phase, onSendToLegal, onUploadFinal }) {
+  const { canWrite } = usePermissions();
   const findings = [];
 
   return (
@@ -1463,7 +1482,7 @@ function AIReportPanel({ phase, onSendToLegal, onUploadFinal }) {
 
         <div style={{ display:'flex', gap:8, marginTop:24, paddingTop:20, borderTop:'1px solid var(--rule)' }}>
           <button className="btn">{Icons.download} ดาวน์โหลด Report</button>
-          {phase === 'Reviewed' && (
+          {canWrite && phase === 'Reviewed' && (
             <button className="btn primary" onClick={onSendToLegal}>
               {Icons.external} ส่ง Report ให้ฝ่ายกฎหมาย
             </button>
@@ -1473,9 +1492,11 @@ function AIReportPanel({ phase, onSendToLegal, onUploadFinal }) {
               <div style={{ flex:1, padding:'8px 14px', background:'var(--chip-recv-bg)', color:'var(--chip-recv-fg)', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:8 }}>
                 <span>{Icons.clock}</span> รอผลตรวจจากฝ่ายกฎหมาย
               </div>
-              <button className="btn primary" onClick={onUploadFinal}>
-                {Icons.upload} Upload Final
-              </button>
+              {canWrite && (
+                <button className="btn primary" onClick={onUploadFinal}>
+                  {Icons.upload} Upload Final
+                </button>
+              )}
             </>
           )}
           {phase === 'Final' && (
