@@ -167,6 +167,19 @@ export function ScreenCompareCreateRFQ({ go }) {
 
   const supplierIds = useMemo(() => pickedRfqs.map(r => r.supplierId), [pickedRfqs]);
 
+  // Mode B trap: an RFQ whose quote was uploaded but never confirmed into the
+  // Price DB has no price_points rows — every price for that supplier comes
+  // back null and the column renders empty. Surface it instead of silently
+  // producing a blank column (creation is still allowed).
+  const missingPriceRfqs = useMemo(
+    () => pickedRfqs.filter(r => !r.items.some(it => it.price != null)),
+    [pickedRfqs]
+  );
+  const missingSupIds = useMemo(
+    () => new Set(missingPriceRfqs.map(r => r.supplierId)),
+    [missingPriceRfqs]
+  );
+
   // Totals — same stale-dep fix
   const totals = useMemo(() => {
     const t = {};
@@ -367,8 +380,31 @@ export function ScreenCompareCreateRFQ({ go }) {
           {canCompare && (
             <SectionCard step="2" label="ตัวอย่างการเปรียบเทียบ"
               desc={`${pickedRfqs.length} Supplier · ${mergedItems.length} รายการ · ในหมวด ${categories[0]}`}>
+              {missingPriceRfqs.length > 0 && (
+                <div style={{
+                  marginBottom:14, padding:'12px 14px',
+                  background:'var(--clay-soft)', border:'1px solid var(--clay)',
+                  borderRadius:6, fontSize:12.5, color:'#6B2D1A',
+                  display:'flex', gap:10, alignItems:'flex-start',
+                }}>
+                  <span style={{ color:'var(--clay)' }}>{Icons.alert}</span>
+                  <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                    {missingPriceRfqs.map(r => (
+                      <div key={r.no}>
+                        RFQ <strong className="font-mono">{r.no}</strong> ยังไม่ได้บันทึกราคาเข้า Price DB — ราคาจะว่าง ·
+                        เปิด RFQ นั้นแล้วกด 'ยืนยันบันทึก Price DB' ก่อน
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <ComparePreviewTable items={mergedItems}
-                suppliers={pickedRfqs.map(r => ({ id:r.supplierId, name:r.supName, kind:r.supKind }))}
+                suppliers={pickedRfqs.map(r => ({
+                  id:   r.supplierId,
+                  // ⚠ suffix flags a column whose RFQ has no saved prices
+                  name: missingSupIds.has(r.supplierId) ? `${r.supName} ⚠` : r.supName,
+                  kind: r.supKind,
+                }))}
                 totals={totals} />
 
               {/* Terms comparison */}
@@ -380,7 +416,13 @@ export function ScreenCompareCreateRFQ({ go }) {
                       <tr>
                         <th style={{ width:200 }}>เงื่อนไข</th>
                         {pickedRfqs.map(r => (
-                          <th key={r.no} className="num-col">{r.supName}</th>
+                          <th key={r.no} className="num-col">
+                            {r.supName}
+                            {missingSupIds.has(r.supplierId) && (
+                              <span title="RFQ นี้ยังไม่ได้บันทึกราคาเข้า Price DB"
+                                style={{ marginLeft:6, color:'var(--clay)', fontSize:11 }}>⚠</span>
+                            )}
+                          </th>
                         ))}
                       </tr>
                     </thead>

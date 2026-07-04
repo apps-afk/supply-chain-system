@@ -6,9 +6,10 @@ import { usePermissions } from '../lib/use-permissions';
 import { useTableView, Th, Pager } from '../lib/table-utils';
 
 /*
-  ใบสั่งซื้อ (Purchase Orders) — closes the loop after a comparison is
-  approved. Created from compare-detail with supplier + items + prices
-  prefilled; tracked through สั่งแล้ว → รับของแล้ว → ปิดงาน (or ยกเลิก).
+  ใบสั่งซื้อ (Purchase Orders) — PO registry (ทะเบียนเก็บ PO). The company
+  opens POs in another system; this screen records them (manual entry via
+  POManualModal) or creates one from an approved comparison, then tracks
+  สั่งแล้ว → รับของแล้ว → ปิดงาน (or ยกเลิก) plus receiving/payment.
 
   Row: { no, comparison_id, project_id, supplier_id, supplier_name, title,
          status: ordered|received|closed|cancelled, items_json:[{code,name,
@@ -107,6 +108,7 @@ export function ScreenPOList({ go }) {
   const [err, setErr]           = useState('');
   const [filter, setFilter]     = useState('ทั้งหมด');
   const [q, setQ]               = useState('');
+  const [manualOpen, setManualOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -122,6 +124,7 @@ export function ScreenPOList({ go }) {
   }, []);
 
   const projById = useMemo(() => new Map(projects.map(p => [p.id, p])), [projects]);
+  const existingNos = useMemo(() => new Set(pos.map(p => String(p.no || '').trim())), [pos]);
 
   const counts = useMemo(() => {
     const c = { ordered:0, received:0, closed:0, cancelled:0 };
@@ -149,11 +152,14 @@ export function ScreenPOList({ go }) {
           <div className="eyebrow">Module 6 · จัดซื้อจัดจ้าง</div>
           <h1 className="h-display">ใบสั่งซื้อ (PO)</h1>
           <p style={{ fontSize:14, color:'var(--ink-3)', margin:'6px 0 0', maxWidth:600 }}>
-            สร้างจากใบเปรียบเทียบราคาที่อนุมัติแล้ว · ติดตามสถานะ สั่ง → รับของ → ปิดงาน
+            ทะเบียนใบสั่งซื้อ — บันทึก PO ที่เปิดจากระบบภายนอกหรือจากใบเปรียบเทียบ · ติดตามรับของและการจ่ายเงิน
           </p>
         </div>
         {canWrite && (
-          <button className="btn primary" onClick={() => go('compare')}>{Icons.plus} สร้างจากใบเปรียบเทียบ</button>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end' }}>
+            <button className="btn" onClick={() => go('compare')}>สร้างจากใบเปรียบเทียบ</button>
+            <button className="btn primary" onClick={() => setManualOpen(true)}>{Icons.plus} บันทึก PO ภายนอก</button>
+          </div>
         )}
       </div>
 
@@ -234,13 +240,279 @@ export function ScreenPOList({ go }) {
         </table>
         <Pager page={page} pages={pages} setPage={setPage} total={total} />
       </div>
+
+      {manualOpen && (
+        <POManualModal existingNos={existingNos}
+          onClose={() => setManualOpen(false)}
+          onSaved={item => {
+            try { localStorage.setItem('po.currentId', item.id); } catch {}
+            go('po-detail');
+          }} />
+      )}
+    </div>
+  );
+}
+
+/* =================== Manual PO modal (create / edit) =================== */
+// Records a PO opened in the external system into this registry (POST), or
+// edits a registry entry that is still 'ordered' (PATCH when `initial` given).
+const emptyPoRow = () => ({ code:'', name:'', qty:1, unit:'', price:'' });
+
+function POManualModal({ initial = null, existingNos = null, onClose, onSaved }) {
+  const isEdit = !!initial;
+  const [no, setNo]               = useState(initial?.no || '');
+  const [noLoading, setNoLoading] = useState(!isEdit);
+  const [suppliers, setSuppliers] = useState([]);
+  const [projects, setProjects]   = useState([]);
+  // Supplier: pick from master, or free-text for suppliers not in master
+  // (supplier_id null + supplier_name text).
+  const [freeSupplier, setFreeSupplier] = useState(isEdit ? !initial.supplier_id : false);
+  const [supplierId, setSupplierId]     = useState(initial?.supplier_id || '');
+  const [supplierText, setSupplierText] = useState(initial?.supplier_name || '');
+  const [projectId, setProjectId] = useState(initial?.project_id || '');
+  const [title, setTitle]         = useState(initial?.title || '');
+  const [orderedAt, setOrderedAt] = useState(initial?.ordered_at || new Date().toLocaleDateString('sv-SE'));
+  const [rows, setRows] = useState(() => {
+    const its = Array.isArray(initial?.items_json) ? initial.items_json : [];
+    return its.length
+      ? its.map(it => ({ code: it.code || '', name: it.name || '', qty: it.qty ?? 1,
+                         unit: it.unit || '', price: it.price ?? '' }))
+      : [emptyPoRow()];
+  });
+  const [notes, setNotes]   = useState(initial?.notes || '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr]       = useState('');
+
+  const computed = useMemo(
+    () => rows.reduce((s, r) => s + (Number(r.qty) || 0) * (Number(r.price) || 0), 0),
+    [rows]
+  );
+  // Amount defaults to Σ qty×price; typing in the field overrides (null = auto).
+  const [amountManual, setAmountManual] = useState(() => {
+    if (!isEdit) return null;
+    const its = Array.isArray(initial?.items_json) ? initial.items_json : [];
+    const c = its.reduce((s, it) => s + (Number(it.qty) || 0) * (Number(it.price) || 0), 0);
+    const a = Number(initial?.amount) || 0;
+    return Math.abs(a - c) > 0.005 ? String(a) : null;
+  });
+  const amount = amountManual !== null ? (Number(amountManual) || 0) : computed;
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [rS, rP] = await Promise.all([fetch('/api/suppliers'), fetch('/api/projects')]);
+        if (rS.ok) setSuppliers((await rS.json()).items || []);
+        if (rP.ok) setProjects((await rP.json()).items || []);
+      } catch { /* dropdowns just stay empty */ }
+      if (!isEdit) {
+        const n = await nextPoNo();
+        setNo(v => v || n); // don't clobber a number the user already typed
+        setNoLoading(false);
+      }
+    })();
+  }, [isEdit]);
+
+  // Active suppliers only — but keep the currently-selected one visible even
+  // if it has since been deactivated/removed from master.
+  const supplierOptions = useMemo(() => {
+    const opts = suppliers.filter(s => s.active || s.id === supplierId);
+    if (supplierId && !opts.some(s => s.id === supplierId)) {
+      opts.unshift({ id: supplierId, name: initial?.supplier_name || supplierId });
+    }
+    return opts;
+  }, [suppliers, supplierId, initial]);
+
+  const setRow = (i, patch) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  async function save() {
+    setErr('');
+    const noClean = no.trim();
+    if (!noClean) { setErr('กรุณากรอกเลขที่ PO'); return; }
+    if (existingNos?.has(noClean) && (!isEdit || noClean !== String(initial.no || '').trim())) {
+      setErr(`เลขที่ "${noClean}" ถูกใช้แล้วในทะเบียน — กรุณาใช้เลขอื่น`); return;
+    }
+    let supId = null, supName = '';
+    if (freeSupplier) {
+      supName = supplierText.trim();
+      if (!supName) { setErr('กรุณากรอกชื่อ Supplier'); return; }
+    } else {
+      const s = supplierOptions.find(x => x.id === supplierId);
+      if (!s) { setErr('กรุณาเลือก Supplier (หรือสลับไปพิมพ์ชื่อเอง)'); return; }
+      supId = s.id; supName = s.name;
+    }
+    const items = rows
+      .filter(r => String(r.name || '').trim())
+      .map(r => ({ code: String(r.code || '').trim(), name: String(r.name || '').trim(),
+                   unit: String(r.unit || '').trim(), qty: Number(r.qty) || 0,
+                   price: r.price === '' || r.price == null ? null : (Number(r.price) || 0) }));
+    if (!items.length) { setErr('กรุณากรอกรายการสินค้าอย่างน้อย 1 รายการ (ต้องมีชื่อรายการ)'); return; }
+
+    const body = {
+      no: noClean,
+      supplier_id: supId,
+      supplier_name: supName,
+      project_id: projectId || null,
+      title: title.trim(),
+      ordered_at: orderedAt || new Date().toLocaleDateString('sv-SE'),
+      items_json: items,
+      amount,
+      notes,
+    };
+    setSaving(true);
+    try {
+      const r = await fetch('/api/purchase-orders', {
+        method: isEdit ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(isEdit ? { id: initial.id, ...body } : { ...body, status:'ordered' }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        const msg = d.error || 'บันทึกไม่สำเร็จ';
+        setErr(r.status === 400 && /duplicate|unique|ซ้ำ/i.test(msg)
+          ? `เลขที่ "${noClean}" ถูกใช้แล้ว — กรุณาใช้เลขอื่น`
+          : msg);
+        setSaving(false);
+        return;
+      }
+      onSaved(d.item || { ...(initial || {}), ...body });
+    } catch { setErr('เครือข่ายขัดข้อง'); setSaving(false); }
+  }
+
+  const inputStyle = { width:'100%', padding:'8px 10px', fontSize:13, border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--surface)' };
+  const cellStyle  = { width:'100%', padding:'6px 8px', fontSize:12.5, border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--surface)' };
+  const labelStyle = { fontSize:11.5, color:'var(--ink-3)', marginBottom:4 };
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(20,18,14,0.45)', zIndex:80,
+                  display:'grid', placeItems:'center', padding:20 }}
+         onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="card" style={{ width:'min(760px, 100%)', maxHeight:'88vh', overflow:'auto', padding:0 }}>
+        <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
+          <h3 className="h-card">{isEdit ? 'แก้ไข PO' : 'บันทึก PO ภายนอก'}</h3>
+          <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:4 }}>
+            {isEdit
+              ? 'แก้ไขข้อมูลในทะเบียน — ทำได้เฉพาะ PO ที่ยังไม่บันทึกรับของ/ปิดงาน'
+              : 'บันทึก PO ที่เปิดจากระบบภายนอกเข้าทะเบียน — ใช้เลขที่ PO จากระบบนั้นได้เลย'}
+          </div>
+        </div>
+
+        {err && <div style={{ margin:'14px 24px 0', background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13 }}>{err}</div>}
+
+        <div style={{ padding:'16px 24px', display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+          <div>
+            <div style={labelStyle}>เลขที่ PO *</div>
+            <input value={no} onChange={e => setNo(e.target.value)} style={{ ...inputStyle, fontFamily:'var(--font-mono, monospace)' }}
+              placeholder={noLoading ? 'กำลังหาเลขรัน…' : 'PO-2026-0001'} />
+            {!isEdit && (
+              <div style={{ fontSize:11, color:'var(--ink-4)', marginTop:3 }}>ระบบใส่เลขรันให้ — แก้เป็นเลขจากระบบภายนอกได้</div>
+            )}
+          </div>
+          <div>
+            <div style={labelStyle}>วันที่สั่ง</div>
+            <input type="date" value={orderedAt} onChange={e => setOrderedAt(e.target.value)} style={inputStyle} />
+          </div>
+          <div>
+            <div style={{ ...labelStyle, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span>Supplier *</span>
+              <button type="button" onClick={() => setFreeSupplier(f => !f)}
+                style={{ border:0, background:'transparent', color:'var(--teal-ink, var(--ink-2))', fontSize:11, cursor:'pointer', textDecoration:'underline', padding:0 }}>
+                {freeSupplier ? 'เลือกจากทะเบียน Supplier' : 'ไม่อยู่ในทะเบียน? พิมพ์ชื่อเอง'}
+              </button>
+            </div>
+            {freeSupplier ? (
+              <input value={supplierText} onChange={e => setSupplierText(e.target.value)} style={inputStyle}
+                placeholder="ชื่อ Supplier (นอกทะเบียน)" />
+            ) : (
+              <select value={supplierId} onChange={e => setSupplierId(e.target.value)} style={inputStyle}>
+                <option value="">— เลือก Supplier —</option>
+                {supplierOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            )}
+          </div>
+          <div>
+            <div style={labelStyle}>โครงการ (ไม่บังคับ)</div>
+            <select value={projectId} onChange={e => setProjectId(e.target.value)} style={inputStyle}>
+              <option value="">— ไม่ระบุ —</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.code ? `${p.code} · ${p.name}` : p.name}</option>)}
+            </select>
+          </div>
+          <div style={{ gridColumn:'1 / -1' }}>
+            <div style={labelStyle}>ชื่องาน / รายการ</div>
+            <input value={title} onChange={e => setTitle(e.target.value)} style={inputStyle}
+              placeholder="เช่น สั่งซื้อเหล็กเส้นงานฐานราก อาคาร B" />
+          </div>
+        </div>
+
+        <div style={{ borderTop:'1px solid var(--rule)' }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th style={{ width:'14%' }}>รหัส</th>
+                <th>รายการ *</th>
+                <th className="num-col" style={{ width:80 }}>จำนวน</th>
+                <th style={{ width:80 }}>หน่วย</th>
+                <th className="num-col" style={{ width:110 }}>ราคา/หน่วย</th>
+                <th className="num-col" style={{ width:110 }}>รวม</th>
+                <th style={{ width:36 }} />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td><input value={r.code} onChange={e => setRow(i, { code: e.target.value })} style={cellStyle} placeholder="—" /></td>
+                  <td><input value={r.name} onChange={e => setRow(i, { name: e.target.value })} style={cellStyle} placeholder="ชื่อสินค้า/งาน" /></td>
+                  <td><input type="number" min={0} value={r.qty} onChange={e => setRow(i, { qty: e.target.value })}
+                        style={{ ...cellStyle, textAlign:'right' }} /></td>
+                  <td><input value={r.unit} onChange={e => setRow(i, { unit: e.target.value })} style={cellStyle} placeholder="หน่วย" /></td>
+                  <td><input type="number" min={0} step="0.01" value={r.price} onChange={e => setRow(i, { price: e.target.value })}
+                        style={{ ...cellStyle, textAlign:'right' }} placeholder="—" /></td>
+                  <td className="num-col num" style={{ fontSize:12.5 }}>{money((Number(r.qty) || 0) * (Number(r.price) || 0))}</td>
+                  <td style={{ textAlign:'center' }}>
+                    <button type="button" onClick={() => setRows(rs => rs.length > 1 ? rs.filter((_, j) => j !== i) : [emptyPoRow()])}
+                      title="ลบแถว" style={{ border:0, background:'transparent', color:'var(--ink-4)', cursor:'pointer', fontSize:14, lineHeight:1 }}>×</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ padding:'10px 24px', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+            <button type="button" className="btn sm" onClick={() => setRows(rs => [...rs, emptyPoRow()])}>{Icons.plus} เพิ่มแถว</button>
+            <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:8 }}>
+              <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>มูลค่ารวม (คำนวณ {money(computed)})</span>
+              <input type="number" min={0} step="0.01" value={amountManual !== null ? amountManual : computed}
+                onChange={e => setAmountManual(e.target.value)}
+                style={{ width:130, padding:'6px 8px', fontSize:13, textAlign:'right', fontWeight:600,
+                         border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--surface)' }} />
+              {amountManual !== null && (
+                <button type="button" onClick={() => setAmountManual(null)}
+                  style={{ border:0, background:'transparent', color:'var(--teal-ink, var(--ink-2))', fontSize:11, cursor:'pointer', textDecoration:'underline', padding:0 }}>
+                  ใช้ยอดคำนวณ
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)' }}>
+          <div style={labelStyle}>หมายเหตุ</div>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+            style={{ ...inputStyle, resize:'vertical', fontFamily:'inherit' }} placeholder="—" />
+        </div>
+
+        <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', display:'flex', justifyContent:'flex-end', gap:8 }}>
+          <button className="btn" onClick={onClose} disabled={saving}>ยกเลิก</button>
+          <button className="btn primary" disabled={saving || noLoading} onClick={save}>
+            {saving ? 'กำลังบันทึก…' : isEdit ? 'บันทึกการแก้ไข' : 'บันทึกเข้าทะเบียน'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 /* =================== Detail =================== */
 export function ScreenPODetail({ go }) {
-  const { canWrite, user } = usePermissions();
+  const { canWrite, isAdmin } = usePermissions();
   const [po, setPo]             = useState(null);
   const [projects, setProjects] = useState([]);
   const [attachments, setAttachments] = useState([]);
@@ -248,6 +520,8 @@ export function ScreenPODetail({ go }) {
   const [err, setErr]           = useState('');
   const [busy, setBusy]         = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
+  const [editOpen, setEditOpen]       = useState(false);
+  const [otherNos, setOtherNos]       = useState(null); // duplicate-no precheck for edit
 
   async function loadAttachments(poId) {
     try {
@@ -267,6 +541,7 @@ export function ScreenPODetail({ go }) {
         const list = d.items || [];
         const picked = (stashed && list.find(x => x.id === stashed)) || list[0] || null;
         setPo(picked);
+        setOtherNos(new Set(list.map(x => String(x.no || '').trim())));
         if (picked) loadAttachments(picked.id);
       } catch { setErr('เครือข่ายขัดข้อง'); }
       setLoading(false);
@@ -302,23 +577,44 @@ export function ScreenPODetail({ go }) {
 
   const today = () => new Date().toLocaleDateString('sv-SE');
 
-  // Record a goods receipt: append the event; flip to 'received' only when
-  // every line is fully received after this event.
+  // Admin-only: remove the entry from the registry entirely.
+  async function deletePo() {
+    if (!po) return;
+    if (!confirm(`ลบ PO ${po.no} ออกจากทะเบียนถาวร?\nประวัติรับของ/บิล/การจ่ายเงินของใบนี้จะหายไปด้วย และกู้คืนไม่ได้`)) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await fetch('/api/purchase-orders', {
+        method:'DELETE', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ id: po.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'ลบไม่สำเร็จ'); setBusy(false); return; }
+      try { localStorage.removeItem('po.currentId'); } catch {}
+      go('po');
+      return;
+    } catch { setErr('เครือข่ายขัดข้อง'); }
+    setBusy(false);
+  }
+
+  // Record a goods receipt. The event is composed SERVER-side (/receive) from
+  // the current row, so two staff recording receipts concurrently can't
+  // overwrite each other, and identity/timestamp come from the session.
   async function saveReceipt(lines, note) {
     const clean = lines.filter(l => (Number(l.qty) || 0) > 0)
                        .map(l => ({ code: l.code, qty: Number(l.qty) }));
     if (!clean.length) { setErr('กรุณากรอกจำนวนที่รับอย่างน้อย 1 รายการ'); return false; }
-    const event = { at: new Date().toISOString(), by: user?.email || '', note: note || '', lines: clean };
-    const nextReceipts = [...receipts, event];
-    const nextMap = {};
-    for (const ev of nextReceipts) for (const l of ev.lines) {
-      nextMap[l.code] = (nextMap[l.code] || 0) + (Number(l.qty) || 0);
-    }
-    const complete = items.every(it => (nextMap[it.code] || 0) >= (Number(it.qty) || 0));
-    const patch = { received_json: nextReceipts };
-    if (complete && po.status === 'ordered') { patch.status = 'received'; patch.received_at = today(); }
-    await transition(patch);
-    return true;
+    setBusy(true); setErr('');
+    try {
+      const r = await fetch('/api/purchase-orders/receive', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: po.id, lines: clean, note: note || '' }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'บันทึกรับของไม่สำเร็จ'); setBusy(false); return false; }
+      setPo(d.item);
+      setBusy(false);
+      return true;
+    } catch { setErr('เครือข่ายขัดข้อง'); setBusy(false); return false; }
   }
 
   if (loading) {
@@ -361,6 +657,18 @@ export function ScreenPODetail({ go }) {
         </div>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end' }}>
           <button className="btn" onClick={() => printDoc(`${po.no}`)}>{Icons.download} พิมพ์ / PDF</button>
+          {canWrite && (
+            <span title={po.status !== 'ordered' ? 'แก้ไขได้เฉพาะ PO สถานะ "สั่งแล้ว" — รายการที่รับของ/ปิดงาน/ยกเลิกแล้วต้องไม่ถูกแก้ย้อนหลัง' : undefined}>
+              <button className="btn" disabled={busy || po.status !== 'ordered'} onClick={() => setEditOpen(true)}>
+                {Icons.edit} แก้ไข PO
+              </button>
+            </span>
+          )}
+          {isAdmin && (
+            <button className="btn ghost" disabled={busy} style={{ color:'var(--clay)' }} onClick={deletePo}>
+              ลบ PO
+            </button>
+          )}
           {canWrite && po.status === 'ordered' && (
             <>
               <button className="btn primary" disabled={busy} onClick={() => setReceiveOpen(true)}>
@@ -508,6 +816,22 @@ export function ScreenPODetail({ go }) {
           onSave={async (lines, note) => {
             const ok = await saveReceipt(lines, note);
             if (ok) setReceiveOpen(false);
+          }} />
+      )}
+
+      {editOpen && (
+        <POManualModal initial={po} existingNos={otherNos}
+          onClose={() => setEditOpen(false)}
+          onSaved={item => {
+            const oldNo = String(po.no || '').trim();
+            setPo(p => ({ ...p, ...item }));
+            // keep the dup-precheck set in step when the number was renamed
+            setOtherNos(s => {
+              if (!s) return s;
+              const n = new Set(s); n.delete(oldNo); n.add(String(item.no || '').trim());
+              return n;
+            });
+            setEditOpen(false);
           }} />
       )}
     </div>

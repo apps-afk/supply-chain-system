@@ -32,15 +32,19 @@ export function ScreenDashboard({ go }) {
   const [materials, setMaterials] = useState([]);
   const [comparisons, setComparisons] = useState([]);
   const [signRoles, setSignRoles] = useState([]);
+  const [projects, setProjects]   = useState([]);
+  const [pos, setPos]             = useState([]);
   const [loading, setLoading]     = useState(true);
+  const [loadErr, setLoadErr]     = useState('');
 
   useEffect(() => {
     (async () => {
       try {
-        const [rPx, rR, rC, rCt, rM, rCmp, rAr] = await Promise.all([
+        const [rPx, rR, rC, rCt, rM, rCmp, rAr, rPj, rPo] = await Promise.all([
           fetch('/api/prices'), fetch('/api/rfqs'), fetch('/api/contracts'),
           fetch('/api/contract-types'), fetch('/api/materials'),
           fetch('/api/comparisons'), fetch('/api/approval-roles'),
+          fetch('/api/projects'), fetch('/api/purchase-orders'),
         ]);
         if (rPx.ok) setPrices((await rPx.json()).items || []);
         if (rR.ok)  setRfqs((await rR.json()).items || []);
@@ -52,7 +56,15 @@ export function ScreenDashboard({ go }) {
           setSignRoles(((await rAr.json()).items || [])
             .filter(x => x.active).sort((a, b) => (a.level || 0) - (b.level || 0)));
         }
-      } catch { /* stats degrade to 0 */ }
+        if (rPj.ok) setProjects((await rPj.json()).items || []);
+        if (rPo.ok) setPos((await rPo.json()).items || []);
+        // Don't let the main stats silently degrade to zeros — flag failures.
+        if (!rR.ok || !rC.ok || !rPx.ok) {
+          setLoadErr('โหลดข้อมูลบางส่วนไม่สำเร็จ — ตัวเลขอาจไม่ครบถ้วน ลองรีเฟรชอีกครั้ง');
+        }
+      } catch {
+        setLoadErr('โหลดข้อมูลบางส่วนไม่สำเร็จ — ตัวเลขอาจไม่ครบถ้วน ลองรีเฟรชอีกครั้ง');
+      }
       setLoading(false);
     })();
   }, []);
@@ -132,8 +144,49 @@ export function ScreenDashboard({ go }) {
 
   const recentRfqs = useMemo(() => rfqs.slice(0, 5), [rfqs]);
 
+  // Budget vs actual per project — contract value (active + draft) and PO
+  // value (non-cancelled) summed by project_id. Contracts and POs can
+  // overlap, so the remaining figure is an estimate (see footnote).
+  const budgetRows = useMemo(() => {
+    const contractByProj = new Map();
+    for (const c of contracts) {
+      if (c.status !== 'active' && c.status !== 'draft') continue;
+      if (!c.project_id) continue;
+      contractByProj.set(c.project_id, (contractByProj.get(c.project_id) || 0) + (Number(c.amount) || 0));
+    }
+    const poByProj = new Map();
+    for (const p of pos) {
+      if (p.status === 'cancelled') continue;
+      if (!p.project_id) continue;
+      poByProj.set(p.project_id, (poByProj.get(p.project_id) || 0) + (Number(p.amount) || 0));
+    }
+    const rows = [];
+    for (const p of projects) {
+      const budget = Number(p.budget) || 0;
+      const contractValue = contractByProj.get(p.id) || 0;
+      const poValue = poByProj.get(p.id) || 0;
+      if (budget <= 0 && contractValue <= 0 && poValue <= 0) continue;
+      rows.push({
+        id: p.id,
+        name: p.code ? `${p.code} · ${p.name}` : p.name,
+        budget, contractValue, poValue,
+        remaining: budget - (contractValue + poValue),
+      });
+    }
+    rows.sort((a, b) => b.budget - a.budget);
+    return rows;
+  }, [projects, contracts, pos]);
+
   return (
     <div className="page">
+      {loadErr && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--ochre-soft)',
+                      color: '#6B5121', padding: '10px 14px', borderRadius: 6, fontSize: 13, marginBottom: 20 }}>
+          <span style={{ flex: 1 }}>⚠ {loadErr}</span>
+          <button className="btn ghost sm" onClick={() => setLoadErr('')}
+            style={{ color: '#6B5121', padding: '2px 8px' }} aria-label="ปิดการแจ้งเตือน">×</button>
+        </div>
+      )}
       <div className="page-head">
         <div className="page-title">
           <div className="eyebrow">ภาพรวม · {monthLabel}</div>
@@ -186,6 +239,58 @@ export function ScreenDashboard({ go }) {
                 <span style={{ color: t.tone }}>{Icons.chevronR}</span>
               </div>
             ))}
+          </div>
+        )}
+      </section>
+
+      <section style={{ marginTop: 56 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div>
+            <h2 className="h-section">งบประมาณรายโครงการ</h2>
+            <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>งบ vs ใช้จริง — มูลค่าสัญญาและยอดสั่งซื้อเทียบกับงบประมาณของแต่ละโครงการ</p>
+          </div>
+        </div>
+        {budgetRows.length === 0 ? (
+          <div className="card" style={{ padding: '40px 24px', textAlign: 'center', color: 'var(--ink-3)' }}>
+            <div style={{ fontSize: 14 }}>ยังไม่ได้ตั้งงบประมาณในโครงการ — ตั้งได้ที่ ตั้งค่า → โครงการ</div>
+          </div>
+        ) : (
+          <div className="card" style={{ padding: 0 }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>โครงการ</th>
+                  <th className="num-col">งบประมาณ</th>
+                  <th className="num-col">มูลค่าสัญญา</th>
+                  <th className="num-col">ยอดสั่งซื้อ PO</th>
+                  <th className="num-col" style={{ width: 160 }}>คงเหลือจากงบ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {budgetRows.slice(0, 8).map(r => (
+                  <tr key={r.id}>
+                    <td style={{ fontWeight: 500 }}>{r.name}</td>
+                    <td className="num-col num">{r.budget > 0 ? money(r.budget) : <span style={{ color: 'var(--ink-4)' }}>—</span>}</td>
+                    <td className="num-col num">{money(r.contractValue)}</td>
+                    <td className="num-col num">{money(r.poValue)}</td>
+                    <td className="num-col">
+                      {r.remaining < 0 ? (
+                        <span className="num" style={{ fontWeight: 600, color: 'var(--clay)' }}>
+                          {money(r.remaining)} · เกินงบ
+                        </span>
+                      ) : (
+                        <span className="num">{money(r.remaining)}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ padding: '10px 20px', borderTop: '1px solid var(--rule)', fontSize: 11.5, color: 'var(--ink-3)',
+                          display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <span>*สัญญาและ PO อาจซ้อนทับกัน — ตัวเลขคงเหลือเป็นการประมาณ</span>
+              {budgetRows.length > 8 && <span>+{budgetRows.length - 8} โครงการ</span>}
+            </div>
           </div>
         )}
       </section>

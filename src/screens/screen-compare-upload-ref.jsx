@@ -62,20 +62,31 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
       const res = await fetch('/api/upload', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) { setErr(data.error || 'อัปโหลดไม่สำเร็จ'); setBusy(false); return; }
-      // Record the decision on the comparison row — finalized is the real
-      // schema status (draft|finalized|archived); "Decided" is UI copy only.
+      // Record the decision on the comparison row's notes only — never send
+      // status here: finalization must flow through the approval chain on
+      // compare-detail (or an admin override), so the server would 403 us.
+      // Append to the existing notes instead of overwriting them.
       if (cmpId) {
         try {
+          let existingNotes = '';
+          try {
+            const rC = await fetch('/api/comparisons');
+            if (rC.ok) {
+              const dC = await rC.json();
+              const row = (dC.items || []).find(x => x.id === cmpId);
+              existingNotes = row?.notes || '';
+            }
+          } catch { /* fall back to appending onto empty */ }
+          const decisionLine = `อัพโหลดเอกสารอนุมัติ: เลือก ${selectedSupplier} · อนุมัติโดย ${approvedBy} · ${approvedDate}${notes ? ' · ' + notes : ''}`;
           await fetch('/api/comparisons', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               id: cmpId,
-              status: 'finalized',
-              notes: `เลือก ${selectedSupplier} · อนุมัติโดย ${approvedBy} เมื่อ ${approvedDate}${notes ? ' · ' + notes : ''}`,
+              notes: existingNotes ? `${existingNotes}\n${decisionLine}` : decisionLine,
             }),
           });
-        } catch { /* upload already succeeded; status update is best-effort */ }
+        } catch { /* upload already succeeded; notes update is best-effort */ }
       }
       setUploaded(true);
     } catch {
@@ -118,10 +129,13 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
             </div>
             <h1 className="h-display">Upload Ref สำเร็จ</h1>
             <p style={{ fontSize:14, color:'var(--ink-3)', maxWidth:560, lineHeight:1.6, margin:'8px 0 0' }}>
-              เอกสารอ้างอิงและการเลือก Supplier ถูกบันทึกในระบบเรียบร้อย — สถานะของเอกสารเปรียบเทียบเปลี่ยนเป็น <strong style={{ color:'var(--ink-2)' }}>Decided</strong>
+              เอกสารอ้างอิงและการเลือก Supplier ถูกบันทึกในระบบเรียบร้อย — เอกสารเปรียบเทียบจะเปลี่ยนเป็น <strong style={{ color:'var(--ink-2)' }}>อนุมัติแล้ว</strong> เมื่อผ่านการอนุมัติตามลำดับครบถ้วน
             </p>
             <div style={{ display:'flex', gap:8, marginTop:24 }}>
-              <button className="btn primary" onClick={() => go('compare-detail')}>ดูเอกสารเปรียบเทียบ</button>
+              <button className="btn primary" onClick={() => {
+                if (cmpId) { try { window.localStorage.setItem('cmp.currentId', cmpId); } catch {} }
+                go('compare-detail');
+              }}>ไปที่ใบเปรียบเทียบเพื่อดำเนินการอนุมัติตามลำดับ</button>
               <button className="btn" onClick={() => go('compare')}>กลับไปรายการ</button>
             </div>
           </div>
@@ -161,7 +175,7 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
                 background:'var(--moss-soft)', color:'#2F4A1A',
               }}>
                 <span style={{ width:6, height:6, borderRadius:999, background:'var(--moss)' }} />
-                Decided
+                บันทึกไฟล์แล้ว · รออนุมัติตามลำดับ
               </span>
             </div>
           </div>
@@ -303,7 +317,7 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
           <button className="btn primary" disabled={!canSave}
             onClick={doUpload}
             style={{ padding:'10px 20px', opacity: canSave ? 1 : 0.5, cursor: canSave ? 'pointer' : 'not-allowed' }}>
-            {Icons.check} {busy ? 'กำลังอัพโหลด…' : 'บันทึก Ref & เปลี่ยนสถานะเป็น Decided'}
+            {Icons.check} {busy ? 'กำลังอัพโหลด…' : 'บันทึก Ref'}
           </button>
         </div>
       </div>

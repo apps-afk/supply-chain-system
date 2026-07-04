@@ -37,6 +37,7 @@ export function ScreenCompare({ go }) {
   const [statusBusy, setStatusBusy] = useState(false);
   const [poBusy, setPoBusy] = useState(false);
   const [approveBusy, setApproveBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const { canWrite, canApprove, isAdmin, user } = usePermissions();
 
   useEffect(() => {
@@ -174,6 +175,26 @@ export function ScreenCompare({ go }) {
     setApproveBusy(false);
   }
 
+  // Admin-only hard delete — the API cascades into file_attachments and
+  // removes the attached Ref files from Drive as well.
+  async function deleteComparison() {
+    if (!cmp || deleteBusy) return;
+    if (!confirm(`ลบเอกสารเปรียบเทียบ "${cmp.no}" ถาวร?\n\nไฟล์ Ref ที่แนบไว้ใน Drive จะถูกลบไปด้วย — การลบไม่สามารถย้อนกลับได้`)) return;
+    setDeleteBusy(true); setErr('');
+    try {
+      const r = await fetch('/api/comparisons', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: cmp.id }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'ลบไม่สำเร็จ'); setDeleteBusy(false); return; }
+      try { window.localStorage.removeItem('cmp.currentId'); } catch {}
+      go('compare');
+      return;
+    } catch { setErr('เครือข่ายขัดข้อง'); }
+    setDeleteBusy(false);
+  }
+
   async function changeStatus(next) {
     if (!cmp || next === cmp.status) return;
     setStatusBusy(true);
@@ -263,6 +284,12 @@ export function ScreenCompare({ go }) {
               style={{ padding: '8px 12px', fontSize: 13, border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper)', fontFamily: 'inherit', cursor: 'pointer' }}>
               {Object.keys(STATUS_TH).map(s => <option key={s} value={s}>{STATUS_TH[s].label}</option>)}
             </select>
+          )}
+          {isAdmin && (
+            <button className="btn ghost" onClick={deleteComparison} disabled={deleteBusy}
+              style={{ color: 'var(--clay)' }}>
+              {deleteBusy ? 'กำลังลบ…' : 'ลบเอกสารนี้'}
+            </button>
           )}
         </div>
       </div>

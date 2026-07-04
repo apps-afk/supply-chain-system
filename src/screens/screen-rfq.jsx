@@ -104,6 +104,16 @@ function fmtDate(iso) {
   } catch { return iso; }
 }
 
+const TrashIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2.5 3.5h9M5 3.5v-1h4v1M3.5 3.5l.5 9a.5.5 0 0 0 .5.5h5a.5.5 0 0 0 .5-.5l.5-9"/>
+  </svg>
+);
+
+// Only RFQs that never left the house may be deleted — sent/received/closed
+// ones are part of the paper trail.
+const DELETABLE_RFQ_STATUSES = new Set(['draft', 'cancelled']);
+
 /* =================== List =================== */
 
 export function ScreenRFQ({ go }) {
@@ -139,6 +149,20 @@ export function ScreenRFQ({ go }) {
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
+
+  async function removeRfq(r) {
+    if (!window.confirm(`ลบ RFQ ${r.no || ''} ?\nการลบย้อนกลับไม่ได้`)) return;
+    setErr('');
+    try {
+      const res = await fetch('/api/rfqs', {
+        method:'DELETE', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ id: r.id }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setErr(d.error || 'ลบไม่สำเร็จ'); return; }
+      await load();
+    } catch { setErr('เครือข่ายขัดข้อง'); }
+  }
 
   // O(1) project name lookup
   const projById = useMemo(() => {
@@ -266,13 +290,14 @@ export function ScreenRFQ({ go }) {
               <th>วันที่สร้างเอกสาร</th>
               <th>วันที่ครบกำหนด</th>
               <th>สถานะ</th>
+              {canWrite && <th style={{ width:40 }}></th>}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+              <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
+              <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
             ) : filtered.map(r => {
               const sp = RFQ_STATUS[r.status] || RFQ_STATUS.draft;
               const overdueFlag = r.status === 'sent' && r.due_date && r.due_date < today;
@@ -304,6 +329,17 @@ export function ScreenRFQ({ go }) {
                       {sp.label}
                     </span>
                   </td>
+                  {canWrite && (
+                    <td onClick={e => e.stopPropagation()} style={{ cursor:'default' }}>
+                      {DELETABLE_RFQ_STATUSES.has(r.status) && (
+                        <button className="btn ghost sm" title={`ลบ RFQ ${r.no || ''}`}
+                          style={{ padding:'2px 6px', color:'var(--ink-3)' }}
+                          onClick={() => removeRfq(r)}>
+                          <TrashIcon />
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -317,9 +353,9 @@ export function ScreenRFQ({ go }) {
 /* =================== Post-quote confirm screen =================== */
 /*
   Loads the "current" RFQ from localStorage (set by the list-row click).
-  Lets the user upload the supplier's quote PDF into Drive under category
-  'rfq_quote' linked to this RFQ id.  Items comparison stays mock for now
-  (no per-item API yet).
+  Lets the user upload the supplier's quote file into Drive under category
+  'rfq_quote' linked to this RFQ id, parses prices out of Excel quotes and
+  compares them against the Price DB (/api/prices) before saving.
 */
 
 export function ScreenRFQConfirm({ go }) {
@@ -329,7 +365,7 @@ export function ScreenRFQConfirm({ go }) {
   const [projects,   setProjects]   = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [err,        setErr]        = useState('');
-  const [items,      setItems]      = useState([]);  // mock for now
+  const [items,      setItems]      = useState([]);  // hydrated from rfq.notes payload
   const [quoteFile,  setQuoteFile]  = useState(null);
   const [uploading,  setUploading]  = useState(false);
   const [uploadErr,  setUploadErr]  = useState('');
@@ -340,6 +376,7 @@ export function ScreenRFQConfirm({ go }) {
   const [matByCode,  setMatByCode]  = useState({});   // code → { id, unit_id, name }
   const [units,      setUnits]      = useState([]);
   const [lastPrice,  setLastPrice]  = useState({});   // material_id → latest price
+  const [pricePts,   setPricePts]   = useState([]);   // raw /api/prices rows (captured_at desc)
   const [readBusy,   setReadBusy]   = useState(false);
   const [savePxBusy, setSavePxBusy] = useState(false);
   const [savePxMsg,  setSavePxMsg]  = useState('');
@@ -352,6 +389,8 @@ export function ScreenRFQConfirm({ go }) {
   // P3: duplicate this RFQ to other suppliers (same items, fresh numbers)
   const [dupOpen, setDupOpen]     = useState(false);
   const [dupMsg, setDupMsg]       = useState('');
+  // Edit header info (title / project / due date) — items are edited in the table
+  const [editOpen, setEditOpen]   = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -379,6 +418,7 @@ export function ScreenRFQConfirm({ go }) {
             const latest = {};
             for (const p of pts) { if (!(p.material_id in latest)) latest[p.material_id] = Number(p.price); }
             setLastPrice(latest);
+            setPricePts(pts);
           } catch {}
         }
         const list = d.items || [];
@@ -679,6 +719,24 @@ export function ScreenRFQConfirm({ go }) {
   const saving = items.filter(i => i.save).length;
   const flagged = items.filter(i => i.outlier).length;
 
+  // Real per-material price history for the row sparkline — /api/prices rows
+  // come captured_at desc, so sort each material's points ascending and keep
+  // the last 6 observations.
+  const histByMat = useMemo(() => {
+    const m = new Map();
+    for (const p of pricePts) {
+      const v = Number(p.price);
+      if (Number.isNaN(v)) continue;
+      if (!m.has(p.material_id)) m.set(p.material_id, []);
+      m.get(p.material_id).push(p);
+    }
+    for (const [id, arr] of m) {
+      arr.sort((a, b) => new Date(a.captured_at || 0) - new Date(b.captured_at || 0));
+      m.set(id, arr.slice(-6).map(p => Number(p.price)));
+    }
+    return m;
+  }, [pricePts]);
+
   return (
     <div className="page" style={{ paddingBottom: 200 }}>
       <button className="btn ghost sm" onClick={() => go('rfq')} style={{ marginBottom: 20, marginLeft: -8 }}>
@@ -711,11 +769,17 @@ export function ScreenRFQConfirm({ go }) {
               </div>
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
-              <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>เปลี่ยนสถานะ</span>
-              <select value={rfq.status || 'draft'} onChange={e => changeStatus(e.target.value)} disabled={statusBusy}
-                style={{ padding:'8px 12px', fontSize:13, border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--paper)', fontFamily:'inherit', cursor:'pointer' }}>
-                {Object.keys(RFQ_STATUS).map(s => <option key={s} value={s}>{RFQ_STATUS[s].label}</option>)}
-              </select>
+              <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>เปลี่ยนสถานะ / แก้ไข</span>
+              <div style={{ display:'flex', gap:8 }}>
+                <select value={rfq.status || 'draft'} onChange={e => changeStatus(e.target.value)} disabled={statusBusy}
+                  style={{ padding:'8px 12px', fontSize:13, border:'1px solid var(--rule-2)', borderRadius:6, background:'var(--paper)', fontFamily:'inherit', cursor:'pointer' }}>
+                  {Object.keys(RFQ_STATUS).map(s => <option key={s} value={s}>{RFQ_STATUS[s].label}</option>)}
+                </select>
+                <button className="btn" onClick={() => setEditOpen(true)}
+                  title="แก้ไขชื่อรายการ / โครงการ / วันครบกำหนด">
+                  {Icons.edit} แก้ไขข้อมูล
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -732,6 +796,11 @@ export function ScreenRFQConfirm({ go }) {
       {dupOpen && (
         <DuplicateRfqModal currentSupplierId={parsed?.supplier_id}
           onClose={() => setDupOpen(false)} onConfirm={duplicateTo} />
+      )}
+      {editOpen && rfq && (
+        <EditRfqModal rfq={rfq} projects={projects}
+          onClose={() => setEditOpen(false)}
+          onSaved={patch => { setRfq(rf => ({ ...rf, ...patch })); setEditOpen(false); }} />
       )}
 
       {/* Upload section */}
@@ -884,7 +953,7 @@ export function ScreenRFQConfirm({ go }) {
         </div>
       )}
 
-      {/* Main comparison panel — items table remains mock */}
+      {/* Main comparison panel — quote prices vs Price DB */}
       <div className="card" style={{ padding: 0 }}>
         <div style={{ padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--rule)' }}>
           <div>
@@ -915,12 +984,11 @@ export function ScreenRFQConfirm({ go }) {
               <th className="num-col">ราคาใหม่จาก RFQ</th>
               <th className="num-col">Δ เปลี่ยน</th>
               <th>ประวัติ</th>
-              <th></th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
-              <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล — อัพโหลด Quote ก่อน · ฟีเจอร์เปรียบเทียบราคารายตัวจะเชื่อม API ในขั้นถัดไป</td></tr>
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล — อัพโหลด Quote (Excel) เพื่อดึงราคาเข้าตาราง</td></tr>
             ) : items.map((it) => {
               const delta = (it.oldP == null || Number(it.oldP) === 0) ? null : ((it.newP - it.oldP) / it.oldP) * 100;
               const dir = delta == null ? 'new' : delta > 0.5 ? 'up' : delta < -0.5 ? 'down' : 'flat';
@@ -972,17 +1040,14 @@ export function ScreenRFQConfirm({ go }) {
                       : <Delta pct={`${delta > 0 ? '+' : ''}${delta.toFixed(1)}%`} dir={dir} />}
                   </td>
                   <td>
-                    <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-                      {it.oldP != null && (
-                        <Spark data={[it.oldP * 0.94, it.oldP * 0.96, it.oldP * 0.98, it.oldP, it.newP]}
-                          w={70} h={20}
-                          color={dir === 'up' ? 'var(--clay)' : dir === 'down' ? 'var(--moss)' : 'var(--ink-4)'} />
-                      )}
-                      <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} title="ดูประวัติ">{Icons.external}</button>
-                    </span>
-                  </td>
-                  <td>
-                    <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }}>{Icons.more}</button>
+                    {(() => {
+                      const mat = matByCode[it.itemCode];
+                      const hist = (mat && histByMat.get(mat.id)) || [];
+                      return hist.length >= 2
+                        ? <Spark data={hist} w={70} h={20}
+                            color={dir === 'up' ? 'var(--clay)' : dir === 'down' ? 'var(--moss)' : 'var(--ink-4)'} />
+                        : <span style={{ fontSize:12, color:'var(--ink-4)' }}>—</span>;
+                    })()}
                   </td>
                 </tr>
               );
@@ -1104,6 +1169,81 @@ function DuplicateRfqModal({ currentSupplierId, onClose, onConfirm }) {
               setBusy(false);
             }}>
             {busy ? 'กำลังสร้าง…' : `สร้างสำเนา ${picked.size || ''} ใบ`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =================== Edit RFQ header info modal =================== */
+// Title / project / due date only — item rows are edited in the items table.
+function EditRfqModal({ rfq, projects, onClose, onSaved }) {
+  const [title,     setTitle]     = useState(rfq.title || '');
+  const [projectId, setProjectId] = useState(rfq.project_id || '');
+  const [dueDate,   setDueDate]   = useState(rfq.due_date ? String(rfq.due_date).slice(0, 10) : '');
+  const [busy, setBusy]           = useState(false);
+  const [msg,  setMsg]            = useState('');
+
+  async function save() {
+    setBusy(true); setMsg('');
+    const patch = {
+      title:      title.trim(),
+      project_id: projectId || null,
+      due_date:   dueDate || null,
+    };
+    try {
+      const r = await fetch('/api/rfqs', {
+        method:'PATCH', headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ id: rfq.id, ...patch }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setMsg(d.error || 'บันทึกไม่สำเร็จ'); setBusy(false); return; }
+      onSaved(patch);
+    } catch {
+      setMsg('เครือข่ายขัดข้อง');
+      setBusy(false);
+    }
+  }
+
+  const fieldStyle = { padding:'8px 11px', fontSize:13, border:'1px solid var(--rule-2)',
+                       borderRadius:6, background:'var(--paper)', fontFamily:'inherit', outline:'none' };
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(20,18,14,0.45)', zIndex:80,
+                  display:'grid', placeItems:'center', padding:20 }}
+         onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="card" style={{ width:'min(420px, 100%)', padding:0 }}>
+        <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
+          <h3 className="h-card">แก้ไขข้อมูล RFQ</h3>
+          <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:4 }}>
+            <span className="font-mono">{rfq.no || ''}</span> · ชื่อรายการ / โครงการ / วันครบกำหนด
+          </div>
+        </div>
+        <div style={{ padding:'16px 24px', display:'flex', flexDirection:'column', gap:14 }}>
+          <label style={{ display:'flex', flexDirection:'column', gap:5 }}>
+            <span style={{ fontSize:11.5, color:'var(--ink-3)', fontWeight:500 }}>รายการ</span>
+            <input value={title} onChange={e => setTitle(e.target.value)}
+              placeholder="ชื่อรายการ RFQ" style={fieldStyle} />
+          </label>
+          <label style={{ display:'flex', flexDirection:'column', gap:5 }}>
+            <span style={{ fontSize:11.5, color:'var(--ink-3)', fontWeight:500 }}>โครงการ</span>
+            <select value={projectId} onChange={e => setProjectId(e.target.value)}
+              style={{ ...fieldStyle, cursor:'pointer' }}>
+              <option value="">— ไม่ระบุ —</option>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </label>
+          <label style={{ display:'flex', flexDirection:'column', gap:5 }}>
+            <span style={{ fontSize:11.5, color:'var(--ink-3)', fontWeight:500 }}>วันครบกำหนด</span>
+            <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} style={fieldStyle} />
+          </label>
+          {msg && <div style={{ fontSize:12, color:'var(--clay)' }}>{msg}</div>}
+        </div>
+        <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', display:'flex', justifyContent:'flex-end', gap:8 }}>
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={busy}>
+            {busy ? 'กำลังบันทึก…' : 'บันทึก'}
           </button>
         </div>
       </div>
