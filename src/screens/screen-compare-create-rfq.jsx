@@ -9,6 +9,7 @@ import {
   CreateSummary,
   GeneratedCompare,
 } from './screen-compare-create-pricedb';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Compare Create — Mode B: From existing RFQs
@@ -42,6 +43,7 @@ async function makeCmpNo() {
 }
 
 export function ScreenCompareCreateRFQ({ go }) {
+  const { canWrite } = usePermissions();
   const [picked, setPicked] = useState([]); // RFQ no's
   const [generated, setGenerated] = useState(false);
   const [generatedNo, setGeneratedNo] = useState('');
@@ -226,6 +228,19 @@ export function ScreenCompareCreateRFQ({ go }) {
       setSubmitErr('เครือข่ายขัดข้อง');
     }
     setSubmitting(false);
+  }
+
+  if (!canWrite) {
+    return (
+      <div className="page">
+        <button className="btn ghost sm" onClick={() => go('compare')} style={{ marginBottom:20, marginLeft:-8 }}>
+          {Icons.back} กลับไป Compare
+        </button>
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)' }}>
+          สิทธิ์ของคุณเป็นแบบดูอย่างเดียว — ไม่สามารถสร้างใบเปรียบเทียบได้
+        </div>
+      </div>
+    );
   }
 
   if (loading) {

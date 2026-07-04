@@ -279,6 +279,15 @@ export function ScreenCompareCreatePriceDB({ go }) {
     setSubmitting(false);
   }
 
+  // Suppliers eligible to add (haven't been added yet, filtered to source-relevant categories)
+  // Memoised — was rebuilt on every render (incl. while typing in any input).
+  // MUST stay above every early return: hooks after a conditional return crash
+  // React ("rendered fewer hooks") the moment the condition flips.
+  const addable = useMemo(() => {
+    const already = new Set(suppliersData.map(s => s.id));
+    return supplierOptions.filter(s => !already.has(s.id));
+  }, [suppliersData, supplierOptions]);
+
   /* ===================== Success ===================== */
   if (generated) {
     return <GeneratedCompare
@@ -294,13 +303,6 @@ export function ScreenCompareCreatePriceDB({ go }) {
   }
 
   /* ===================== Main builder UI ===================== */
-  // Suppliers eligible to add (haven't been added yet, filtered to source-relevant categories)
-  // Memoised — was rebuilt on every render (incl. while typing in any input)
-  const addable = useMemo(() => {
-    const already = new Set(suppliersData.map(s => s.id));
-    return supplierOptions.filter(s => !already.has(s.id));
-  }, [suppliersData, supplierOptions]);
-
   if (!canWrite) {
     return (
       <div className="page">
