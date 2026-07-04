@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Chip, Av, Spark, Delta, money } from '../lib/shell';
-import { downloadRfqExcel, ExcelDocPreview } from './screen-rfq-create';
+import { downloadRfqExcel, ExcelDocPreview, nextRfqNo } from './screen-rfq-create';
 import { findUnit } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
 
@@ -349,6 +349,9 @@ export function ScreenRFQConfirm({ go }) {
   const [conds, setConds] = useState({ payment:'', delivery:'', validity:'', warranty:'', leadtime:'' });
   const [condsBusy, setCondsBusy] = useState(false);
   const [condsMsg, setCondsMsg]   = useState('');
+  // P3: duplicate this RFQ to other suppliers (same items, fresh numbers)
+  const [dupOpen, setDupOpen]     = useState(false);
+  const [dupMsg, setDupMsg]       = useState('');
 
   useEffect(() => {
     (async () => {
@@ -591,6 +594,51 @@ export function ScreenRFQConfirm({ go }) {
     setStatusBusy(false);
   }
 
+  // P3: copy this RFQ to other suppliers — same items/terms, new running
+  // numbers, status draft. Quote data (conditions, parsed prices) is NOT
+  // copied: each supplier's quote starts clean.
+  async function duplicateTo(sups) {
+    if (!rfq || !sups.length) return;
+    setDupMsg('');
+    try {
+      const lr = await fetch('/api/rfqs');
+      const existing = lr.ok ? ((await lr.json()).items || []) : [];
+      const pool = [...existing];
+      const made = [];
+      for (const s of sups) {
+        const no = nextRfqNo(pool);
+        pool.push({ no }); // reserve locally so the next copy gets the next slot
+        const base = parsed || {};
+        const cleanNotes = {
+          supplier_id:   s.id,
+          supplier_name: s.name,
+          contact_name:  base.contact_name  || '',
+          contact_email: base.contact_email || '',
+          overheadHint:  base.overheadHint  || '',
+          vatPolicy:     base.vatPolicy     || 'include',
+          memo:          base.memo          || '',
+          items:         Array.isArray(base.items) ? base.items : [],
+        };
+        const r = await fetch('/api/rfqs', {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            no,
+            project_id: rfq.project_id || null,
+            title:      rfq.title || '',
+            status:     'draft',
+            due_date:   rfq.due_date || null,
+            notes:      JSON.stringify(cleanNotes),
+          }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { setDupMsg(`สร้างสำเนาให้ ${s.name} ไม่สำเร็จ: ${d.error || ''}`); return; }
+        made.push(`${no} → ${s.name}`);
+      }
+      setDupOpen(false);
+      setDupMsg(`สร้างสำเนาแล้ว ${made.length} ใบ: ${made.join(' · ')} (สถานะร่าง — เปิดจากหน้ารายการ RFQ)`);
+    } catch { setDupMsg('เครือข่ายขัดข้อง'); }
+  }
+
   // Rebuild & download the RFQ Excel from the saved record. Item names +
   // contact + overhead all live in the notes payload, so no catalog needed.
   async function downloadExcel() {
@@ -652,9 +700,15 @@ export function ScreenRFQConfirm({ go }) {
           <div style={{ display:'flex', gap:16, alignItems:'flex-end' }}>
             <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-start' }}>
               <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>เอกสาร RFQ</span>
-              <button className="btn" onClick={downloadExcel} disabled={dlBusy || !parsed}>
-                {Icons.download} {dlBusy ? 'กำลังสร้าง…' : 'ดาวน์โหลด Excel'}
-              </button>
+              <div style={{ display:'flex', gap:8 }}>
+                <button className="btn" onClick={downloadExcel} disabled={dlBusy || !parsed}>
+                  {Icons.download} {dlBusy ? 'กำลังสร้าง…' : 'ดาวน์โหลด Excel'}
+                </button>
+                <button className="btn" onClick={() => setDupOpen(true)} disabled={!parsed}
+                  title="สร้าง RFQ ชุดเดียวกันให้ supplier รายอื่น">
+                  {Icons.plus} ทำสำเนาให้เจ้าอื่น
+                </button>
+              </div>
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
               <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>เปลี่ยนสถานะ</span>
@@ -669,6 +723,15 @@ export function ScreenRFQConfirm({ go }) {
 
       {err && (
         <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
+      {dupMsg && (
+        <div style={{ background: dupMsg.includes('ไม่สำเร็จ') || dupMsg.includes('ขัดข้อง') ? '#FDE8E4' : 'var(--moss-soft)',
+                      color: dupMsg.includes('ไม่สำเร็จ') || dupMsg.includes('ขัดข้อง') ? '#8B2A1A' : '#2F4A1A',
+                      padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{dupMsg}</div>
+      )}
+      {dupOpen && (
+        <DuplicateRfqModal currentSupplierId={parsed?.supplier_id}
+          onClose={() => setDupOpen(false)} onConfirm={duplicateTo} />
       )}
 
       {/* Upload section */}
@@ -963,6 +1026,85 @@ export function ScreenRFQConfirm({ go }) {
               {Icons.check} {savePxBusy ? 'กำลังบันทึก…' : (pricesSaved ? 'บันทึกแล้ว' : 'ยืนยันบันทึก Price DB')}
             </button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =================== Duplicate-to-suppliers modal (P3) =================== */
+function DuplicateRfqModal({ currentSupplierId, onClose, onConfirm }) {
+  const [suppliers, setSuppliers] = useState([]);
+  const [picked, setPicked]       = useState(new Set());
+  const [q, setQ]                 = useState('');
+  const [busy, setBusy]           = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/suppliers');
+        if (r.ok) {
+          const items = (await r.json()).items || [];
+          setSuppliers(items.filter(s =>
+            s.id !== currentSupplierId &&
+            (s.status ? s.status === 'Active' : s.active !== false)
+          ));
+        }
+      } catch {}
+    })();
+  }, [currentSupplierId]);
+
+  const shown = suppliers.filter(s =>
+    !q || (s.name || '').toLowerCase().includes(q.toLowerCase()) ||
+    (s.code || '').toLowerCase().includes(q.toLowerCase())
+  );
+  const toggle = id => setPicked(p => {
+    const n = new Set(p);
+    n.has(id) ? n.delete(id) : n.add(id);
+    return n;
+  });
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(20,18,14,0.45)', zIndex:80,
+                  display:'grid', placeItems:'center', padding:20 }}
+         onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="card" style={{ width:'min(480px, 100%)', maxHeight:'80vh', display:'flex', flexDirection:'column', padding:0 }}>
+        <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
+          <h3 className="h-card">ทำสำเนา RFQ ให้ supplier รายอื่น</h3>
+          <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:4 }}>
+            รายการวัสดุ/เงื่อนไขชุดเดิม · เลขที่ใหม่ · สถานะร่าง — เลือกได้หลายราย
+          </div>
+        </div>
+        <div style={{ padding:'12px 24px', borderBottom:'1px solid var(--rule)' }}>
+          <input placeholder="ค้นหา supplier…" value={q} onChange={e => setQ(e.target.value)}
+            style={{ width:'100%', padding:'8px 10px', fontSize:13, border:'1px solid var(--rule-2)', borderRadius:6 }} />
+        </div>
+        <div style={{ flex:1, overflowY:'auto', padding:'8px 12px' }}>
+          {shown.length === 0 ? (
+            <div style={{ padding:24, textAlign:'center', color:'var(--ink-3)', fontSize:12.5 }}>
+              ไม่พบ supplier ที่เลือกได้
+            </div>
+          ) : shown.map(s => (
+            <label key={s.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px',
+                                       borderRadius:6, cursor:'pointer', fontSize:13 }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}>
+              <input type="checkbox" checked={picked.has(s.id)} onChange={() => toggle(s.id)} />
+              <span style={{ flex:1 }}>{s.name}</span>
+              <span className="font-mono" style={{ fontSize:11, color:'var(--ink-4)' }}>{s.code || ''}</span>
+            </label>
+          ))}
+        </div>
+        <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', display:'flex', justifyContent:'flex-end', gap:8 }}>
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" disabled={busy || picked.size === 0}
+            onClick={async () => {
+              setBusy(true);
+              await onConfirm(suppliers.filter(s => picked.has(s.id)));
+              setBusy(false);
+            }}>
+            {busy ? 'กำลังสร้าง…' : `สร้างสำเนา ${picked.size || ''} ใบ`}
+          </button>
         </div>
       </div>
     </div>

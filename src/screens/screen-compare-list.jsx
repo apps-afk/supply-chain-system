@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Icons } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
+import { useTableView, Th, Pager, exportCSV } from '../lib/table-utils';
 
 /*
   Compare List — index of all เปรียบเทียบราคา documents.
@@ -60,6 +61,9 @@ export function ScreenCompareList({ go }) {
     });
   }, [docs, statusFilter, modeFilter, q]);
 
+  const { view, page, pages, setPage, sortKey, sortDir, toggleSort, total } =
+    useTableView(filtered, { pageSize: 25 });
+
   function fmtDate(s) {
     if (!s) return '—';
     try {
@@ -91,11 +95,24 @@ export function ScreenCompareList({ go }) {
             จาก <strong style={{ color:'var(--ink-2)' }}>RFQ ที่จัดทำ</strong> · AI ช่วยวิเคราะห์และเสนอแนะ
           </p>
         </div>
-        {canWrite && (
-          <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8 }}>
+          <button className="btn" onClick={() => exportCSV(
+            'comparisons.csv',
+            [
+              { key:'no',                                                              label:'เลขที่' },
+              { key:'title',                                                           label:'ชื่อ' },
+              { key:'project_id',                                                      label:'โครงการ' },
+              { key: d => (STATUS_PILL[d.status] || STATUS_PILL.draft).label,          label:'สถานะ' },
+              { key: d => (Array.isArray(d.suppliers_json?.list) ? d.suppliers_json.list.length : 0), label:'จำนวน Supplier' },
+              { key: d => d.total_low ?? '',                                           label:'มูลค่าต่ำสุด' },
+              { key: d => fmtDate(d.created_at),                                       label:'วันที่สร้าง' },
+            ],
+            filtered
+          )}>Export CSV</button>
+          {canWrite && (
             <button className="btn primary" onClick={() => setCreateOpen(true)}>{Icons.plus} สร้างเอกสารเปรียบเทียบ</button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Summary — 3 status counts only */}
@@ -159,13 +176,13 @@ export function ScreenCompareList({ go }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width:'12%' }}>เลขที่เอกสาร</th>
+              <Th sortKey="no" activeKey={sortKey} dir={sortDir} onSort={toggleSort} style={{ width:'12%' }}>เลขที่เอกสาร</Th>
               <th style={{ width:'11%' }}>โหมด</th>
-              <th>หมวด / โครงการ</th>
+              <Th sortKey="title" activeKey={sortKey} dir={sortDir} onSort={toggleSort}>หมวด / โครงการ</Th>
               <th className="num-col">จำนวนที่เปรียบเทียบ</th>
               <th>Supplier ที่เลือก</th>
-              <th>วันที่สร้าง</th>
-              <th>Status</th>
+              <Th sortKey="created_at" activeKey={sortKey} dir={sortDir} onSort={toggleSort}>วันที่สร้าง</Th>
+              <Th sortKey="status" activeKey={sortKey} dir={sortDir} onSort={toggleSort}>Status</Th>
             </tr>
           </thead>
           <tbody>
@@ -173,7 +190,7 @@ export function ScreenCompareList({ go }) {
               <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
             ) : filtered.length === 0 ? (
               <tr><td colSpan={7} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
-            ) : filtered.map(d => {
+            ) : view.map(d => {
               const sp = STATUS_PILL[d.status] || STATUS_PILL.draft;
               const mode = d.suppliers_json?.mode || 'PriceDB';
               const mp = MODE_PILL[mode] || MODE_PILL.PriceDB;
@@ -232,6 +249,7 @@ export function ScreenCompareList({ go }) {
             })}
           </tbody>
         </table>
+        <Pager page={page} pages={pages} setPage={setPage} total={total} />
       </div>
 
       {createOpen && <CreateModePicker onClose={() => setCreateOpen(false)} go={go} />}

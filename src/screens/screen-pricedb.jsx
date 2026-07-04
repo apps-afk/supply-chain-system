@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Stat, Spark, Delta, Av, money } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox, UnitPicker } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
+import { useTableView, Th, Pager, exportCSV } from '../lib/table-utils';
 
 /*
   Price DB — list + detail.
@@ -12,9 +13,6 @@ import { usePermissions } from '../lib/use-permissions';
   Prices stored are NET — exclude VAT and Overhead.
 */
 
-/* =================== Synthetic RFQ pool for "pull from RFQ" =================== */
-const RECEIVED_RFQS_FOR_PRICEDB = [];
-
 /* =================== List =================== */
 
 export function ScreenPriceDB({ go }) {
@@ -23,7 +21,6 @@ export function ScreenPriceDB({ go }) {
   const [sourceFilter, setSourceFilter] = useState('ทั้งหมด'); // ทั้งหมด | Manual | RFQ
   const [q, setQ] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
-  const [rfqPullOpen, setRfqPullOpen] = useState(false);
 
   // Live data
   const [prices, setPrices]       = useState([]);
@@ -65,6 +62,43 @@ export function ScreenPriceDB({ go }) {
     return ['ทั้งหมด', ...[...s].sort()];
   }, [materials]);
 
+  // Real per-material trends: one pass over `prices` builds a material → sorted
+  // history map, then spark / Δ MoM / Δ YoY per material (any supplier).
+  // null pct = "no comparison data" so the UI can distinguish from a flat 0.
+  const trendByMat = useMemo(() => {
+    const byMat = new Map();
+    for (const p of prices) {
+      if (!p.captured_at) continue;
+      const t = new Date(p.captured_at).getTime();
+      if (Number.isNaN(t)) continue;
+      if (!byMat.has(p.material_id)) byMat.set(p.material_id, []);
+      byMat.get(p.material_id).push({ t, price: Number(p.price) || 0 });
+    }
+    const now = Date.now();
+    const sparkCutoff = now - 183 * 86400000; // ~6 เดือน
+    const out = new Map();
+    for (const [matId, pts] of byMat) {
+      pts.sort((a, b) => a.t - b.t); // oldest → newest
+      const sparkPts = pts.filter(p => p.t >= sparkCutoff);
+      const spark = sparkPts.length >= 2 ? sparkPts.map(p => p.price) : [];
+      const latest = pts[pts.length - 1];
+      const deltaVs = (minDays) => {
+        // closest point at least `minDays` older than the latest
+        let older = null;
+        for (let i = pts.length - 2; i >= 0; i--) {
+          if (latest.t - pts[i].t >= minDays * 86400000) { older = pts[i]; break; }
+        }
+        if (!older || older.price <= 0) return { pct: null, dir: 'flat' };
+        const pct = ((latest.price - older.price) / older.price) * 100;
+        return { pct, dir: pct > 0.5 ? 'up' : pct < -0.5 ? 'down' : 'flat' };
+      };
+      const mom = deltaVs(25);
+      const yoy = deltaVs(335);
+      out.set(matId, { spark, mom: mom.pct, momDir: mom.dir, yoy: yoy.pct, yoyDir: yoy.dir });
+    }
+    return out;
+  }, [prices]);
+
   // Build display rows
   const rows = useMemo(() => prices.map(p => {
     const m = matById.get(p.material_id) || {};
@@ -73,6 +107,7 @@ export function ScreenPriceDB({ go }) {
     const captured = p.captured_at ? new Date(p.captured_at) : null;
     const ageDays = captured ? Math.max(0, Math.round((Date.now() - captured.getTime()) / 86400000)) : 0;
     const source = (p.source && p.source.toLowerCase().includes('rfq')) ? 'RFQ' : (p.source || 'Manual');
+    const trend = trendByMat.get(p.material_id);
     return {
       id:        p.id,
       materialId: p.material_id,
@@ -84,15 +119,18 @@ export function ScreenPriceDB({ go }) {
       sup:       s.name || '—',
       supkind:   s.type || 'company',
       price:     Number(p.price) || 0,
-      mom: 0, momDir: 'flat', yoy: 0, yoyDir: 'flat',
-      spark:     [],
+      mom:       trend ? trend.mom : null,
+      momDir:    trend ? trend.momDir : 'flat',
+      yoy:       trend ? trend.yoy : null,
+      yoyDir:    trend ? trend.yoyDir : 'flat',
+      spark:     trend ? trend.spark : [],
       date:      captured ? captured.toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' }) : '—',
       age:       ageDays,
       source,
       sourceRef: p.source_id || '',
       flag:      null,
     };
-  }), [prices, matById, supById, unitById]);
+  }), [prices, matById, supById, unitById, trendByMat]);
 
   const filtered = useMemo(() => {
     const v = q.toLowerCase();
@@ -111,6 +149,11 @@ export function ScreenPriceDB({ go }) {
     });
   }, [rows, cat, sourceFilter, q]);
 
+  // Client-side sort + pagination over the filtered rows (API order by default)
+  const { view, page, pages, setPage, sortKey, sortDir, toggleSort, total } =
+    useTableView(filtered, { pageSize: 25 });
+  const sortProps = { activeKey: sortKey, dir: sortDir, onSort: toggleSort };
+
   // Stats — single pass, memoised so filter toggles don't recompute
   const { totalPoints, supplierCount, recent30, stale180 } = useMemo(() => {
     let recent = 0, stale = 0;
@@ -122,6 +165,13 @@ export function ScreenPriceDB({ go }) {
     }
     return { totalPoints: rows.length, supplierCount: sups.size, recent30: recent, stale180: stale };
   }, [rows]);
+
+  // วัสดุที่ราคาปีนี้สูงกว่าปีก่อน (yoy > 0.5%) — นับต่อวัสดุ ไม่ใช่ต่อ price point
+  const risingYoY = useMemo(() => {
+    let n = 0;
+    for (const t of trendByMat.values()) if (t.yoy != null && t.yoy > 0.5) n++;
+    return n;
+  }, [trendByMat]);
 
   return (
     <div className="page">
@@ -136,9 +186,20 @@ export function ScreenPriceDB({ go }) {
         </div>
         {perms.canWrite && (
           <div style={{ display:'flex', gap:8 }}>
-            <button className="btn" onClick={() => setRfqPullOpen(true)}>{Icons.upload} ดึงจาก RFQ</button>
             <button className="btn primary" onClick={() => setManualOpen(true)}>{Icons.plus} เพิ่มราคา</button>
-            <button className="btn">{Icons.download} Export</button>
+            <button className="btn" onClick={() => exportCSV('price-database.csv', [
+              { key:'code',      label:'รหัส' },
+              { key:'name',      label:'วัสดุ' },
+              { key:'spec',      label:'Spec' },
+              { key:'cat',       label:'หมวด' },
+              { key:'unit',      label:'หน่วย' },
+              { key:'sup',       label:'Supplier' },
+              { key:'price',     label:'ราคา (net)' },
+              { key: r => r.mom == null ? '' : r.mom.toFixed(1), label:'Δ MoM %' },
+              { key:'source',    label:'ที่มา' },
+              { key:'sourceRef', label:'อ้างอิง' },
+              { key:'date',      label:'วันที่บันทึก' },
+            ], filtered)}>{Icons.download} Export</button>
           </div>
         )}
       </div>
@@ -157,7 +218,7 @@ export function ScreenPriceDB({ go }) {
           { label:'รายการในระบบ',     value: String(totalPoints), sub: totalPoints ? 'price points ทั้งหมด' : 'ยังไม่มีข้อมูล' },
           { label:'Supplier ใช้งาน',    value: String(supplierCount), sub: supplierCount ? 'มีราคาบันทึกไว้' : 'ยังไม่มีข้อมูล' },
           { label:'เพิ่มเข้าระบบ 30 วัน', value: String(recent30), sub: recent30 ? 'ราคาที่อัพเดทล่าสุด' : 'ยังไม่มีข้อมูล' },
-          { label:'ขาขึ้น (YoY)',       value: '—',                 sub: 'ต้องการประวัติเทียบ' },
+          { label:'ขาขึ้น (YoY)',       value: String(risingYoY),  sub: risingYoY ? 'วัสดุแพงขึ้นเทียบปีก่อน' : 'ไม่มีวัสดุขาขึ้น' },
           { label:'ค้างไม่อัพเดท',       value: String(stale180),   sub: stale180 ? 'เกิน 180 วัน' : 'ยังไม่มีข้อมูล' },
         ].map((s, i) => (
           <div key={i} style={{ paddingLeft: i === 0 ? 0 : 28, borderLeft: i === 0 ? 'none' : '1px solid var(--rule)' }}>
@@ -204,16 +265,16 @@ export function ScreenPriceDB({ go }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width:'5%' }}>รหัส</th>
-              <th style={{ width:'22%' }}>วัสดุ / Item</th>
-              <th>หมวด</th>
+              <Th sortKey="code" {...sortProps} style={{ width:'5%' }}>รหัส</Th>
+              <Th sortKey="name" {...sortProps} style={{ width:'22%' }}>วัสดุ / Item</Th>
+              <Th sortKey="cat" {...sortProps}>หมวด</Th>
               <th>หน่วย</th>
-              <th>Supplier · ราคาต่ำสุด</th>
-              <th className="num-col">ราคาล่าสุด<br/><span style={{ fontSize:9, color:'var(--ink-4)', textTransform:'none', letterSpacing:0 }}>(net · ไม่รวม VAT/OH)</span></th>
-              <th className="num-col">Δ MoM</th>
+              <Th sortKey="sup" {...sortProps}>Supplier · ราคาต่ำสุด</Th>
+              <Th sortKey="price" {...sortProps} className="num-col">ราคาล่าสุด<br/><span style={{ fontSize:9, color:'var(--ink-4)', textTransform:'none', letterSpacing:0 }}>(net · ไม่รวม VAT/OH)</span></Th>
+              <Th sortKey="mom" {...sortProps} className="num-col">Δ MoM</Th>
               <th className="num-col">Δ YoY</th>
               <th>เทรนด์ 6 ด.</th>
-              <th>อัพเดท · อายุ</th>
+              <Th sortKey="age" {...sortProps}>อัพเดท · อายุ</Th>
             </tr>
           </thead>
           <tbody>
@@ -225,7 +286,7 @@ export function ScreenPriceDB({ go }) {
               <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล — คลิก "เพิ่มราคา" เพื่อสร้างรายการแรก
               </td></tr>
-            ) : filtered.map((r) => (
+            ) : view.map((r) => (
               <tr key={r.id} onClick={() => {
                 try { localStorage.setItem('pricedb.currentMaterialId', r.materialId); } catch {}
                 go('pricedb-detail');
@@ -252,8 +313,16 @@ export function ScreenPriceDB({ go }) {
                   </span>
                 </td>
                 <td className="num-col num" style={{ fontWeight:500 }}>{money(r.price)}</td>
-                <td className="num-col"><Delta pct={r.mom} dir={r.momDir} /></td>
-                <td className="num-col"><Delta pct={r.yoy} dir={r.yoyDir} /></td>
+                <td className="num-col">
+                  {r.mom == null
+                    ? <span style={{ fontSize:12, color:'var(--ink-4)' }}>—</span>
+                    : <Delta pct={`${r.mom > 0 ? '+' : ''}${r.mom.toFixed(1)}%`} dir={r.momDir} />}
+                </td>
+                <td className="num-col">
+                  {r.yoy == null
+                    ? <span style={{ fontSize:12, color:'var(--ink-4)' }}>—</span>
+                    : <Delta pct={`${r.yoy > 0 ? '+' : ''}${r.yoy.toFixed(1)}%`} dir={r.yoyDir} />}
+                </td>
                 <td><Spark data={r.spark} w={100} h={26}
                        color={r.momDir==='down'?'var(--moss)':r.momDir==='up'?'var(--clay)':'var(--ink-4)'} /></td>
                 <td>
@@ -267,21 +336,13 @@ export function ScreenPriceDB({ go }) {
           </tbody>
         </table>
 
-        <div style={{ padding:'14px 24px', display:'flex', alignItems:'center', justifyContent:'space-between',
-                      borderTop:'1px solid var(--rule)', fontSize:12, color:'var(--ink-3)' }}>
-          <span>แสดง {filtered.length === 0 ? 0 : 1}–{filtered.length} จาก {filtered.length} รายการ</span>
-          <div style={{ display:'flex', gap:6 }}>
-            <button className="btn sm" disabled>ก่อนหน้า</button>
-            <button className="btn sm">ถัดไป {Icons.chevronR}</button>
-          </div>
-        </div>
+        <Pager page={page} pages={pages} setPage={setPage} total={total} />
       </div>
 
       {manualOpen  && <ManualPriceModal
         materials={materials} suppliers={suppliers} units={units}
         onClose={() => setManualOpen(false)}
         onSaved={() => { setManualOpen(false); load(); }} />}
-      {rfqPullOpen && <PullFromRFQModal onClose={() => setRfqPullOpen(false)} />}
     </div>
   );
 }
@@ -389,143 +450,6 @@ function ManualPriceModal({ materials, suppliers, units, onClose, onSaved, initi
       </div>
       {busy && <div style={{ marginTop:12, fontSize:12, color:'var(--ink-3)' }}>กำลังบันทึก…</div>}
     </SettingsModal>
-  );
-}
-
-/* =================== Pull from RFQ modal =================== */
-function PullFromRFQModal({ onClose }) {
-  const [picked, setPicked] = useState(new Set()); // composite keys "rfqNo::itemCode"
-  const [q, setQ] = useState('');
-
-  const filtered = RECEIVED_RFQS_FOR_PRICEDB.filter(r => {
-    if (!q) return true;
-    const v = q.toLowerCase();
-    return r.no.toLowerCase().includes(v) || r.supplier.includes(q) || r.category.includes(q);
-  });
-
-  const toggle = (rfqNo, itemCode) => {
-    const k = `${rfqNo}::${itemCode}`;
-    const next = new Set(picked);
-    next.has(k) ? next.delete(k) : next.add(k);
-    setPicked(next);
-  };
-
-  const toggleAll = (rfqNo, items) => {
-    const keys = items.map(it => `${rfqNo}::${it.code}`);
-    const next = new Set(picked);
-    const allOn = keys.every(k => next.has(k));
-    if (allOn) keys.forEach(k => next.delete(k));
-    else keys.forEach(k => next.add(k));
-    setPicked(next);
-  };
-
-  return (
-    <div onClick={onClose} style={{
-      position:'fixed', inset:0, background:'rgba(20,18,14,0.32)',
-      display:'grid', placeItems:'center', zIndex:50,
-    }}>
-      <div onClick={e=>e.stopPropagation()} className="card"
-           style={{ width:780, padding:0, boxShadow:'var(--sh-pop)', maxHeight:'88vh', display:'flex', flexDirection:'column' }}>
-        <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-          <div>
-            <div className="eyebrow" style={{ marginBottom:4 }}>ดึงราคาจาก RFQ ที่ได้รับใบเสนอราคาแล้ว</div>
-            <h3 className="h-section">เลือก RFQ และรายการที่ต้องการบันทึก</h3>
-          </div>
-          <SettingsSearchBox value={q} onChange={setQ} placeholder="ค้นหา RFQ / Supplier…" />
-        </div>
-
-        <div style={{
-          padding:'12px 24px', background:'var(--surface-2)',
-          borderBottom:'1px solid var(--rule)',
-          display:'flex', gap:10, alignItems:'flex-start',
-        }}>
-          <span style={{ color:'var(--ink-3)' }}>{Icons.alert}</span>
-          <div style={{ fontSize:11.5, color:'var(--ink-2)', lineHeight:1.6 }}>
-            ระบบจะบันทึก <strong>ราคาที่ Supplier เสนอ</strong> เป็นราคา net (ก่อน VAT, ก่อน Overhead) ตามที่กรอกในใบเสนอราคา
-          </div>
-        </div>
-
-        <div style={{ flex:1, overflowY:'auto', padding:'8px 8px' }}>
-          {filtered.map(r => {
-            const allKeys = r.items.map(it => `${r.no}::${it.code}`);
-            const allOn = allKeys.every(k => picked.has(k));
-            const someOn = !allOn && allKeys.some(k => picked.has(k));
-            return (
-              <div key={r.no} style={{
-                margin:'8px 16px', border:'1px solid var(--rule)', borderRadius:6, overflow:'hidden',
-              }}>
-                <div style={{
-                  padding:'12px 16px', background:'var(--surface-2)',
-                  borderBottom:'1px solid var(--rule)',
-                  display:'flex', alignItems:'center', gap:12,
-                }}>
-                  <input type="checkbox"
-                    checked={allOn}
-                    ref={el => { if (el) el.indeterminate = someOn; }}
-                    onChange={() => toggleAll(r.no, r.items)}
-                    style={{ width:14, height:14, accentColor:'var(--teal)', cursor:'pointer' }} />
-                  <Av initials={r.supplier.slice(0,2)} kind={r.supKind} />
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                      <span className="font-mono" style={{ fontSize:11.5, color:'var(--ink-2)', fontWeight:500 }}>{r.no}</span>
-                      <span style={{ fontSize:13, fontWeight:500 }}>{r.supplier}</span>
-                    </div>
-                    <div style={{ fontSize:11.5, color:'var(--ink-3)', marginTop:3 }}>
-                      {r.category} · {r.project} · เสนอราคา {r.quoteDate} · {r.items.length} รายการ
-                    </div>
-                  </div>
-                </div>
-                <table className="tbl" style={{ background:'transparent' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ width:36 }}></th>
-                      <th style={{ width:'16%' }}>รหัส</th>
-                      <th>รายการ</th>
-                      <th>หน่วย</th>
-                      <th className="num-col">ราคา/หน่วย (net)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {r.items.map(it => {
-                      const k = `${r.no}::${it.code}`;
-                      const on = picked.has(k);
-                      return (
-                        <tr key={it.code} style={{ background: on ? 'var(--teal-soft)' : 'transparent' }}>
-                          <td>
-                            <input type="checkbox" checked={on} onChange={() => toggle(r.no, it.code)}
-                              style={{ width:14, height:14, accentColor:'var(--teal)', cursor:'pointer' }} />
-                          </td>
-                          <td className="font-mono" style={{ fontSize:11, color:'var(--ink-2)' }}>{it.code}</td>
-                          <td>
-                            <div style={{ fontSize:12.5, fontWeight:500 }}>{it.name}</div>
-                            <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>{it.desc}</div>
-                          </td>
-                          <td style={{ fontSize:12.5, color:'var(--ink-3)' }}>{it.unit}</td>
-                          <td className="num-col num" style={{ fontWeight:500 }}>{money(it.price)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })}
-        </div>
-
-        <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', background:'var(--surface-2)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-          <div style={{ fontSize:12.5, color:'var(--ink-3)' }}>
-            เลือกแล้ว <strong style={{ color:'var(--ink)' }}>{picked.size}</strong> รายการ
-          </div>
-          <div style={{ display:'flex', gap:8 }}>
-            <button className="btn ghost" onClick={onClose}>ยกเลิก</button>
-            <button className="btn primary" disabled={picked.size === 0} onClick={onClose}
-              style={{ opacity: picked.size === 0 ? 0.5 : 1 }}>
-              {Icons.check} บันทึก {picked.size} รายการ เข้า Price DB
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }
 

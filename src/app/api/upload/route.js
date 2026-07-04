@@ -68,7 +68,7 @@ function normalizeMime(reported, filename) {
 }
 // Whitelisted entity_type values — keeps the file_attachments table tidy and
 // prevents callers from inventing categories that break later joins.
-const ALLOWED_ENTITY_TYPES = new Set(['rfq', 'contract', 'comparison', 'supplier', 'pricedb', '']);
+const ALLOWED_ENTITY_TYPES = new Set(['rfq', 'contract', 'comparison', 'supplier', 'pricedb', 'po', '']);
 
 export const runtime = 'nodejs';  // googleapis isn't Edge-safe
 export const maxDuration = 60;    // PDFs can take a bit on slow links

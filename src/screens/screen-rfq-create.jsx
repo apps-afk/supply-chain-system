@@ -24,7 +24,7 @@ import { usePermissions } from '../lib/use-permissions';
 // Finds the first FREE 0001-style slot (so legacy random suffixes from the
 // old generator don't push every new number into the thousands), while
 // still guaranteeing the result doesn't collide with an existing number.
-function nextRfqNo(existing) {
+export function nextRfqNo(existing) {
   const year = new Date().getFullYear();
   const prefix = `RFQ-${year}-`;
   const used = new Set();

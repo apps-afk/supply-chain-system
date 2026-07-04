@@ -2,13 +2,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Icons, Av } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle, BulkUploadModal } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Settings → Supplier List
   Data is now stored in DB and fetched from /api/suppliers.
   Whitelisted fields:
     code, name, type, contact_name, email, phone,
-    address, tax_id, payment_terms, rating, notes, active
+    address, tax_id, payment_terms, rating, notes, active, status,
+    blacklist_json — audit trail [{action:'ban'|'unban', reason, by, at}]
 */
 
 export function ScreenSettingsSuppliers({ go }) {
@@ -321,8 +323,15 @@ function parseType(str) {
   return { material: s.includes('material'), subcontract: s.includes('subcontract') };
 }
 
+function fmtBlDate(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' }); }
+  catch { return iso; }
+}
+
 function SupplierModal({ item, existingCodes, onClose, onSaved }) {
   const isEdit = !!item;
+  const { user } = usePermissions();
   const initialTerms = parsePaymentTerms(item?.payment_terms);
   const initialType  = parseType(item?.type);
   const [form, setForm] = useState({
@@ -344,22 +353,48 @@ function SupplierModal({ item, existingCodes, onClose, onSaved }) {
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr]   = useState('');
+  // Blacklist audit trail — prompt for a reason on Blacklist transitions.
+  // reasonPrompt: null | 'ban' | 'unban'
+  const [reasonPrompt, setReasonPrompt] = useState(null);
+  const [reason, setReason]             = useState('');
+  const [reasonErr, setReasonErr]       = useState('');
+  const [histOpen, setHistOpen]         = useState(false);
+  // Read the CURRENT row's history (guarded) so append never clobbers it.
+  const history = Array.isArray(item?.blacklist_json) ? item.blacklist_json : [];
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  async function save() {
-    setErr('');
+  function validate() {
     if (!form.name.trim()) {
-      setErr('กรอกชื่อบริษัท'); return;
+      setErr('กรอกชื่อบริษัท'); return false;
     }
     if (!form.typeMaterial && !form.typeSubcontract) {
-      setErr('เลือกประเภทอย่างน้อย 1 อย่าง (Material / SubContract)'); return;
+      setErr('เลือกประเภทอย่างน้อย 1 อย่าง (Material / SubContract)'); return false;
     }
     if (form.hasCredit) {
       const n = parseInt(form.creditDays, 10);
       if (!Number.isFinite(n) || n <= 0) {
-        setErr('กรอกจำนวนวันเครดิตเทอม (ตัวเลขมากกว่า 0)'); return;
+        setErr('กรอกจำนวนวันเครดิตเทอม (ตัวเลขมากกว่า 0)'); return false;
       }
     }
+    return true;
+  }
+
+  function save() {
+    setErr('');
+    if (!validate()) return;
+    // Status transitions to/from Blacklist require an audit entry — collect
+    // the reason first, then doSave() appends it to blacklist_json.
+    const prevStatus = isEdit ? (item.status || (item.active === false ? 'Non-Active' : 'Active')) : null;
+    if (form.status === 'Blacklist' && prevStatus !== 'Blacklist') {
+      setReason(''); setReasonErr(''); setReasonPrompt('ban'); return;
+    }
+    if (prevStatus === 'Blacklist' && form.status !== 'Blacklist') {
+      setReason(''); setReasonErr(''); setReasonPrompt('unban'); return;
+    }
+    doSave(null);
+  }
+
+  async function doSave(blEntry) {
     setBusy(true);
     const typeParts = [];
     if (form.typeMaterial)    typeParts.push('Material');
@@ -385,6 +420,10 @@ function SupplierModal({ item, existingCodes, onClose, onSaved }) {
       // `active` should still see Blacklist as inactive.
       active:        form.status === 'Active',
     };
+    if (blEntry) {
+      // Append to the row's existing trail — never replace/clobber history.
+      payload.blacklist_json = [...history, blEntry];
+    }
     if (isEdit) payload.id = item.id;
     const res = await fetch('/api/suppliers', {
       method: isEdit ? 'PATCH' : 'POST',
@@ -483,7 +522,35 @@ function SupplierModal({ item, existingCodes, onClose, onSaved }) {
             <option value="Blacklist">Blacklist</option>
           </select>
         </SettingsField>
-        <div />
+        {history.length > 0 ? (
+          <div style={{ alignSelf:'end' }}>
+            <button type="button" className="btn ghost sm" onClick={() => setHistOpen(o => !o)}
+              title="ดูประวัติการขึ้น/ปลดบัญชีดำ"
+              style={{ padding:'6px 10px', color:'var(--clay)', fontSize:12 }}>
+              ประวัติ Blacklist × {history.length}
+              <span style={{ display:'inline-block', marginLeft:4, transform: histOpen ? 'rotate(180deg)':'rotate(0)', transition:'transform 0.15s' }}>
+                {Icons.chevronD}
+              </span>
+            </button>
+          </div>
+        ) : <div />}
+        {histOpen && history.length > 0 && (
+          <div style={{ gridColumn:'1 / -1', background:'var(--surface-2)', borderRadius:6, padding:'10px 14px' }}>
+            {[...history].sort((a, b) => new Date(b.at) - new Date(a.at)).map((h, i) => (
+              <div key={i} style={{ display:'flex', alignItems:'baseline', gap:10, padding:'6px 0',
+                                    borderTop: i ? '1px solid var(--rule)' : 'none', fontSize:12 }}>
+                <span style={{ color:'var(--ink-3)', whiteSpace:'nowrap' }}>{fmtBlDate(h.at)}</span>
+                <span style={{ padding:'1px 8px', borderRadius:3, fontSize:10.5, fontWeight:600, whiteSpace:'nowrap',
+                  background: h.action === 'ban' ? 'var(--clay-soft)' : 'var(--moss-soft)',
+                  color: h.action === 'ban' ? '#6B2D1A' : '#2F4A1A' }}>
+                  {h.action === 'ban' ? 'แบน' : 'ปลดแบน'}
+                </span>
+                <span style={{ flex:1, color:'var(--ink-2)' }}>{h.reason || '—'}</span>
+                <span style={{ color:'var(--ink-4)', whiteSpace:'nowrap' }}>โดย {h.by || '—'}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <div style={{ gridColumn:'1 / -1' }}>
           <SettingsField label="หมายเหตุ">
             <textarea value={form.notes} onChange={e=>set('notes', e.target.value)}
@@ -499,6 +566,46 @@ function SupplierModal({ item, existingCodes, onClose, onSaved }) {
           {busy ? 'กำลังบันทึก…' : (isEdit ? 'บันทึก' : 'เพิ่ม')}
         </button>
       </div>
+
+      {reasonPrompt && (
+        <SettingsModal
+          eyebrow={reasonPrompt === 'ban' ? 'ขึ้นบัญชีดำ' : 'ปลดออกจากบัญชีดำ'}
+          title={form.name || item?.name || 'Supplier'}
+          onClose={() => setReasonPrompt(null)}
+          width={460}
+        >
+          {reasonErr && (
+            <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:14 }}>{reasonErr}</div>
+          )}
+          <SettingsField
+            label={reasonPrompt === 'ban' ? 'เหตุผลที่ขึ้นบัญชีดำ' : 'เหตุผลที่ปลดออกจากบัญชีดำ'}
+            required={reasonPrompt === 'ban'}
+            hint={reasonPrompt === 'ban' ? 'บันทึกลงประวัติ Blacklist ของ Supplier รายนี้' : '(ไม่บังคับ) บันทึกลงประวัติ Blacklist'}
+          >
+            <textarea value={reason} onChange={e=>setReason(e.target.value)} autoFocus
+                      placeholder={reasonPrompt === 'ban' ? 'เช่น ส่งของไม่ตรงสเปก / ทิ้งงาน…' : '(ไม่บังคับ)'}
+                      style={{ ...settingsInputStyle, minHeight:80, resize:'vertical', fontFamily:'inherit' }} />
+          </SettingsField>
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:8, marginTop:20 }}>
+            <button className="btn" onClick={() => setReasonPrompt(null)}>ยกเลิก</button>
+            <button className="btn primary" disabled={busy} onClick={() => {
+              if (reasonPrompt === 'ban' && !reason.trim()) {
+                setReasonErr('กรอกเหตุผลที่ขึ้นบัญชีดำ'); return;
+              }
+              const entry = {
+                action: reasonPrompt,
+                reason: reason.trim(),
+                by: user?.email || '',
+                at: new Date().toISOString(),
+              };
+              setReasonPrompt(null);
+              doSave(entry);
+            }}>
+              {busy ? 'กำลังบันทึก…' : 'ยืนยันและบันทึก'}
+            </button>
+          </div>
+        </SettingsModal>
+      )}
     </SettingsModal>
   );
 }

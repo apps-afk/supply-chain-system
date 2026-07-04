@@ -1,10 +1,11 @@
 'use client';
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Icons, Chip, Av, money } from '../lib/shell';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Icons, Av, money } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
+import { useTableView, Th, Pager, exportCSV } from '../lib/table-utils';
 /*
-  Contract module — upload-driven AI review workflow.
+  Contract module — upload-driven manual review workflow.
 
   Wired to /api/contracts, /api/upload (Google Drive), /api/attachments.
 
@@ -12,7 +13,7 @@ import { usePermissions } from '../lib/use-permissions';
   UI workflow phases (visual prototype):
     Uploaded → Reviewing → Reviewed → Legal → Final
   Mapping for the 5-stat pipeline at the top of the list:
-    draft     → Uploaded  (just uploaded, awaiting AI review)
+    draft     → Uploaded  (just uploaded, awaiting manual review)
     active    → Final     (signed & in use)
     expired   → Final     (still considered "done")
     terminated→ (no bucket — shown in raw status filter)
@@ -28,9 +29,9 @@ import { usePermissions } from '../lib/use-permissions';
 
 // UI buckets for the 5-card pipeline at the top of the list page.
 const CT_STATUS = {
-  Uploaded:  { bg:'#F0E4C5',             fg:'#6B5121',             dot:'var(--ochre)', label:'รอตรวจ AI' },
-  Reviewing: { bg:'var(--teal-soft)',    fg:'var(--teal-ink)',     dot:'var(--teal)',  label:'AI กำลังตรวจ' },
-  Reviewed:  { bg:'#DEE7E3',             fg:'#1F4D40',             dot:'var(--teal)',  label:'AI ตรวจเสร็จ' },
+  Uploaded:  { bg:'#F0E4C5',             fg:'#6B5121',             dot:'var(--ochre)', label:'รอตรวจสอบ' },
+  Reviewing: { bg:'var(--teal-soft)',    fg:'var(--teal-ink)',     dot:'var(--teal)',  label:'กำลังตรวจสอบ' },
+  Reviewed:  { bg:'#DEE7E3',             fg:'#1F4D40',             dot:'var(--teal)',  label:'ตรวจสอบแล้ว' },
   Legal:     { bg:'var(--chip-recv-bg)', fg:'var(--chip-recv-fg)', dot:'var(--ochre)', label:'รอกฎหมาย' },
   Final:     { bg:'var(--moss-soft)',    fg:'#2F4A1A',             dot:'var(--moss)',  label:'Final · ใช้งานได้' },
 };
@@ -50,6 +51,14 @@ const DB_STATUS_LABEL = {
   expired:    'หมดอายุ',
   terminated: 'ยกเลิก',
 };
+
+// Manual review checklist — สิ่งที่ฝ่ายจัดซื้อต้องตรวจก่อนส่งต่อ
+const REVIEW_CHECKLIST = [
+  { key:'party',     label:'คู่สัญญาถูกต้อง (ชื่อ Supplier ตรงกับเอกสาร)' },
+  { key:'amount',    label:'วงเงินตรงตามที่ตกลง' },
+  { key:'guarantee', label:'มีเงื่อนไขค้ำประกัน / เงินประกันผลงาน' },
+  { key:'dates',     label:'วันที่เริ่มต้น–สิ้นสุดครบถ้วน' },
+];
 
 // =================== Helpers ===================
 
@@ -251,8 +260,37 @@ export function ScreenContractList({ go }) {
         if (!hit) return false;
       }
       return true;
-    });
+    }).map(c => ({
+      ...c,
+      // Enriched fields so sort + CSV can work on plain row keys
+      supplier_name: supById.get(c.supplier_id)?.name || '',
+      type_name:     typeById.get(c.type_id)?.name || '',
+      amount:        c.amount == null || c.amount === '' ? null : Number(c.amount),
+    }));
   }, [contracts, projectFilter, q, supById, projById, typeById]);
+
+  // Client-side sort + pagination over the filtered rows (P3 shared helpers)
+  const { view, page, pages, setPage, sortKey, sortDir, toggleSort } =
+    useTableView(filtered, { pageSize: 25 });
+  const sortProps = { activeKey: sortKey, dir: sortDir, onSort: toggleSort };
+
+  function exportContractsCSV() {
+    exportCSV(
+      `contracts-${new Date().toISOString().slice(0, 10)}.csv`,
+      [
+        { key: 'no',            label: 'เลขที่' },
+        { key: 'title',         label: 'ชื่อ' },
+        { key: 'supplier_name', label: 'Supplier' },
+        { key: 'type_name',     label: 'ประเภท' },
+        { key: 'amount',        label: 'มูลค่า' },
+        { key: c => DB_STATUS_LABEL[c.status] || c.status || '', label: 'สถานะ' },
+        { key: 'start_date',    label: 'วันเริ่ม' },
+        { key: 'end_date',      label: 'วันสิ้นสุด' },
+        { key: 'warranty',      label: 'ประกัน' },
+      ],
+      filtered,
+    );
+  }
 
   return (
     <div className="page">
@@ -265,11 +303,14 @@ export function ScreenContractList({ go }) {
             แต่ละไฟล์อยู่ใน Google Drive และผูกกับโครงการ/คู่สัญญาในระบบ
           </p>
         </div>
-        {canWrite && (
-          <div style={{ display:'flex', gap:8 }}>
+        <div style={{ display:'flex', gap:8 }}>
+          <button className="btn" onClick={exportContractsCSV} disabled={filtered.length === 0}>
+            {Icons.download} Export CSV
+          </button>
+          {canWrite && (
             <button className="btn primary" onClick={() => setUploadOpen(true)}>{Icons.upload} อัพโหลดเอกสาร</button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Filter row — project + search */}
@@ -308,12 +349,12 @@ export function ScreenContractList({ go }) {
         <table className="tbl">
           <thead>
             <tr>
-              <th style={{ width:'12%' }}>ประเภทเอกสาร</th>
-              <th>ชื่อเอกสาร</th>
-              <th>คู่สัญญา</th>
-              <th className="num-col">มูลค่าสัญญา</th>
-              <th>วันเริ่มต้น</th>
-              <th>วันสิ้นสุด</th>
+              <Th sortKey="no" {...sortProps} style={{ width:'12%' }}>ประเภทเอกสาร</Th>
+              <Th sortKey="title" {...sortProps}>ชื่อเอกสาร</Th>
+              <Th sortKey="supplier_name" {...sortProps}>คู่สัญญา</Th>
+              <Th sortKey="amount" {...sortProps} className="num-col">มูลค่าสัญญา</Th>
+              <Th sortKey="start_date" {...sortProps}>วันเริ่มต้น</Th>
+              <Th sortKey="end_date" {...sortProps}>วันสิ้นสุด</Th>
               <th>ระยะเวลารับประกัน</th>
               <th>Retention</th>
               <th style={{ width:80 }}>ไฟล์</th>
@@ -327,7 +368,7 @@ export function ScreenContractList({ go }) {
               <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล
               </td></tr>
-            ) : filtered.map(c => {
+            ) : view.map(c => {
               const supplierName = supName(c.supplier_id);
               const projectName  = projName(c.project_id);
               const type         = typeById.get(c.type_id);
@@ -418,6 +459,7 @@ export function ScreenContractList({ go }) {
             })}
           </tbody>
         </table>
+        <Pager page={page} pages={pages} setPage={setPage} total={filtered.length} />
       </div>
 
       {uploadOpen && (
@@ -442,9 +484,9 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
   const [contractTypes, setContractTypes] = useState([]);
 
   const [file, setFile]         = useState(null);
-  // 'ai'   = ส่งให้ AI ตรวจสอบเข้า workflow 5 ขั้น (status เริ่ม='draft')
-  // 'skip' = ไฟล์ผ่านการตรวจสอบมาแล้ว / ไม่ต้องตรวจ → บันทึก + active ทันที
-  const [reviewMode, setReviewMode] = useState('ai');
+  // 'review' = ส่งตรวจสอบเอกสารเข้า workflow 5 ขั้น (status เริ่ม='draft')
+  // 'skip'   = ไฟล์ผ่านการตรวจสอบมาแล้ว / ไม่ต้องตรวจ → บันทึก + active ทันที
+  const [reviewMode, setReviewMode] = useState('review');
   const [form, setForm] = useState({
     title:       '',
     supplier_id: '',
@@ -560,8 +602,8 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
             <div style={{ fontSize:11.5, color:'var(--ink-3)', fontWeight:500, marginBottom:8 }}>ประเภทการดำเนินการ</div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               {[
-                { value:'ai',   label:'ส่งให้ AI ตรวจสอบ',        sub:'เข้า workflow 5 ขั้น (AI → ฝ่ายกฎหมาย → Final)' },
-                { value:'skip', label:'ผ่านการตรวจสอบแล้ว', sub:'ข้ามขั้นตอน — บันทึกไฟล์เข้า Drive ทันที' },
+                { value:'review', label:'ส่งตรวจสอบเอกสาร',   sub:'เข้า workflow 5 ขั้น (ตรวจสอบ → ฝ่ายกฎหมาย → Final)' },
+                { value:'skip',   label:'ผ่านการตรวจสอบแล้ว', sub:'ข้ามขั้นตอน — บันทึกไฟล์เข้า Drive ทันที' },
               ].map(o => {
                 const active = reviewMode === o.value;
                 return (
@@ -660,7 +702,7 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
 
           {/* File picker */}
           <p style={{ fontSize:12, color:'var(--ink-3)', margin:'0 0 8px', lineHeight:1.6 }}>
-            อัพโหลดไฟล์ PDF ของสัญญาที่ทำแล้วภายนอก ระบบจะยังไม่เริ่มตรวจสอบจนกว่าจะกด <strong>คอนเฟิร์มให้ AI ตรวจ</strong> ในหน้าถัดไป
+            อัพโหลดไฟล์ PDF ของสัญญาที่ทำแล้วภายนอก การตรวจสอบเอกสารจะเริ่มเมื่อกด <strong>เริ่มตรวจสอบเอกสาร</strong> ในหน้าถัดไป
           </p>
           <label style={{
             display:'block', padding:'28px 22px',
@@ -726,13 +768,12 @@ export function ScreenContract({ go }) {
 
   // phase: 'Uploaded' | 'Reviewing' | 'Reviewed' | 'Legal' | 'Final'
   const [phase, setPhase] = useState('Uploaded');
-  const [confirmOpen, setConfirmOpen] = useState(false);
   const [legalOpen,   setLegalOpen]   = useState(false);
   const [finalOpen,   setFinalOpen]   = useState(false);
-  // Track the AI-review fake-delay timer so we can clear it on unmount
-  // (otherwise setState fires on a torn-down component).
-  const reviewTimerRef = useRef(null);
-  useEffect(() => () => { if (reviewTimerRef.current) clearTimeout(reviewTimerRef.current); }, []);
+  // Manual document-review checklist (client-side, per session) — ฝ่ายจัดซื้อ
+  // ติ๊กครบทุกข้อก่อนส่งต่อขั้นถัดไป
+  const [checks, setChecks] = useState({});
+  const allChecked = REVIEW_CHECKLIST.every(item => checks[item.key]);
 
   async function loadAttachments(contractId) {
     if (!contractId) return;
@@ -909,7 +950,7 @@ export function ScreenContract({ go }) {
       </div>
 
       {/* If contract is already 'active' (skipped review or workflow done),
-          show a simple archive view instead of the AI workflow stepper. */}
+          show a simple archive view instead of the review workflow stepper. */}
       {contract && contract.status === 'active' && (
         <ActiveContractView
           contract={contract}
@@ -930,7 +971,7 @@ export function ScreenContract({ go }) {
         />
       )}
 
-      {/* AI workflow only shown when status is still 'draft' */}
+      {/* Review workflow only shown when status is still 'draft' */}
       {contract && contract.status !== 'active' && (
       <>
       {/* Workflow stepper — horizontal */}
@@ -938,11 +979,11 @@ export function ScreenContract({ go }) {
         <div className="eyebrow" style={{ marginBottom:14 }}>ขั้นตอนตรวจสอบสัญญา</div>
         <div style={{ display:'grid', gridTemplateColumns:'repeat(5, 1fr)', gap:0, alignItems:'flex-start' }}>
           {[
-            { key:'Uploaded',  label:'1. อัพโหลดเอกสาร', sub:'รับไฟล์จากภายนอก' },
-            { key:'Reviewing', label:'2. AI กำลังตรวจ',  sub:'หลังกดคอนเฟิร์ม' },
-            { key:'Reviewed',  label:'3. AI Report',     sub:'รายการที่ต้องแก้' },
-            { key:'Legal',     label:'4. ส่งฝ่ายกฎหมาย', sub:'รอผลตรวจ' },
-            { key:'Final',     label:'5. Upload Final',  sub:'ไฟล์สัญญาสุดท้าย' },
+            { key:'Uploaded',  label:'1. อัพโหลดเอกสาร',  sub:'รับไฟล์จากภายนอก' },
+            { key:'Reviewing', label:'2. ตรวจสอบเอกสาร', sub:'เช็คลิสต์โดยฝ่ายจัดซื้อ' },
+            { key:'Reviewed',  label:'3. ผลการตรวจ',      sub:'สรุปรายการที่ตรวจแล้ว' },
+            { key:'Legal',     label:'4. ส่งฝ่ายกฎหมาย',  sub:'รอผลตรวจ' },
+            { key:'Final',     label:'5. Upload Final',   sub:'ไฟล์สัญญาสุดท้าย' },
           ].map((s, i, arr) => {
             const order = ['Uploaded','Reviewing','Reviewed','Legal','Final'];
             const cur   = order.indexOf(phase);
@@ -1003,12 +1044,12 @@ export function ScreenContract({ go }) {
               <h2 className="h-section" style={{ marginBottom:8 }}>เลือกการดำเนินการต่อ</h2>
               <p style={{ fontSize:13.5, color:'var(--ink-2)', lineHeight:1.7, margin:'0 auto 24px', maxWidth:520 }}>
                 สัญญานี้อัปโหลดเข้าระบบและ Drive แล้ว ขั้นถัดไปเลือกได้ระหว่าง
-                <strong> ส่งให้ AI ตรวจสอบ </strong>(วิเคราะห์เทียบ Template มาตรฐาน)
+                <strong> ตรวจสอบเอกสาร </strong>(ฝ่ายจัดซื้อตรวจตามเช็คลิสต์)
                 หรือ <strong>ข้ามไป Final</strong> ถ้าเอกสารผ่านการตรวจจากภายนอกแล้ว
               </p>
 
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, maxWidth:640, margin:'0 auto' }}>
-                {/* Option A — AI review */}
+                {/* Option A — manual document review */}
                 <div style={{
                   padding:'20px 18px', borderRadius:10,
                   border:'1.5px solid var(--rule-2)', background:'var(--surface)',
@@ -1018,20 +1059,20 @@ export function ScreenContract({ go }) {
                     <span style={{
                       width:30, height:30, borderRadius:999, background:'var(--teal-soft)',
                       color:'var(--teal-ink)', display:'grid', placeItems:'center', fontSize:13, fontWeight:600,
-                    }}>AI</span>
-                    <span style={{ fontSize:14, fontWeight:600 }}>ส่งให้ AI ตรวจสอบ</span>
+                    }}>☑</span>
+                    <span style={{ fontSize:14, fontWeight:600 }}>ตรวจสอบเอกสาร</span>
                   </div>
                   <div style={{ fontSize:12, color:'var(--ink-3)', lineHeight:1.55, flex:1 }}>
-                    วิเคราะห์เทียบ Template + ออก Report ประเด็นที่ต้องแก้ ใช้เวลา 1–2 นาที
+                    ฝ่ายจัดซื้อตรวจคู่สัญญา วงเงิน เงื่อนไขค้ำประกัน และวันที่ ตามเช็คลิสต์ ก่อนส่งฝ่ายกฎหมาย
                   </div>
                   {canWrite && (
-                    <button className="btn primary" onClick={() => setConfirmOpen(true)} disabled={!contract}>
-                      {Icons.sparkles} เริ่ม AI ตรวจ
+                    <button className="btn primary" onClick={() => setPhase('Reviewing')} disabled={!contract}>
+                      {Icons.check} เริ่มตรวจสอบเอกสาร
                     </button>
                   )}
                 </div>
 
-                {/* Option B — skip AI, mark active directly */}
+                {/* Option B — skip review, mark active directly */}
                 <div style={{
                   padding:'20px 18px', borderRadius:10,
                   border:'1.5px solid var(--rule-2)', background:'var(--surface)',
@@ -1052,7 +1093,7 @@ export function ScreenContract({ go }) {
                     className="btn"
                     disabled={!contract}
                     onClick={async () => {
-                      if (!confirm('ยืนยันข้ามขั้นตอน AI/ฝ่ายกฎหมาย และบันทึกสัญญาเป็น "ใช้งานอยู่"?')) return;
+                      if (!confirm('ยืนยันข้ามขั้นตอนตรวจสอบ/ฝ่ายกฎหมาย และบันทึกสัญญาเป็น "ใช้งานอยู่"?')) return;
                       try {
                         const r = await fetch('/api/contracts', {
                           method: 'PATCH',
@@ -1089,34 +1130,64 @@ export function ScreenContract({ go }) {
             </div>
           )}
 
-          {/* Phase 2: Reviewing — animated waiting state */}
+          {/* Phase 2: Reviewing — manual checklist by procurement */}
           {phase === 'Reviewing' && (
-            <div className="card" style={{ padding:32, textAlign:'center' }}>
-              <div style={{ display:'flex', justifyContent:'center', marginBottom:20 }}>
-                <span style={{
-                  width:48, height:48, borderRadius:999,
-                  background:'var(--teal)', color:'var(--paper)',
-                  display:'inline-grid', placeItems:'center', fontSize:18, fontWeight:600,
-                }}>AI</span>
-              </div>
-              <h2 className="h-section" style={{ marginBottom:8 }}>AI กำลังตรวจสอบสัญญา…</h2>
-              <p style={{ fontSize:13, color:'var(--ink-3)', maxWidth:420, margin:'0 auto 20px', lineHeight:1.6 }}>
-                กำลังเทียบสัญญากับ Template มาตรฐาน · ตรวจสอบเงื่อนไข · สรุปประเด็นที่ต้องแก้
+            <div className="card" style={{ padding:32 }}>
+              <div className="eyebrow" style={{ marginBottom:6 }}>ตรวจสอบโดยฝ่ายจัดซื้อ</div>
+              <h2 className="h-section" style={{ marginBottom:8 }}>ตรวจสอบเอกสาร</h2>
+              <p style={{ fontSize:13, color:'var(--ink-3)', margin:'0 0 20px', lineHeight:1.6 }}>
+                เปิดไฟล์สัญญา (แผงด้านขวา) เทียบกับข้อมูลที่บันทึกไว้ แล้วติ๊กยืนยันทุกข้อก่อนส่งต่อ
               </p>
-              <div style={{ width:'80%', maxWidth:420, height:6, margin:'0 auto', background:'var(--rule)', borderRadius:999, overflow:'hidden' }}>
-                <div style={{ height:'100%', width:'68%', background:'var(--teal)', borderRadius:999 }} />
+              <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:24 }}>
+                {REVIEW_CHECKLIST.map(item => (
+                  <label key={item.key} style={{
+                    display:'flex', alignItems:'center', gap:12,
+                    padding:'12px 16px', borderRadius:8,
+                    border:`1px solid ${checks[item.key] ? 'var(--teal)' : 'var(--rule-2)'}`,
+                    background: checks[item.key] ? 'var(--teal-soft)' : 'var(--surface)',
+                    cursor: canWrite ? 'pointer' : 'default',
+                  }}>
+                    {canWrite ? (
+                      <input
+                        type="checkbox"
+                        checked={!!checks[item.key]}
+                        onChange={e => setChecks(cs => ({ ...cs, [item.key]: e.target.checked }))}
+                        style={{ width:16, height:16, accentColor:'var(--teal)', flexShrink:0 }}
+                      />
+                    ) : (
+                      <span style={{ fontSize:14, color: checks[item.key] ? 'var(--teal)' : 'var(--ink-4)', flexShrink:0 }}>
+                        {checks[item.key] ? '✓' : '○'}
+                      </span>
+                    )}
+                    <span style={{ fontSize:13, color:'var(--ink-2)' }}>{item.label}</span>
+                  </label>
+                ))}
               </div>
-              <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:8 }}>ประมาณ 30 วินาที</div>
-              <button className="btn sm" onClick={() => setPhase('Reviewed')} style={{ marginTop:24 }}>
-                (ข้าม · ดู Report สำหรับ demo)
-              </button>
+              {canWrite ? (
+                <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+                  <button
+                    className="btn primary"
+                    disabled={!allChecked}
+                    onClick={() => setPhase('Reviewed')}
+                    style={{ opacity: allChecked ? 1 : 0.5, cursor: allChecked ? 'pointer' : 'not-allowed' }}
+                  >
+                    {Icons.check} บันทึกผลตรวจ · ไปขั้นถัดไป
+                  </button>
+                  {!allChecked && (
+                    <span style={{ fontSize:12, color:'var(--ink-3)' }}>ติ๊กให้ครบทุกข้อก่อนส่งต่อ</span>
+                  )}
+                </div>
+              ) : (
+                <div style={{ fontSize:12.5, color:'var(--ink-3)' }}>รอฝ่ายจัดซื้อตรวจสอบเอกสาร</div>
+              )}
             </div>
           )}
 
-          {/* Phase 3+: AI Report */}
+          {/* Phase 3+: review result */}
           {(phase === 'Reviewed' || phase === 'Legal' || phase === 'Final') && (
-            <AIReportPanel
+            <ReviewResultPanel
               phase={phase}
+              checks={checks}
               onSendToLegal={() => setLegalOpen(true)}
               onUploadFinal={() => setFinalOpen(true)}
             />
@@ -1164,36 +1235,11 @@ export function ScreenContract({ go }) {
               </div>
             )}
           </div>
-
-          {/* Demo helper: jump to any phase */}
-          <div className="card" style={{ background:'var(--surface-2)' }}>
-            <div className="eyebrow" style={{ marginBottom:8 }}>Demo · ทดสอบแต่ละขั้นตอน</div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
-              {['Uploaded','Reviewing','Reviewed','Legal','Final'].map(p => (
-                <button key={p} onClick={() => setPhase(p)} className="btn sm" style={{
-                  background: phase === p ? 'var(--ink)' : 'transparent',
-                  color: phase === p ? 'var(--paper)' : 'var(--ink-2)',
-                  borderColor: phase === p ? 'var(--ink)' : 'var(--rule)',
-                  fontSize:10.5, padding:'4px 8px',
-                }}>{CT_STATUS[p].label}</button>
-              ))}
-            </div>
-          </div>
         </aside>
       </div>
       </>
       )}
 
-      {confirmOpen && (
-        <ConfirmAIModal
-          onConfirm={() => {
-            setConfirmOpen(false);
-            setPhase('Reviewing');
-            if (reviewTimerRef.current) clearTimeout(reviewTimerRef.current);
-            reviewTimerRef.current = setTimeout(() => setPhase('Reviewed'), 2000);
-          }}
-          onClose={() => setConfirmOpen(false)} />
-      )}
       {legalOpen && (
         <SendToLegalModal
           onSend={() => { setLegalOpen(false); setPhase('Legal'); }}
@@ -1219,6 +1265,7 @@ export function ScreenContract({ go }) {
             try { window.localStorage.setItem('contract.currentId', c.id); } catch {}
             setContract(c);
             setPhase(DB_TO_BUCKET[c.status] || 'Uploaded');
+            setChecks({});   // fresh checklist per contract
             setAttachments(allAttachments[c.id] || []);
             if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' });
           }}
@@ -1344,10 +1391,9 @@ function ContractArchive({ contracts, currentId, attachmentsByContract, supplier
   );
 }
 
-/* =================== AI Report panel =================== */
 /* ----------------------------------------------------------
    ActiveContractView — shown when contract.status === 'active'
-   (either skipped AI review at upload, or completed full workflow).
+   (either skipped review at upload, or completed full workflow).
    Clean archive view: file list + simple actions. No phase stepper.
    ---------------------------------------------------------- */
 function ActiveContractView({ contract, attachments, onUploadAddon }) {
@@ -1461,103 +1507,57 @@ function ActiveContractView({ contract, attachments, onUploadAddon }) {
   );
 }
 
-function AIReportPanel({ phase, onSendToLegal, onUploadFinal }) {
+function ReviewResultPanel({ phase, checks, onSendToLegal, onUploadFinal }) {
   const { canWrite } = usePermissions();
-  const findings = [];
 
   return (
-    <>
-      <div className="card" style={{ padding:28, background:'var(--surface-2)', marginBottom:24 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
-          <div>
-            <div className="eyebrow" style={{ marginBottom:6 }}>AI Risk Report</div>
-            <h2 className="h-section" style={{ margin:0 }}>สรุปประเด็นที่ต้องแก้</h2>
-          </div>
-          <Chip kind="ai">Claude Sonnet</Chip>
-        </div>
-
-        <div style={{ padding:'24px 0', textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
-          ยังไม่มีข้อมูล
-        </div>
-
-        <div style={{ display:'flex', gap:8, marginTop:24, paddingTop:20, borderTop:'1px solid var(--rule)' }}>
-          <button className="btn">{Icons.download} ดาวน์โหลด Report</button>
-          {canWrite && phase === 'Reviewed' && (
-            <button className="btn primary" onClick={onSendToLegal}>
-              {Icons.external} ส่ง Report ให้ฝ่ายกฎหมาย
-            </button>
-          )}
-          {phase === 'Legal' && (
-            <>
-              <div style={{ flex:1, padding:'8px 14px', background:'var(--chip-recv-bg)', color:'var(--chip-recv-fg)', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:8 }}>
-                <span>{Icons.clock}</span> รอผลตรวจจากฝ่ายกฎหมาย
-              </div>
-              {canWrite && (
-                <button className="btn primary" onClick={onUploadFinal}>
-                  {Icons.upload} Upload Final
-                </button>
-              )}
-            </>
-          )}
-          {phase === 'Final' && (
-            <div style={{ flex:1, padding:'8px 14px', background:'var(--moss-soft)', color:'#2F4A1A', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:8 }}>
-              <span style={{ color:'var(--moss)' }}>{Icons.check}</span>
-              Upload Final เรียบร้อย — สัญญานี้พร้อมใช้งาน
-            </div>
-          )}
-        </div>
+    <div className="card" style={{ padding:28, background:'var(--surface-2)', marginBottom:24 }}>
+      <div style={{ marginBottom:20 }}>
+        <div className="eyebrow" style={{ marginBottom:6 }}>ตรวจสอบโดยฝ่ายจัดซื้อ</div>
+        <h2 className="h-section" style={{ margin:0 }}>ผลการตรวจสอบเอกสาร</h2>
       </div>
 
-      <h3 className="h-section" style={{ marginBottom:16 }}>รายการที่ต้องแก้ ({findings.length} ข้อ)</h3>
-      {findings.length === 0 ? (
-        <div className="card" style={{ padding:40, textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
-          ยังไม่มีข้อมูล
-        </div>
-      ) : (
-        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-          {findings.map((f, i) => (
-            <Finding key={i} {...f} />
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
+      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+        {REVIEW_CHECKLIST.map(item => (
+          <div key={item.key} style={{ display:'flex', alignItems:'center', gap:10, fontSize:13, color:'var(--ink-2)' }}>
+            <span style={{ color: checks[item.key] ? 'var(--moss)' : 'var(--ink-4)', fontSize:14 }}>
+              {checks[item.key] ? '✓' : '○'}
+            </span>
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
 
-/* =================== Modals =================== */
-
-function ConfirmAIModal({ onConfirm, onClose }) {
-  return (
-    <div onClick={onClose} style={{
-      position:'fixed', inset:0, background:'rgba(20,18,14,0.32)',
-      display:'grid', placeItems:'center', zIndex:50,
-    }}>
-      <div onClick={e=>e.stopPropagation()} className="card"
-           style={{ width:480, padding:0, boxShadow:'var(--sh-pop)' }}>
-        <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
-          <div className="eyebrow" style={{ marginBottom:4 }}>ก่อนเริ่มตรวจสอบ</div>
-          <h3 className="h-section">ยืนยันให้ AI ตรวจสอบ</h3>
-        </div>
-        <div style={{ padding:24 }}>
-          <p style={{ margin:'0 0 14px', fontSize:13.5, color:'var(--ink-2)', lineHeight:1.7 }}>
-            AI จะอ่านเนื้อหาสัญญาทั้งฉบับและออก Report ภายใน 1–2 นาที — กรุณายืนยันก่อนเริ่ม
-          </p>
-          <ul style={{ margin:0, paddingLeft:18, fontSize:12.5, color:'var(--ink-3)', lineHeight:1.9 }}>
-            <li>ระบบจะส่งข้อมูลไป AI Service ที่บริษัทใช้</li>
-            <li>ผลที่ได้เป็นเพียงคำแนะนำ — ต้องตรวจสอบโดยฝ่ายกฎหมายอีกครั้ง</li>
-            <li>เริ่มได้ทันที · กดยกเลิกได้ระหว่างประมวลผล</li>
-          </ul>
-        </div>
-        <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', background:'var(--surface-2)', display:'flex', justifyContent:'flex-end', gap:8 }}>
-          <button className="btn ghost" onClick={onClose}>ยกเลิก</button>
-          <button className="btn primary" onClick={onConfirm}>
-            {Icons.sparkles} ยืนยัน · เริ่มตรวจสอบ
+      <div style={{ display:'flex', gap:8, marginTop:24, paddingTop:20, borderTop:'1px solid var(--rule)' }}>
+        {canWrite && phase === 'Reviewed' && (
+          <button className="btn primary" onClick={onSendToLegal}>
+            {Icons.external} ส่งให้ฝ่ายกฎหมาย
           </button>
-        </div>
+        )}
+        {phase === 'Legal' && (
+          <>
+            <div style={{ flex:1, padding:'8px 14px', background:'var(--chip-recv-bg)', color:'var(--chip-recv-fg)', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:8 }}>
+              <span>{Icons.clock}</span> รอผลตรวจจากฝ่ายกฎหมาย
+            </div>
+            {canWrite && (
+              <button className="btn primary" onClick={onUploadFinal}>
+                {Icons.upload} Upload Final
+              </button>
+            )}
+          </>
+        )}
+        {phase === 'Final' && (
+          <div style={{ flex:1, padding:'8px 14px', background:'var(--moss-soft)', color:'#2F4A1A', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:8 }}>
+            <span style={{ color:'var(--moss)' }}>{Icons.check}</span>
+            Upload Final เรียบร้อย — สัญญานี้พร้อมใช้งาน
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+/* =================== Modals =================== */
 
 function SendToLegalModal({ onSend, onClose }) {
   const [to, setTo] = useState('');
@@ -1571,7 +1571,7 @@ function SendToLegalModal({ onSend, onClose }) {
            style={{ width:560, padding:0, boxShadow:'var(--sh-pop)' }}>
         <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
           <div className="eyebrow" style={{ marginBottom:4 }}>ส่งให้ฝ่ายกฎหมายตรวจ</div>
-          <h3 className="h-section">ส่ง AI Report ให้ฝ่ายกฎหมาย</h3>
+          <h3 className="h-section">ส่งผลการตรวจให้ฝ่ายกฎหมาย</h3>
         </div>
         <div style={{ padding:24, display:'flex', flexDirection:'column', gap:14 }}>
           <label style={{ display:'flex', flexDirection:'column', gap:6 }}>
@@ -1592,7 +1592,7 @@ function SendToLegalModal({ onSend, onClose }) {
               }} />
           </label>
           <div style={{ padding:'10px 14px', background:'var(--surface-2)', borderRadius:6, fontSize:11.5, color:'var(--ink-3)' }}>
-            📎 จะแนบ AI Report และไฟล์สัญญาฉบับร่าง
+            📎 จะแนบผลการตรวจสอบและไฟล์สัญญาฉบับร่าง
           </div>
         </div>
         <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', background:'var(--surface-2)', display:'flex', justifyContent:'flex-end', gap:8 }}>
@@ -1677,35 +1677,6 @@ function UploadFinalModal({ onUpload, onDone, onClose }) {
 }
 
 /* =================== Subcomponents =================== */
-
-function Finding({ tone, title, clause, category, body, isPositive }) {
-  const tones = {
-    warn: 'var(--ochre)',
-    err:  'var(--clay)',
-    info: isPositive ? 'var(--moss)' : 'var(--teal)',
-  };
-  return (
-    <div style={{
-      background:'var(--surface)',
-      border:'1px solid var(--rule)',
-      borderLeft:`3px solid ${tones[tone]}`,
-      borderRadius:6, padding:20,
-    }}>
-      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:8 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <span style={{ fontSize:14, fontWeight:500 }}>{title}</span>
-          {isPositive && <span style={{ color:'var(--moss)', fontSize:14 }}>✓</span>}
-        </div>
-        <div style={{ display:'flex', gap:8, fontSize:11, color:'var(--ink-3)' }}>
-          <span style={{ fontFamily:'var(--font-mono)' }}>{clause}</span>
-          <span>·</span>
-          <span>{category}</span>
-        </div>
-      </div>
-      <p style={{ fontSize:12.5, color:'var(--ink-2)', lineHeight:1.6, margin:0 }}>{body}</p>
-    </div>
-  );
-}
 
 function KV({ label, value, mono }) {
   return (

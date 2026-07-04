@@ -224,11 +224,7 @@ function TopbarImpl({ crumbs, onNav, go }) {
         ))}
       </div>
       <div className="topbar-right">
-        <div className="search">
-          {Icons.search}
-          <input placeholder="ค้นหา RFQ, วัสดุ, ผู้ขาย…" />
-          <span className="kbd">⌘K</span>
-        </div>
+        <CommandPalette go={go} />
         <NotificationBell go={go} />
         <UserMenu onNav={onNav} />
       </div>
@@ -238,6 +234,160 @@ function TopbarImpl({ crumbs, onNav, go }) {
 // Memoised so it doesn't re-render when the inner screen state changes
 // (App passes stable crumbs from a module-scope object and a memoised onNav).
 export const Topbar = React.memo(TopbarImpl);
+
+/* ----------------------- Topbar ⌘K command palette ---------------- */
+// Real global search (P3): looks across RFQs, comparisons, contracts, POs,
+// materials, and suppliers; picking a result deep-links via the same
+// localStorage-stash + go() convention the rest of the app uses.
+const SEARCH_SOURCES = [
+  { url: '/api/rfqs',            group: 'RFQ',            screen: 'rfq-confirm',      storeKey: 'rfq.currentId',
+    label: x => `${x.no || ''} · ${x.title || ''}` },
+  { url: '/api/comparisons',     group: 'ใบเปรียบเทียบ',   screen: 'compare-detail',   storeKey: 'cmp.currentId',
+    label: x => `${x.no || ''} · ${x.title || ''}` },
+  { url: '/api/contracts',       group: 'เอกสาร/สัญญา',    screen: 'contract',         storeKey: 'contract.currentId',
+    label: x => `${x.no || ''} · ${x.title || ''}` },
+  { url: '/api/purchase-orders', group: 'ใบสั่งซื้อ',      screen: 'po-detail',        storeKey: 'po.currentId',
+    label: x => `${x.no || ''} · ${x.supplier_name || x.title || ''}` },
+  { url: '/api/materials',       group: 'วัสดุ',           screen: 'pricedb-detail',   storeKey: 'pricedb.currentMaterialId',
+    label: x => `${x.code || ''} · ${x.name || ''}` },
+  { url: '/api/suppliers',       group: 'Supplier',        screen: 'supplierdb-detail', storeKey: 'supplierdb.currentId',
+    label: x => `${x.name || ''}${x.code ? ` · ${x.code}` : ''}` },
+];
+
+const CommandPalette = React.memo(function CommandPalette({ go }) {
+  const [open, setOpen]   = useState(false);
+  const [q, setQ]         = useState('');
+  const [index, setIndex] = useState([]);   // flattened searchable entries
+  const [sel, setSel]     = useState(0);
+  const cacheAt = useRef(0);
+  const inputRef = useRef(null);
+
+  // ⌘K / Ctrl+K opens from anywhere
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setOpen(o => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Load (and cache for 60s) all sources when the palette opens
+  useEffect(() => {
+    if (!open) return;
+    setQ(''); setSel(0);
+    setTimeout(() => inputRef.current?.focus(), 30);
+    if (Date.now() - cacheAt.current < 60_000 && index.length) return;
+    (async () => {
+      try {
+        const results = await Promise.all(SEARCH_SOURCES.map(s =>
+          fetch(s.url).then(r => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] }))
+        ));
+        const flat = [];
+        results.forEach((d, i) => {
+          const src = SEARCH_SOURCES[i];
+          for (const item of (d.items || [])) {
+            const label = src.label(item).trim();
+            if (!label || label === '·') continue;
+            flat.push({ group: src.group, screen: src.screen, storeKey: src.storeKey,
+                        id: item.id, label, lc: label.toLowerCase() });
+          }
+        });
+        setIndex(flat);
+        cacheAt.current = Date.now();
+      } catch { /* palette is best-effort */ }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const hits = useMemoPalette(index, q);
+
+  function pick(hit) {
+    setOpen(false);
+    try { localStorage.setItem(hit.storeKey, hit.id); } catch {}
+    if (go) go(hit.screen);
+  }
+
+  function onKeyDown(e) {
+    if (e.key === 'Escape') setOpen(false);
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setSel(s => Math.min(s + 1, hits.length - 1)); }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setSel(s => Math.max(s - 1, 0)); }
+    else if (e.key === 'Enter' && hits[sel]) pick(hits[sel]);
+  }
+
+  return (
+    <>
+      <div className="search" onClick={() => setOpen(true)} style={{ cursor: 'pointer' }}>
+        {Icons.search}
+        <input placeholder="ค้นหา RFQ, วัสดุ, ผู้ขาย…" readOnly style={{ cursor: 'pointer' }} />
+        <span className="kbd">⌘K</span>
+      </div>
+
+      {open && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(20,18,14,0.4)', zIndex:90,
+                      display:'flex', justifyContent:'center', paddingTop:'12vh' }}
+             onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false); }}>
+          <div style={{ width:'min(560px, 92vw)', maxHeight:'60vh', display:'flex', flexDirection:'column',
+                        background:'var(--surface)', border:'1px solid var(--rule)', borderRadius:12,
+                        boxShadow:'0 24px 64px -12px rgba(20,18,14,0.3)', overflow:'hidden', height:'fit-content' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 18px',
+                          borderBottom:'1px solid var(--rule)' }}>
+              {Icons.search}
+              <input ref={inputRef} value={q} onKeyDown={onKeyDown}
+                onChange={e => { setQ(e.target.value); setSel(0); }}
+                placeholder="พิมพ์เลขที่เอกสาร, ชื่อวัสดุ, ชื่อ supplier…"
+                style={{ flex:1, border:0, outline:0, background:'transparent', fontSize:14.5, fontFamily:'inherit' }} />
+              <span className="kbd">esc</span>
+            </div>
+            <div style={{ overflowY:'auto' }}>
+              {q.trim() === '' ? (
+                <div style={{ padding:'24px 18px', textAlign:'center', color:'var(--ink-3)', fontSize:12.5 }}>
+                  ค้นหาได้ทั้ง RFQ · ใบเปรียบเทียบ · เอกสาร · PO · วัสดุ · Supplier
+                </div>
+              ) : hits.length === 0 ? (
+                <div style={{ padding:'24px 18px', textAlign:'center', color:'var(--ink-3)', fontSize:12.5 }}>
+                  ไม่พบ "{q}"
+                </div>
+              ) : hits.map((h, i) => (
+                <button key={`${h.group}-${h.id}`} onClick={() => pick(h)} onMouseEnter={() => setSel(i)}
+                  style={{ display:'flex', alignItems:'center', gap:12, width:'100%', textAlign:'left',
+                           padding:'10px 18px', border:'none', cursor:'pointer', fontFamily:'inherit',
+                           background: i === sel ? 'var(--teal-soft)' : 'transparent' }}>
+                  <span style={{ fontSize:10, fontWeight:600, color:'var(--ink-3)', width:86, flexShrink:0,
+                                 textTransform:'uppercase', letterSpacing:0.04 }}>{h.group}</span>
+                  <span style={{ flex:1, fontSize:13.5, color:'var(--ink-1)', overflow:'hidden',
+                                 textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{h.label}</span>
+                  {i === sel && <span className="kbd">↵</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+});
+
+// Filter helper kept outside the component body for clarity: substring match,
+// grouped cap (max 5 per group) so one noisy source can't bury the rest.
+function useMemoPalette(index, q) {
+  return React.useMemo(() => {
+    const v = q.trim().toLowerCase();
+    if (!v) return [];
+    const perGroup = {};
+    const out = [];
+    for (const item of index) {
+      if (!item.lc.includes(v)) continue;
+      perGroup[item.group] = (perGroup[item.group] || 0) + 1;
+      if (perGroup[item.group] > 5) continue;
+      out.push(item);
+      if (out.length >= 30) break;
+    }
+    return out;
+  }, [index, q]);
+}
 
 /* ----------------------- Topbar notification bell ----------------- */
 // Real alerts derived from live data (same builder as the dashboard todos).

@@ -348,3 +348,17 @@ alter table contracts add column if not exists retention_released_by text defaul
 
 -- In-app approval chain for comparisons (P2): [{level, role_code, role_name, by_name, by_email, at}]
 alter table comparisons add column if not exists approvals_json jsonb default '[]';
+
+-- Goods receipt + billing/payment on purchase orders (P3 Source-to-Pay)
+-- received_json: [{at, by, note, lines:[{code, qty}]}] — one entry per receipt event
+alter table purchase_orders add column if not exists received_json jsonb default '[]';
+alter table purchase_orders add column if not exists invoice_no text default '';
+alter table purchase_orders add column if not exists invoice_date date;
+alter table purchase_orders add column if not exists paid_at date;
+alter table purchase_orders add column if not exists paid_amount numeric default 0;
+alter table purchase_orders add column if not exists payment_ref text default '';
+alter table purchase_orders add column if not exists payment_status text default 'unpaid'
+  check (payment_status in ('unpaid','partial','paid'));
+
+-- Blacklist audit trail on suppliers (P3): [{action:'ban'|'unban', reason, by, at}]
+alter table suppliers add column if not exists blacklist_json jsonb default '[]';

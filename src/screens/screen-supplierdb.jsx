@@ -285,6 +285,14 @@ export function ScreenSupplierDBDetail({ go }) {
     return out;
   }, [sup, matById]);
 
+  // Blacklist audit trail (blacklist_json) — newest first, read-only.
+  const blHistory = useMemo(() => {
+    const list = Array.isArray(sup?.blacklist_json) ? sup.blacklist_json : [];
+    return [...list].sort((a, b) => new Date(b.at) - new Date(a.at));
+  }, [sup]);
+  const isBlacklisted = sup?.status3 === 'Blacklist';
+  const latestBan = blHistory.find(h => h.action === 'ban');
+
   if (loading) {
     return (
       <div className="page">
@@ -304,6 +312,18 @@ export function ScreenSupplierDBDetail({ go }) {
 
       {err && (
         <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:16 }}>{err}</div>
+      )}
+
+      {isBlacklisted && (
+        <div style={{ display:'flex', alignItems:'baseline', gap:10, background:'var(--clay-soft)',
+                      borderLeft:'3px solid var(--clay)', color:'#6B2D1A',
+                      padding:'12px 16px', borderRadius:6, fontSize:13, marginBottom:20 }}>
+          <strong style={{ whiteSpace:'nowrap' }}>Supplier รายนี้อยู่ในบัญชีดำ (Blacklist)</strong>
+          <span style={{ flex:1 }}>
+            {latestBan?.reason ? `เหตุผล: ${latestBan.reason}` : 'ไม่ระบุเหตุผล'}
+            {latestBan?.at ? ` · ตั้งแต่ ${fmtDate(latestBan.at)}` : ''}
+          </span>
+        </div>
       )}
 
       <div className="page-head" style={{ alignItems:'flex-start' }}>
@@ -389,26 +409,51 @@ export function ScreenSupplierDBDetail({ go }) {
           </table>
         </div>
 
-        {/* RFQ history */}
-        <div className="card" style={{ padding:0 }}>
-          <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--rule)' }}>
-            <h3 className="h-card">RFQ ที่ส่งให้ · {sup?.rfqCount ?? 0} ใบ</h3>
+        <div style={{ display:'grid', gap:32 }}>
+          {/* RFQ history */}
+          <div className="card" style={{ padding:0 }}>
+            <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--rule)' }}>
+              <h3 className="h-card">RFQ ที่ส่งให้ · {sup?.rfqCount ?? 0} ใบ</h3>
+            </div>
+            {(!sup || sup.rfqList.length === 0) ? (
+              <div style={{ padding:32, textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
+                ยังไม่เคยส่ง RFQ ให้ Supplier นี้
+              </div>
+            ) : sup.rfqList.map((r, i) => (
+              <div key={r.id} onClick={() => { try { localStorage.setItem('rfq.currentId', r.id); } catch {} go('rfq-confirm'); }}
+                style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 20px',
+                         borderTop: i ? '1px solid var(--rule)' : 'none', cursor:'pointer' }}>
+                <span className="font-mono" style={{ fontSize:11.5, fontWeight:500, color:'var(--ink-2)' }}>{r.no}</span>
+                <span style={{ flex:1, fontSize:12.5, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.title}</span>
+                <span style={{ fontSize:11, color:'var(--ink-3)' }}>
+                  {{ draft:'ร่าง', sent:'ส่งแล้ว', received:'ได้ Quote', closed:'ปิดงาน', cancelled:'ยกเลิก' }[r.status] || r.status}
+                </span>
+              </div>
+            ))}
           </div>
-          {(!sup || sup.rfqList.length === 0) ? (
-            <div style={{ padding:32, textAlign:'center', color:'var(--ink-3)', fontSize:13 }}>
-              ยังไม่เคยส่ง RFQ ให้ Supplier นี้
+
+          {/* Blacklist audit trail — read-only, visible to everyone */}
+          {blHistory.length > 0 && (
+            <div className="card" style={{ padding:0 }}>
+              <div style={{ padding:'16px 24px', borderBottom:'1px solid var(--rule)' }}>
+                <h3 className="h-card">ประวัติ Blacklist · {blHistory.length} รายการ</h3>
+              </div>
+              {blHistory.map((h, i) => (
+                <div key={i} style={{ padding:'12px 20px', borderTop: i ? '1px solid var(--rule)' : 'none' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                    <span style={{ display:'inline-block', padding:'1px 8px', borderRadius:3, fontSize:10.5, fontWeight:600,
+                      background: h.action === 'ban' ? 'var(--clay-soft)' : 'var(--moss-soft)',
+                      color: h.action === 'ban' ? '#6B2D1A' : '#2F4A1A' }}>
+                      {h.action === 'ban' ? 'แบน' : 'ปลดแบน'}
+                    </span>
+                    <span style={{ fontSize:11.5, color:'var(--ink-3)', marginLeft:'auto' }}>{fmtDate(h.at)}</span>
+                  </div>
+                  <div style={{ fontSize:12.5, color:'var(--ink-2)' }}>{h.reason || '—'}</div>
+                  <div style={{ fontSize:11, color:'var(--ink-4)', marginTop:2 }}>โดย {h.by || '—'}</div>
+                </div>
+              ))}
             </div>
-          ) : sup.rfqList.map((r, i) => (
-            <div key={r.id} onClick={() => { try { localStorage.setItem('rfq.currentId', r.id); } catch {} go('rfq-confirm'); }}
-              style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 20px',
-                       borderTop: i ? '1px solid var(--rule)' : 'none', cursor:'pointer' }}>
-              <span className="font-mono" style={{ fontSize:11.5, fontWeight:500, color:'var(--ink-2)' }}>{r.no}</span>
-              <span style={{ flex:1, fontSize:12.5, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{r.title}</span>
-              <span style={{ fontSize:11, color:'var(--ink-3)' }}>
-                {{ draft:'ร่าง', sent:'ส่งแล้ว', received:'ได้ Quote', closed:'ปิดงาน', cancelled:'ยกเลิก' }[r.status] || r.status}
-              </span>
-            </div>
-          ))}
+          )}
         </div>
       </div>
     </div>

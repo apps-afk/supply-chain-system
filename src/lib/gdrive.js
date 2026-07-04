@@ -45,6 +45,7 @@ export const CATEGORIES = {
   compare_report:   'รายงานเปรียบเทียบ (Compare Reports)',
   supplier_doc:     'เอกสารผู้ขาย (Supplier KYC)',
   price_reference:  'อ้างอิงราคา (Price References)',
+  po_invoice:       'บิล/ใบแจ้งหนี้ (PO Invoices)',
 };
 
 async function findOrCreateSubfolder(label) {

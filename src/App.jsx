@@ -39,7 +39,6 @@ const ScreenSettingsMaterialSubCategories  = dynamic(() => import('./screens/scr
 const ScreenSettingsSubcontracts   = dynamic(() => import('./screens/screen-settings-subcontracts').then(m => ({ default: m.ScreenSettingsSubcontracts })), { loading: LoadingPage });
 const ScreenSettingsContractTypes  = dynamic(() => import('./screens/screen-settings-contract-types').then(m => ({ default: m.ScreenSettingsContractTypes })), { loading: LoadingPage });
 const ScreenSettingsUnits          = dynamic(() => import('./screens/screen-settings-units').then(m => ({ default: m.ScreenSettingsUnits })), { loading: LoadingPage });
-const ScreenSettingsUsers          = dynamic(() => import('./screens/screen-settings-users').then(m => ({ default: m.ScreenSettingsUsers })), { loading: LoadingPage });
 const ScreenSettingsApprovalRoles  = dynamic(() => import('./screens/screen-settings-approval-roles').then(m => ({ default: m.ScreenSettingsApprovalRoles })), { loading: LoadingPage });
 const ScreenSettingsAccount        = dynamic(() => import('./screens/screen-settings-account').then(m => ({ default: m.ScreenSettingsAccount })), { loading: LoadingPage });
 const ScreenSettingsTeam           = dynamic(() => import('./screens/screen-settings-team').then(m => ({ default: m.ScreenSettingsTeam })), { loading: LoadingPage });
@@ -72,7 +71,6 @@ const CRUMBS = {
   'settings-subcontracts':   ['ตั้งค่า', 'ข้อมูลหลัก', 'งานจ้างเหมา'],
   'settings-contract-types': ['ตั้งค่า', 'ข้อมูลหลัก', 'ประเภทเอกสาร'],
   'settings-units':          ['ตั้งค่า', 'ข้อมูลหลัก', 'หน่วยนับ'],
-  'settings-users':          ['ตั้งค่า', 'ข้อมูลหลัก', 'ผู้ใช้งาน'],
   'settings-approval-roles': ['ตั้งค่า', 'ข้อมูลหลัก', 'ตำแหน่งผู้อนุมัติ'],
   'settings-account':        ['ตั้งค่า', 'บัญชีของฉัน'],
   'settings-team':           ['ตั้งค่า', 'ทีมงานและสิทธิ์'],
@@ -106,7 +104,6 @@ const ACTIVE_NAV = {
   'settings-subcontracts':   'subcontracts',
   'settings-contract-types': 'contract-types',
   'settings-units':          'units',
-  'settings-users':          'users',
   'settings-approval-roles': 'approval-roles',
   'settings-account':        'account',
   'settings-team':           'team',
@@ -175,7 +172,6 @@ export default function App() {
       case 'settings-subcontracts':   return <ScreenSettingsSubcontracts go={go} />;
       case 'settings-contract-types': return <ScreenSettingsContractTypes go={go} />;
       case 'settings-units':          return <ScreenSettingsUnits go={go} />;
-      case 'settings-users':          return <ScreenSettingsUsers go={go} />;
       case 'settings-approval-roles': return <ScreenSettingsApprovalRoles go={go} />;
       case 'settings-account':        return <ScreenSettingsAccount />;
       case 'settings-team':           return <ScreenSettingsTeam />;
@@ -206,7 +202,6 @@ export default function App() {
       'subcontracts':   'settings-subcontracts',
       'contract-types': 'settings-contract-types',
       'units':          'settings-units',
-      'users':          'settings-users',
       'approval-roles': 'settings-approval-roles',
       'account':        'settings-account',
       'team':           'settings-team',
