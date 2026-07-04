@@ -52,6 +52,22 @@ const DB_STATUS_LABEL = {
   terminated: 'ยกเลิก',
 };
 
+// Lifecycle chips for statuses past the review pipeline — muted gray for
+// expired, clay for terminated (same danger accent as delete actions).
+const DB_STATUS_CHIP = {
+  expired:    { bg:'var(--paper-2)', fg:'var(--ink-3)', dot:'var(--ink-4)', label: DB_STATUS_LABEL.expired },
+  terminated: { bg:'#FDE8E4',        fg:'#8B2A1A',      dot:'var(--clay)',  label: DB_STATUS_LABEL.terminated },
+};
+
+// Chip style for a raw DB status — lifecycle chip first, then the workflow
+// bucket chip, then a neutral fallback.
+function statusChip(status) {
+  if (DB_STATUS_CHIP[status]) return DB_STATUS_CHIP[status];
+  const bucket = DB_TO_BUCKET[status];
+  if (bucket && CT_STATUS[bucket]) return CT_STATUS[bucket];
+  return { bg:'var(--paper-2)', fg:'var(--ink-3)', dot:'var(--ink-4)', label: DB_STATUS_LABEL[status] || status || '—' };
+}
+
 // Manual review checklist — สิ่งที่ฝ่ายจัดซื้อต้องตรวจก่อนส่งต่อ
 const REVIEW_CHECKLIST = [
   { key:'party',     label:'คู่สัญญาถูกต้อง (ชื่อ Supplier ตรงกับเอกสาร)' },
@@ -117,6 +133,33 @@ function retentionStatus(contract) {
   return { state, releaseDate: release, daysLeft };
 }
 
+/**
+ * Parse contracts.notes — the column holds either legacy free text (memo)
+ * or an RFQ-style JSON payload:
+ *   { workflow: { phase, checks, legal:{to,note,sentAt,by} }, memo:'<free text>' }
+ * Plain-text / unparseable notes are treated as memo and never overwritten
+ * with raw JSON on screen.
+ * Returns { workflow: object|null, memo: string, payload: object|null }.
+ */
+function parseContractNotes(notes) {
+  if (!notes) return { workflow: null, memo: '', payload: null };
+  try {
+    const parsed = JSON.parse(notes);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return {
+        workflow: parsed.workflow || null,
+        memo: typeof parsed.memo === 'string' ? parsed.memo : '',
+        payload: parsed,
+      };
+    }
+    // JSON scalar (e.g. a bare quoted string) — keep the raw text as memo
+    return { workflow: null, memo: String(notes), payload: null };
+  } catch {
+    // Legacy plain-text notes → memo
+    return { workflow: null, memo: String(notes), payload: null };
+  }
+}
+
 function fmtDate(iso) {
   if (!iso) return '—';
   try {
@@ -137,6 +180,7 @@ export function ScreenContractList({ go }) {
   const [err,       setErr]       = useState('');
   const [q, setQ] = useState('');
   const [projectFilter, setProjectFilter] = useState('all');
+  const [statusFilter,  setStatusFilter]  = useState('all');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const { canWrite, isAdmin } = usePermissions();
@@ -250,6 +294,7 @@ export function ScreenContractList({ go }) {
     const v = q.toLowerCase();
     return contracts.filter(c => {
       if (projectFilter !== 'all' && c.project_id !== projectFilter) return false;
+      if (statusFilter  !== 'all' && c.status !== statusFilter) return false;
       if (q) {
         const hit =
           (c.title || '').toLowerCase().includes(v) ||
@@ -267,7 +312,7 @@ export function ScreenContractList({ go }) {
       type_name:     typeById.get(c.type_id)?.name || '',
       amount:        c.amount == null || c.amount === '' ? null : Number(c.amount),
     }));
-  }, [contracts, projectFilter, q, supById, projById, typeById]);
+  }, [contracts, projectFilter, statusFilter, q, supById, projById, typeById]);
 
   // Client-side sort + pagination over the filtered rows (P3 shared helpers)
   const { view, page, pages, setPage, sortKey, sortDir, toggleSort } =
@@ -333,6 +378,26 @@ export function ScreenContractList({ go }) {
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
+        <label style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <span style={{ fontSize:12, color:'var(--ink-3)' }}>สถานะ</span>
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            style={{
+              padding:'6px 28px 6px 10px', borderRadius:6,
+              border:'1px solid var(--rule-2)', fontSize:12.5,
+              background:'var(--surface)', fontFamily:'var(--font-sans)',
+              appearance:'none',
+              backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%236E6859' stroke-width='1.4' stroke-linecap='round'><path d='m3 4.5 3 3 3-3'/></svg>")`,
+              backgroundRepeat:'no-repeat', backgroundPosition:'right 8px center',
+              minWidth:140,
+            }}>
+            <option value="all">— ทุกสถานะ —</option>
+            {Object.keys(DB_STATUS_LABEL).map(s => (
+              <option key={s} value={s}>{DB_STATUS_LABEL[s]}</option>
+            ))}
+          </select>
+        </label>
         <div style={{ marginLeft:'auto', display:'flex', gap:12, alignItems:'center' }}>
           <SettingsSearchBox value={q} onChange={setQ} placeholder="ค้นหาชื่อเอกสาร / คู่สัญญา / โครงการ…" />
           <span style={{ fontSize:12, color:'var(--ink-3)' }}>
@@ -353,6 +418,7 @@ export function ScreenContractList({ go }) {
               <Th sortKey="title" {...sortProps}>ชื่อเอกสาร</Th>
               <Th sortKey="supplier_name" {...sortProps}>คู่สัญญา</Th>
               <Th sortKey="amount" {...sortProps} className="num-col">มูลค่าสัญญา</Th>
+              <Th sortKey="status" {...sortProps}>สถานะ</Th>
               <Th sortKey="start_date" {...sortProps}>วันเริ่มต้น</Th>
               <Th sortKey="end_date" {...sortProps}>วันสิ้นสุด</Th>
               <th>ระยะเวลารับประกัน</th>
@@ -363,9 +429,9 @@ export function ScreenContractList({ go }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
+              <tr><td colSpan={11} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={10} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
+              <tr><td colSpan={11} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>
                 ยังไม่มีข้อมูล
               </td></tr>
             ) : view.map(c => {
@@ -406,6 +472,21 @@ export function ScreenContractList({ go }) {
                     </span>
                   </td>
                   <td className="num-col num" style={{ fontWeight:500 }}>{c.amount != null ? money(c.amount) : '—'}</td>
+                  <td>
+                    {(() => {
+                      const st = statusChip(c.status);
+                      return (
+                        <span style={{
+                          display:'inline-flex', alignItems:'center', gap:6,
+                          fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
+                          background: st.bg, color: st.fg, whiteSpace:'nowrap',
+                        }}>
+                          <span style={{ width:6, height:6, borderRadius:999, background: st.dot }} />
+                          {st.label}
+                        </span>
+                      );
+                    })()}
+                  </td>
                   <td style={{ fontSize:12, color:'var(--ink-3)' }}>
                     {c.start_date ? fmtDate(c.start_date) : '—'}
                   </td>
@@ -764,16 +845,122 @@ export function ScreenContract({ go }) {
   const [attachments, setAttachments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const { canWrite, isAdmin } = usePermissions();
+  const { canWrite, isAdmin, user } = usePermissions();
 
   // phase: 'Uploaded' | 'Reviewing' | 'Reviewed' | 'Legal' | 'Final'
   const [phase, setPhase] = useState('Uploaded');
   const [legalOpen,   setLegalOpen]   = useState(false);
   const [finalOpen,   setFinalOpen]   = useState(false);
-  // Manual document-review checklist (client-side, per session) — ฝ่ายจัดซื้อ
+  // Manual document-review checklist — persisted into contracts.notes as
+  // JSON (RFQ-style payload) so it survives reloads. ฝ่ายจัดซื้อ
   // ติ๊กครบทุกข้อก่อนส่งต่อขั้นถัดไป
   const [checks, setChecks] = useState({});
+  // Send-to-legal record: { to, note, sentAt, by } — persisted with workflow
+  const [legal, setLegal] = useState(null);
+  // Free-text part of contracts.notes (legacy plain text or payload.memo)
+  const [memo, setMemo] = useState('');
   const allChecked = REVIEW_CHECKLIST.every(item => checks[item.key]);
+
+  // Hydrate phase/checks/legal/memo from a contract row. JSON notes with a
+  // .workflow payload win; legacy plain-text notes become memo and the phase
+  // falls back to the DB status mapping.
+  function hydrateFromContract(c) {
+    const { workflow, memo: m } = parseContractNotes(c?.notes);
+    setMemo(m);
+    if (workflow) {
+      setPhase(CT_STATUS[workflow.phase] ? workflow.phase : (DB_TO_BUCKET[c?.status] || 'Uploaded'));
+      setChecks(workflow.checks || {});
+      setLegal(workflow.legal || null);
+    } else {
+      setPhase(DB_TO_BUCKET[c?.status] || 'Uploaded');
+      setChecks({});
+      setLegal(null);
+    }
+  }
+
+  // Persist the review workflow into contracts.notes as JSON:
+  //   { workflow: { phase, checks, legal }, memo:'<free text>' }
+  // CLOBBER-SAFE (same pattern as screen-rfq.jsx persistConditions): re-fetch
+  // the row's CURRENT notes right before the PATCH and merge — a save from
+  // another tab never gets overwritten, and legacy plain-text notes are kept
+  // as memo instead of being wiped.
+  // `patch`           — partial workflow: { phase?, checks?, legal? }
+  // `opts.appendMemo` — extra line appended to the memo free text
+  // `opts.fields`     — extra contract columns to PATCH in the same call
+  async function persistWorkflow(patch = {}, opts = {}) {
+    if (!contract) return { ok:false, error:'ไม่มีสัญญา' };
+    const wf = { phase, checks, legal, ...patch };
+    let base = {};        // preserve any other top-level keys in the payload
+    let memoNow = memo;
+    try {
+      const rNow = await fetch('/api/contracts');
+      if (rNow.ok) {
+        const dNow = await rNow.json();
+        const rowNow = (dNow.items || []).find(x => x.id === contract.id);
+        if (rowNow) {
+          const cur = parseContractNotes(rowNow.notes);
+          memoNow = cur.memo;
+          if (cur.payload) base = cur.payload;
+        }
+      }
+    } catch { /* network hiccup — fall back to local snapshot */ }
+    if (opts.appendMemo) memoNow = memoNow ? `${memoNow}\n${opts.appendMemo}` : opts.appendMemo;
+    const nextNotes = JSON.stringify({ ...base, workflow: wf, memo: memoNow });
+    try {
+      const r = await fetch('/api/contracts', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: contract.id, notes: nextNotes, ...(opts.fields || {}) }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        return { ok:false, error: d.error || 'บันทึกไม่สำเร็จ' };
+      }
+      setMemo(memoNow);
+      const rowPatch = { notes: nextNotes, ...(opts.fields || {}) };
+      setContract(c => (c && c.id === contract.id) ? { ...c, ...rowPatch } : c);
+      setAllContracts(cs => cs.map(x => x.id === contract.id ? { ...x, ...rowPatch } : x));
+      return { ok:true };
+    } catch {
+      return { ok:false, error:'เครือข่ายขัดข้อง' };
+    }
+  }
+
+  // Advance the workflow phase optimistically, then persist into notes.
+  async function advancePhase(nextPhase, extra) {
+    setPhase(nextPhase);
+    const r = await persistWorkflow({ phase: nextPhase, ...(extra || {}) });
+    if (!r.ok) alert(`บันทึกสถานะไม่สำเร็จ: ${r.error || 'ไม่ทราบสาเหตุ'}`);
+  }
+
+  // ===== Lifecycle actions (active → expired / terminated) =====
+
+  async function markExpired() {
+    if (!contract) return;
+    if (!confirm(`บันทึกว่าสัญญา "${contract.title || contract.no}" หมดอายุแล้ว?`)) return;
+    try {
+      const r = await fetch('/api/contracts', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: contract.id, status: 'expired' }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); alert(`บันทึกไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`); return; }
+      setContract(c => c ? { ...c, status: 'expired' } : c);
+      setAllContracts(cs => cs.map(x => x.id === contract.id ? { ...x, status: 'expired' } : x));
+    } catch (e) {
+      alert(`เครือข่ายขัดข้อง: ${e.message}`);
+    }
+  }
+
+  async function terminateContract() {
+    if (!contract) return;
+    const reason = prompt(`เหตุผลการยกเลิกสัญญา "${contract.title || contract.no}" (จำเป็นต้องระบุ):`);
+    if (reason == null) return;
+    if (!reason.trim()) { alert('กรุณาระบุเหตุผลการยกเลิกสัญญา'); return; }
+    if (!confirm(`ยืนยันยกเลิกสัญญา "${contract.title || contract.no}"?\n\nเหตุผล: ${reason.trim()}`)) return;
+    const stamp = `[ยกเลิกสัญญา ${fmtDate(new Date().toISOString())}${user?.email ? ` โดย ${user.email}` : ''}] ${reason.trim()}`;
+    // Single PATCH: status + reason appended into the notes memo (clobber-safe)
+    const r = await persistWorkflow({}, { appendMemo: stamp, fields: { status: 'terminated' } });
+    if (!r.ok) alert(`บันทึกไม่สำเร็จ: ${r.error || 'ไม่ทราบสาเหตุ'}`);
+  }
 
   async function loadAttachments(contractId) {
     if (!contractId) return;
@@ -846,8 +1033,9 @@ export function ScreenContract({ go }) {
         setSuppliers(dS.items || []);
         setProjects(dP.items  || []);
         if (picked) {
-          // map DB status to a starting phase
-          setPhase(DB_TO_BUCKET[picked.status] || 'Uploaded');
+          // Hydrate workflow (phase/checks/legal) from the notes JSON payload;
+          // legacy plain-text notes fall back to the DB-status mapping.
+          hydrateFromContract(picked);
           // Reuse the grouped attachments — saves a redundant round-trip
           // (we already fetched all contract attachments with limit=500 above).
           setAttachments(grouped[picked.id] || []);
@@ -868,7 +1056,11 @@ export function ScreenContract({ go }) {
     () => projects.find(p => p.id === contract?.project_id),
     [projects, contract?.project_id]
   );
-  const sp = CT_STATUS[phase] || CT_STATUS.Uploaded;
+  // Header chip: lifecycle statuses (expired/terminated) win over the
+  // review-phase chip; otherwise show the current workflow phase.
+  const sp = (contract && DB_STATUS_CHIP[contract.status])
+    ? DB_STATUS_CHIP[contract.status]
+    : (CT_STATUS[phase] || CT_STATUS.Uploaded);
 
   async function uploadFinalFile(file) {
     if (!contract || !file) return { ok:false, error:'ไม่มีสัญญาหรือไฟล์' };
@@ -949,12 +1141,16 @@ export function ScreenContract({ go }) {
         )}
       </div>
 
-      {/* If contract is already 'active' (skipped review or workflow done),
-          show a simple archive view instead of the review workflow stepper. */}
-      {contract && contract.status === 'active' && (
+      {/* If contract already left the review pipeline (active, or lifecycle
+          statuses expired/terminated), show a simple archive view instead of
+          the review workflow stepper. */}
+      {contract && ['active', 'expired', 'terminated'].includes(contract.status) && (
         <ActiveContractView
           contract={contract}
           attachments={attachments}
+          memo={memo}
+          onMarkExpired={markExpired}
+          onTerminate={terminateContract}
           onUploadAddon={async (file) => {
             const fd = new FormData();
             fd.append('file', file);
@@ -972,7 +1168,7 @@ export function ScreenContract({ go }) {
       )}
 
       {/* Review workflow only shown when status is still 'draft' */}
-      {contract && contract.status !== 'active' && (
+      {contract && !['active', 'expired', 'terminated'].includes(contract.status) && (
       <>
       {/* Workflow stepper — horizontal */}
       <div style={{ marginBottom:32, padding:'18px 22px', background:'var(--surface-2)', border:'1px solid var(--rule)', borderRadius:8 }}>
@@ -1066,7 +1262,7 @@ export function ScreenContract({ go }) {
                     ฝ่ายจัดซื้อตรวจคู่สัญญา วงเงิน เงื่อนไขค้ำประกัน และวันที่ ตามเช็คลิสต์ ก่อนส่งฝ่ายกฎหมาย
                   </div>
                   {canWrite && (
-                    <button className="btn primary" onClick={() => setPhase('Reviewing')} disabled={!contract}>
+                    <button className="btn primary" onClick={() => advancePhase('Reviewing')} disabled={!contract}>
                       {Icons.check} เริ่มตรวจสอบเอกสาร
                     </button>
                   )}
@@ -1108,6 +1304,9 @@ export function ScreenContract({ go }) {
                         if (!r.ok) { alert(`บันทึกไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`); return; }
                         setContract(d.item || { ...contract, status:'active', signed_at: new Date().toISOString().slice(0,10) });
                         setPhase('Final');
+                        // Record the skip in the notes workflow too, so a
+                        // reload shows the same terminal phase.
+                        persistWorkflow({ phase:'Final' });
                       } catch (e) {
                         alert(`เครือข่ายขัดข้อง: ${e.message}`);
                       }
@@ -1151,7 +1350,13 @@ export function ScreenContract({ go }) {
                       <input
                         type="checkbox"
                         checked={!!checks[item.key]}
-                        onChange={e => setChecks(cs => ({ ...cs, [item.key]: e.target.checked }))}
+                        onChange={e => {
+                          const next = { ...checks, [item.key]: e.target.checked };
+                          setChecks(next);
+                          // Save each tick into the notes payload so the
+                          // checklist survives a reload.
+                          persistWorkflow({ checks: next });
+                        }}
                         style={{ width:16, height:16, accentColor:'var(--teal)', flexShrink:0 }}
                       />
                     ) : (
@@ -1168,7 +1373,7 @@ export function ScreenContract({ go }) {
                   <button
                     className="btn primary"
                     disabled={!allChecked}
-                    onClick={() => setPhase('Reviewed')}
+                    onClick={() => advancePhase('Reviewed')}
                     style={{ opacity: allChecked ? 1 : 0.5, cursor: allChecked ? 'pointer' : 'not-allowed' }}
                   >
                     {Icons.check} บันทึกผลตรวจ · ไปขั้นถัดไป
@@ -1188,6 +1393,7 @@ export function ScreenContract({ go }) {
             <ReviewResultPanel
               phase={phase}
               checks={checks}
+              legal={legal}
               onSendToLegal={() => setLegalOpen(true)}
               onUploadFinal={() => setFinalOpen(true)}
             />
@@ -1204,6 +1410,12 @@ export function ScreenContract({ go }) {
             <KV label="เซ็นเมื่อ" value={fmtDate(contract?.signed_at)} />
             <KV label="ระยะเวลา" value={contract?.start_date ? `${fmtDate(contract.start_date)} – ${fmtDate(contract.end_date)}` : '—'} />
             <KV label="รับประกันผลงาน" value={contract?.warranty || '—'} />
+            {memo && (
+              <div style={{ marginTop:12, padding:'10px 12px', background:'var(--surface-2)', borderRadius:6, fontSize:12, color:'var(--ink-2)', whiteSpace:'pre-wrap', lineHeight:1.6 }}>
+                <div className="eyebrow" style={{ marginBottom:6 }}>บันทึก</div>
+                {memo}
+              </div>
+            )}
           </div>
 
           <div className="card">
@@ -1242,13 +1454,20 @@ export function ScreenContract({ go }) {
 
       {legalOpen && (
         <SendToLegalModal
-          onSend={() => { setLegalOpen(false); setPhase('Legal'); }}
+          onSend={({ to, note }) => {
+            setLegalOpen(false);
+            // Record who/when the draft went to legal — persisted in the
+            // notes workflow payload so it survives reloads.
+            const rec = { to, note, sentAt: new Date().toISOString(), by: user?.email || '' };
+            setLegal(rec);
+            advancePhase('Legal', { legal: rec });
+          }}
           onClose={() => setLegalOpen(false)} />
       )}
       {finalOpen && (
         <UploadFinalModal
           onUpload={uploadFinalFile}
-          onDone={() => { setFinalOpen(false); setPhase('Final'); }}
+          onDone={() => { setFinalOpen(false); advancePhase('Final'); }}
           onClose={() => setFinalOpen(false)} />
       )}
 
@@ -1264,8 +1483,7 @@ export function ScreenContract({ go }) {
           onSelect={(c) => {
             try { window.localStorage.setItem('contract.currentId', c.id); } catch {}
             setContract(c);
-            setPhase(DB_TO_BUCKET[c.status] || 'Uploaded');
-            setChecks({});   // fresh checklist per contract
+            hydrateFromContract(c);   // per-contract workflow from notes
             setAttachments(allAttachments[c.id] || []);
             if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'auto' });
           }}
@@ -1328,8 +1546,9 @@ function ContractArchive({ contracts, currentId, attachmentsByContract, supplier
           </thead>
           <tbody>
             {contracts.map(c => {
-              const bucket = DB_TO_BUCKET[c.status];
-              const sp = bucket ? CT_STATUS[bucket] : { bg:'var(--paper-2)', fg:'var(--ink-3)', dot:'var(--ink-4)', label: DB_STATUS_LABEL[c.status] || c.status };
+              // Lifecycle statuses (expired/terminated) get their own chip;
+              // pipeline statuses map through the workflow bucket.
+              const sp = statusChip(c.status);
               const atts = attachmentsByContract[c.id] || [];
               const latest = atts[0];
               const isCurrent = c.id === currentId;
@@ -1392,11 +1611,12 @@ function ContractArchive({ contracts, currentId, attachmentsByContract, supplier
 }
 
 /* ----------------------------------------------------------
-   ActiveContractView — shown when contract.status === 'active'
-   (either skipped review at upload, or completed full workflow).
+   ActiveContractView — shown when the contract left the review pipeline:
+   status 'active' (skipped review at upload, or completed full workflow)
+   as well as lifecycle statuses 'expired' / 'terminated'.
    Clean archive view: file list + simple actions. No phase stepper.
    ---------------------------------------------------------- */
-function ActiveContractView({ contract, attachments, onUploadAddon }) {
+function ActiveContractView({ contract, attachments, memo, onUploadAddon, onMarkExpired, onTerminate }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const inputRef = React.useRef(null);
@@ -1484,6 +1704,26 @@ function ActiveContractView({ contract, attachments, onUploadAddon }) {
               {busy && <div style={{ fontSize:12, color:'var(--ink-3)', marginTop:8 }}>กำลังอัปโหลด…</div>}
             </>
           )}
+
+          {canWrite && contract.status === 'active' && (
+            <>
+              <hr className="hr" style={{ margin:'22px 0 18px' }} />
+
+              <div className="eyebrow" style={{ marginBottom:8 }}>สถานะสัญญา</div>
+              <p style={{ fontSize:12.5, color:'var(--ink-3)', margin:'0 0 12px' }}>
+                เมื่อสัญญาสิ้นสุดตามกำหนด บันทึกเป็น "หมดอายุ" — หากต้องยุติก่อนกำหนด กด "ยกเลิกสัญญา" (ต้องระบุเหตุผล)
+              </p>
+              <div style={{ display:'flex', gap:8 }}>
+                <button className="btn" onClick={onMarkExpired}>
+                  หมดอายุ
+                </button>
+                <button className="btn" onClick={onTerminate}
+                  style={{ color:'var(--clay)', borderColor:'#F5C0B4' }}>
+                  ยกเลิกสัญญา
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1491,23 +1731,33 @@ function ActiveContractView({ contract, attachments, onUploadAddon }) {
         <div className="card" style={{ padding:24 }}>
           <div className="eyebrow" style={{ marginBottom:10 }}>ข้อมูลสัญญา</div>
           <KV label="เลขที่สัญญา" value={contract.no} mono />
-          <KV label="สถานะ" value={
-            <span style={{ display:'inline-block', padding:'2px 10px', borderRadius:999,
-              background:'#DEE7E3', color:'#1F4D40', fontSize:11, fontWeight:500 }}>
-              ใช้งานอยู่
-            </span>
-          } />
+          <KV label="สถานะ" value={(() => {
+            const st = DB_STATUS_CHIP[contract.status]
+              || { bg:'#DEE7E3', fg:'#1F4D40', label:'ใช้งานอยู่' };
+            return (
+              <span style={{ display:'inline-block', padding:'2px 10px', borderRadius:999,
+                background: st.bg, color: st.fg, fontSize:11, fontWeight:500 }}>
+                {st.label}
+              </span>
+            );
+          })()} />
           <KV label="วันเซ็น" value={contract.signed_at ? fmtDate(contract.signed_at) : '—'} />
           <KV label="เริ่มสัญญา" value={contract.start_date ? fmtDate(contract.start_date) : '—'} />
           <KV label="สิ้นสุดสัญญา" value={contract.end_date ? fmtDate(contract.end_date) : '—'} />
           <KV label="รับประกันผลงาน" value={contract.warranty || '—'} />
+          {memo && (
+            <div style={{ marginTop:12, padding:'10px 12px', background:'var(--surface-2)', borderRadius:6, fontSize:12, color:'var(--ink-2)', whiteSpace:'pre-wrap', lineHeight:1.6 }}>
+              <div className="eyebrow" style={{ marginBottom:6 }}>บันทึก</div>
+              {memo}
+            </div>
+          )}
         </div>
       </aside>
     </div>
   );
 }
 
-function ReviewResultPanel({ phase, checks, onSendToLegal, onUploadFinal }) {
+function ReviewResultPanel({ phase, checks, legal, onSendToLegal, onUploadFinal }) {
   const { canWrite } = usePermissions();
 
   return (
@@ -1537,7 +1787,15 @@ function ReviewResultPanel({ phase, checks, onSendToLegal, onUploadFinal }) {
         {phase === 'Legal' && (
           <>
             <div style={{ flex:1, padding:'8px 14px', background:'var(--chip-recv-bg)', color:'var(--chip-recv-fg)', borderRadius:6, fontSize:12, display:'flex', alignItems:'center', gap:8 }}>
-              <span>{Icons.clock}</span> รอผลตรวจจากฝ่ายกฎหมาย
+              <span>{Icons.clock}</span>
+              <span>
+                รอผลตรวจจากฝ่ายกฎหมาย
+                {legal?.sentAt && (
+                  <span style={{ display:'block', fontSize:11, marginTop:2, opacity:0.85 }}>
+                    ส่งให้ {legal.to || '—'} เมื่อ {fmtDate(legal.sentAt)}{legal.by ? ` · โดย ${legal.by}` : ''}
+                  </span>
+                )}
+              </span>
             </div>
             {canWrite && (
               <button className="btn primary" onClick={onUploadFinal}>
@@ -1597,7 +1855,7 @@ function SendToLegalModal({ onSend, onClose }) {
         </div>
         <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', background:'var(--surface-2)', display:'flex', justifyContent:'flex-end', gap:8 }}>
           <button className="btn ghost" onClick={onClose}>ยกเลิก</button>
-          <button className="btn primary" onClick={onSend}>
+          <button className="btn primary" onClick={() => onSend({ to: to.trim(), note: note.trim() })}>
             {Icons.external} ส่งให้ฝ่ายกฎหมาย
           </button>
         </div>
