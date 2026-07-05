@@ -1,0 +1,70 @@
+name: Weekly Data Backup
+
+# Self-serve automated backup: dumps every domain table to one JSON file and
+# stores it as a workflow artifact (kept 90 days). Uses the same Supabase
+# secrets the deploy already has — no new credentials needed.
+# Manual run: Actions → Weekly Data Backup → Run workflow.
+
+on:
+  schedule:
+    - cron: '0 20 * * 0'   # Sunday 20:00 UTC = Monday 03:00 Asia/Bangkok
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump all tables
+        env:
+          URL: ${{ secrets.SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -euo pipefail
+          TABLES="workspace_settings units project_types projects suppliers materials \
+            material_main_categories material_sub_categories subcontracts subcontract_categories \
+            contract_types approval_roles rfqs rfq_items price_points comparisons contracts \
+            purchase_orders file_attachments dsar_requests"
+
+          STAMP=$(date -u +%Y-%m-%d)
+          OUT="backup-$STAMP.json"
+          echo "{\"exported_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"tables\":{" > "$OUT"
+
+          FIRST=1
+          fetch_table () {
+            local t="$1" select="$2"
+            local CODE
+            CODE=$(curl -sS -o /tmp/t.json -w "%{http_code}" \
+              "$URL/rest/v1/$t?select=$select" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY" \
+              -H "Prefer: count=exact")
+            if [ "$CODE" -ge 400 ]; then
+              echo "::warning::table $t returned HTTP $CODE"
+              echo '[]' > /tmp/t.json
+            fi
+            [ $FIRST -eq 0 ] && echo "," >> "$OUT"
+            FIRST=0
+            printf '"%s":' "$t" >> "$OUT"
+            cat /tmp/t.json >> "$OUT"
+            echo "  $t: $(python3 -c "import json;print(len(json.load(open('/tmp/t.json'))))" 2>/dev/null || echo '?') rows"
+          }
+
+          for t in $TABLES; do fetch_table "$t" "*"; done
+          # users WITHOUT credentials — a backup must never carry password hashes
+          fetch_table "users" "id,email,name,phone,role,verified,created_at,last_login"
+          # recent audit trail (bounded)
+          FIRST=0
+          echo "," >> "$OUT"
+          printf '"audit_log":' >> "$OUT"
+          curl -sS "$URL/rest/v1/audit_log?select=*&order=timestamp.desc&limit=5000" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY" >> "$OUT"
+
+          echo "}}" >> "$OUT"
+          python3 -m json.tool "$OUT" > /dev/null && echo "✓ backup JSON is valid ($(du -h "$OUT" | cut -f1))"
+          echo "FILE=$OUT" >> $GITHUB_ENV
+
+      - name: Store as artifact (90 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: supplychain-backup-${{ github.run_id }}
+          path: ${{ env.FILE }}
+          retention-days: 90
