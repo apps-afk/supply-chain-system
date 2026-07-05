@@ -596,7 +596,9 @@ export function ScreenPODetail({ go }) {
       });
       const d = await r.json();
       if (!r.ok) setErr(d.error || 'บันทึกไม่สำเร็จ');
-      else setPo(p => ({ ...p, ...patch }));
+      // Prefer the server row so client shows the server-derived payment_status
+      // / clamped paid_amount; fall back to a local merge if it's absent.
+      else setPo(p => (d.item ? { ...p, ...d.item } : { ...p, ...patch }));
     } catch { setErr('เครือข่ายขัดข้อง'); }
     setBusy(false);
   }

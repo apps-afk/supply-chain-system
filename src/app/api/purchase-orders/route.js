@@ -24,19 +24,22 @@ function guardMutation(session, body, current, kind) {
     }
   }
 
-  // Payment sanity: paid_amount within [0, amount]; payment_status is derived,
-  // never trusted from the client.
+  // Payment sanity: reject only a negative/NaN amount. We deliberately do NOT
+  // cap paid_amount at the PO value — the recorded amount legitimately exceeds
+  // the net PO when it includes VAT (7%) or fees, and a zero-amount service PO
+  // still gets real payments. payment_status is DERIVED server-side (never
+  // trusted from the client); every payment write is audited.
   if (body.paid_amount !== undefined || body.payment_status !== undefined) {
     const amount = Number(current.amount) || 0;
-    let paid = body.paid_amount !== undefined ? Number(body.paid_amount) : (Number(current.paid_amount) || 0);
+    const paid = body.paid_amount !== undefined ? Number(body.paid_amount) : (Number(current.paid_amount) || 0);
     if (!Number.isFinite(paid) || paid < 0) {
       return NextResponse.json({ error: 'ยอดจ่ายไม่ถูกต้อง' }, { status: 400 });
     }
-    if (paid > amount + 0.01) {
-      return NextResponse.json({ error: 'ยอดจ่ายเกินมูลค่าใบสั่งซื้อไม่ได้' }, { status: 400 });
-    }
     body.paid_amount = paid;
-    body.payment_status = paid <= 0 ? 'unpaid' : (paid + 0.01 >= amount ? 'paid' : 'partial');
+    // Fully paid once the payment covers the (net) PO value; partial only when
+    // there IS a positive PO value and the payment falls short of it.
+    body.payment_status = paid <= 0 ? 'unpaid'
+      : (amount > 0 && paid + 0.01 < amount ? 'partial' : 'paid');
   }
   return null;
 }
