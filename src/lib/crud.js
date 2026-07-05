@@ -150,15 +150,16 @@ export function createCrudRoutes(table, opts = {}) {
     try { body = await req.json(); }
     catch { return NextResponse.json({ error: 'invalid JSON' }, { status: 400 }); }
 
-    const payload = pickFields(body, allowedFields);
-    payload.id = body.id || newId(idPrefix);
-    // Authorship is server-set, never client-supplied (anti-forgery).
-    if (stampCreatedBy) payload.created_by = session.user.email;
-
+    // Guard runs BEFORE pickFields so any body overrides it makes are kept.
     if (guardMutation) {
       const rej = await guardMutation(session, body, null, 'create');
       if (rej) return rej;
     }
+
+    const payload = pickFields(body, allowedFields);
+    payload.id = body.id || newId(idPrefix);
+    // Authorship is server-set, never client-supplied (anti-forgery).
+    if (stampCreatedBy) payload.created_by = session.user.email;
 
     const { data, error } = await supabase.from(table).insert(payload).select().single();
     if (error) return friendlyDbError(error);
@@ -177,12 +178,11 @@ export function createCrudRoutes(table, opts = {}) {
     catch { return NextResponse.json({ error: 'invalid JSON' }, { status: 400 }); }
     if (!body.id) return NextResponse.json({ error: 'ต้องระบุ id' }, { status: 400 });
 
-    const payload = pickFields(body, allowedFields);
-    // created_by is immutable after creation — never let an update rewrite it.
-    delete payload.created_by;
-
     // Per-route mutation guard (immutability / financial rules). It gets the
-    // current row so it can compare against the requested change.
+    // current row so it can compare against the requested change, and MAY
+    // mutate `body` (e.g. derive payment_status, force retention_released_by
+    // from the session) — so it runs BEFORE pickFields, otherwise those
+    // server-authoritative overrides would be dropped from the written row.
     if (guardMutation) {
       const { data: current } = await supabase
         .from(table).select('*').eq('id', body.id).maybeSingle();
@@ -190,6 +190,10 @@ export function createCrudRoutes(table, opts = {}) {
       const rej = await guardMutation(session, body, current, 'update');
       if (rej) return rej;
     }
+
+    const payload = pickFields(body, allowedFields);
+    // created_by is immutable after creation — never let an update rewrite it.
+    delete payload.created_by;
 
     // Optimistic lock on state transitions: `_expect: { status: '<current>' }`
     // turns the update into compare-and-swap — if someone else already moved
