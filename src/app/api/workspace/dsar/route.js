@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
+import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../../lib/auth-messages';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
 import { getDsarQueue, getDsarStats, resolveDsar, createDsar } from '../../../../lib/workspace';
 
 async function adminGuard() {
   const session = await getServerSession(authOptions);
-  if (!session?.user) return { err: NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 }) };
-  if (session.user.role !== 'admin') return { err: NextResponse.json({ error: 'ต้องเป็นผู้ดูแลระบบเท่านั้น' }, { status: 403 }) };
+  if (!session?.user) return { err: NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 }) };
+  if (session.user.role !== 'admin') return { err: NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 }) };
   return { session };
 }
 

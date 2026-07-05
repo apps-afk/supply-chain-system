@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../../lib/auth-messages';
 import { requireSession } from '../../../../lib/crud';
 import { canApprove } from '../../../../lib/permissions';
 import { supabase, isSupabaseConfigured } from '../../../../lib/supabase';
@@ -27,8 +28,7 @@ export async function POST(request) {
   if (err) return err;
   if (!canApprove(session.user.role)) {
     return NextResponse.json(
-      { error: 'ต้องเป็นผู้จัดการหรือผู้ดูแลระบบจึงจะอนุมัติได้' },
-      { status: 403 }
+      { error: FORBIDDEN_MESSAGE }, { status: 403 }
     );
   }
   if (!isSupabaseConfigured) {
@@ -96,8 +96,7 @@ export async function POST(request) {
     const isOwner = entry.by_email === session.user.email;
     if (!isOwner && session.user.role !== 'admin') {
       return NextResponse.json(
-        { error: 'ยกเลิกได้เฉพาะผู้ที่อนุมัติลำดับนี้เอง หรือผู้ดูแลระบบ' },
-        { status: 403 }
+        { error: FORBIDDEN_MESSAGE }, { status: 403 }
       );
     }
     approvals.splice(approvals.indexOf(entry), 1);

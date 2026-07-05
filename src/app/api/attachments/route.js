@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../lib/auth-messages';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../lib/auth';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
@@ -10,7 +11,7 @@ export const runtime = 'nodejs';
 // List attachments — supports filtering by entity_type, entity_id, category
 export async function GET(request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
+  if (!session?.user) return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
   if (!isSupabaseConfigured) return NextResponse.json({ items: [] });
 
   const url = new URL(request.url);
@@ -40,7 +41,7 @@ export async function GET(request) {
 // Delete one attachment by id — removes from Drive and DB
 export async function DELETE(request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
+  if (!session?.user) return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
 
   try {
     const { id } = await request.json();
@@ -55,7 +56,7 @@ export async function DELETE(request) {
 
       // Only the uploader or admin can delete
       if (row.uploaded_by !== session.user.email && session.user.role !== 'admin') {
-        return NextResponse.json({ error: 'ไม่มีสิทธิ์ลบไฟล์นี้' }, { status: 403 });
+        return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
       }
 
       // Delete from Drive first; if fails, leave DB row so we don't orphan

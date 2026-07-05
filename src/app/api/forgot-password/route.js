@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../lib/auth-messages';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../lib/auth';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
@@ -6,8 +7,8 @@ import { appendAudit } from '../../../lib/workspace';
 
 async function requireAdmin() {
   const s = await getServerSession(authOptions);
-  if (!s?.user) return { err: NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 }) };
-  if (s.user.role !== 'admin') return { err: NextResponse.json({ error: 'ต้องเป็นผู้ดูแลระบบ' }, { status: 403 }) };
+  if (!s?.user) return { err: NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 }) };
+  if (s.user.role !== 'admin') return { err: NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 }) };
   return { session: s };
 }
 

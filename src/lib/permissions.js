@@ -16,5 +16,5 @@ export function canWrite(role)   { return WRITER_ROLES.includes(role); }
 export function canApprove(role) { return APPROVER_ROLES.includes(role); }
 export function isAdmin(role)    { return role === 'admin'; }
 
-// Message shown to read-only roles when they hit a write endpoint.
-export const READ_ONLY_MSG = 'สิทธิ์ของคุณเป็นแบบดูอย่างเดียว — ติดต่อผู้ดูแลระบบหากต้องการแก้ไขข้อมูล';
+// 401/403 wire messages live in lib/auth-messages.js (API_implement spec) —
+// read-only roles now receive the canonical FORBIDDEN_MESSAGE.

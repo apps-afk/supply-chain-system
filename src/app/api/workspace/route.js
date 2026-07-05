@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../lib/auth-messages';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../lib/auth';
 import { getSettings, updateSettings, appendAudit, SUB_PROCESSORS } from '../../../lib/workspace';
@@ -6,7 +7,7 @@ import { getSettings, updateSettings, appendAudit, SUB_PROCESSORS } from '../../
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
-    return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
+    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
   }
   return NextResponse.json({
     settings: await getSettings(),
@@ -17,10 +18,10 @@ export async function GET() {
 export async function PATCH(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
-    return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
+    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
   }
   if (session.user.role !== 'admin') {
-    return NextResponse.json({ error: 'ต้องเป็นผู้ดูแลระบบเท่านั้น' }, { status: 403 });
+    return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
   }
   try {
     const patch = await request.json();

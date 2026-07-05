@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../../lib/auth-messages';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
 import { getProfile, updateProfile } from '../../../../lib/users';
@@ -6,7 +7,7 @@ import { getProfile, updateProfile } from '../../../../lib/users';
 export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
-    return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
+    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
   }
   const profile = await getProfile(session.user.email);
   if (!profile) return NextResponse.json({ error: 'ไม่พบบัญชี' }, { status: 404 });
@@ -16,7 +17,7 @@ export async function GET() {
 export async function PATCH(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
-    return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
+    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
   }
   try {
     const body = await request.json();

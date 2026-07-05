@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../../lib/auth-messages';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../../lib/auth';
 import { updatePassword } from '../../../../lib/users';
@@ -7,7 +8,7 @@ import { appendAudit } from '../../../../lib/workspace';
 export async function POST(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
-    return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อน' }, { status: 401 });
+    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
   }
   try {
     const { oldPassword, newPassword } = await request.json();

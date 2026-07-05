@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../lib/auth-messages';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../lib/auth';
 import { getAuditLog } from '../../../lib/workspace';
@@ -6,10 +7,10 @@ import { getAuditLog } from '../../../lib/workspace';
 export async function GET(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
-    return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
+    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
   }
   if (session.user.role !== 'admin') {
-    return NextResponse.json({ error: 'ต้องเป็นผู้ดูแลระบบ' }, { status: 403 });
+    return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
   }
   const url = new URL(request.url);
   const rawLimit = parseInt(url.searchParams.get('limit') || '200', 10);

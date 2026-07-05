@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../lib/auth-messages';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../lib/auth';
 import { createCrudRoutes } from '../../../lib/crud';
@@ -35,10 +36,7 @@ export async function PATCH(request) {
       const { count } = await supabase
         .from('approval_roles').select('id', { count: 'exact', head: true }).eq('active', true);
       if ((count || 0) > 0) {
-        return NextResponse.json(
-          { error: 'ต้องอนุมัติผ่านลำดับผู้อนุมัติในหน้าใบเปรียบเทียบ (หรือให้ผู้ดูแลระบบยืนยัน)' },
-          { status: 403 }
-        );
+        return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
       }
     }
   }
@@ -51,13 +49,13 @@ export async function PATCH(request) {
 export async function DELETE(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user) {
-    return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 });
+    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
   }
   // Cascade delete is destructive (removes Drive files). Restrict to admin
   // like the contracts DELETE — non-admins can still cancel/draft a compare
   // doc via PATCH but cannot wipe attachments.
   if (session.user.role !== 'admin') {
-    return NextResponse.json({ error: 'ต้องเป็นผู้ดูแลระบบเท่านั้น' }, { status: 403 });
+    return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
   }
 
   let body;

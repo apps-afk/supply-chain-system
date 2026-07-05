@@ -16,43 +16,29 @@
  *     clear "configure Supabase first" message
  */
 import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from './auth';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { appendAudit } from './workspace';
-import { canWrite, READ_ONLY_MSG } from './permissions';
+import { WRITER_ROLES } from './permissions';
+import { requireAuth } from './api-auth';
 
+// All three guards ride on the central requireAuth (lib/api-auth.js) so the
+// canonical 401/403 messages are uniform across the whole API surface:
+//   - no/dead session          → 401 UNAUTHORIZED_MESSAGE (always wins)
+//   - role outside allowedRoles → 403 FORBIDDEN_MESSAGE
 async function requireSession() {
-  const s = await getServerSession(authOptions);
-  if (!s?.user) {
-    return { err: NextResponse.json({ error: 'กรุณาเข้าสู่ระบบ' }, { status: 401 }) };
-  }
-  // role === null means the account was deleted after this JWT was issued
-  // (see lib/auth.js jwt callback) — revoke instead of serving stale access.
-  if (!s.user.role) {
-    return { err: NextResponse.json({ error: 'บัญชีนี้ถูกปิดการใช้งาน — กรุณาเข้าสู่ระบบใหม่' }, { status: 401 }) };
-  }
-  return { session: s };
+  const gate = await requireAuth();
+  return gate.ok ? { session: gate.session } : { err: gate.response };
 }
 
 async function requireAdmin() {
-  const { session, err } = await requireSession();
-  if (err) return { err };
-  if (session.user.role !== 'admin') {
-    return { err: NextResponse.json({ error: 'ต้องเป็นผู้ดูแลระบบเท่านั้น' }, { status: 403 }) };
-  }
-  return { session };
+  const gate = await requireAuth(['admin']);
+  return gate.ok ? { session: gate.session } : { err: gate.response };
 }
 
-// Logged in AND a role that may write documents (admin/procurement/manager).
-// Read-only roles (accountant, hr_manager, user) get a clear 403.
+// Roles that may write documents: admin/procurement/manager.
 async function requireWriter() {
-  const { session, err } = await requireSession();
-  if (err) return { err };
-  if (!canWrite(session.user.role)) {
-    return { err: NextResponse.json({ error: READ_ONLY_MSG }, { status: 403 }) };
-  }
-  return { session };
+  const gate = await requireAuth(WRITER_ROLES);
+  return gate.ok ? { session: gate.session } : { err: gate.response };
 }
 
 // Exported for custom routes (upload, approvals, …) that don't use the factory.
