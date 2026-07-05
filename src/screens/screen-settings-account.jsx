@@ -275,6 +275,16 @@ export function ScreenSettingsAccount() {
         </form>
       </section>
 
+      {/* Two-factor authentication */}
+      <section style={{ marginTop: 48 }}>
+        <h2 className="h-section">ยืนยันตัวตนสองขั้น (2FA)</h2>
+        <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4, marginBottom: 16 }}>
+          เพิ่มรหัส 6 หลักจากแอป Authenticator (Google/Microsoft Authenticator, 1Password ฯลฯ)
+          ทุกครั้งที่เข้าสู่ระบบด้วยรหัสผ่าน — บัญชีที่เข้าผ่าน Google ใช้ 2FA ของ Google อยู่แล้ว
+        </p>
+        <TwoFactorSection />
+      </section>
+
       {/* Sign out */}
       <section style={{ marginTop: 56, paddingTop: 24, borderTop: '1px solid var(--rule)' }}>
         <h2 className="h-section" style={{ marginBottom: 8 }}>ออกจากระบบ</h2>
@@ -285,6 +295,144 @@ export function ScreenSettingsAccount() {
           ออกจากระบบ
         </button>
       </section>
+    </div>
+  );
+}
+
+/* ===== 2FA enrollment ===== */
+
+function TwoFactorSection() {
+  const [status, setStatus]   = useState(null);   // {enabled, required}
+  const [enroll, setEnroll]   = useState(null);   // {qr, secret, otpauth}
+  const [code, setCode]       = useState('');
+  const [busy, setBusy]       = useState(false);
+  const [msg, setMsg]         = useState({ msg: '', tone: '' });
+
+  async function load() {
+    try {
+      const r = await fetch('/api/auth/2fa');
+      if (r.ok) setStatus(await r.json());
+    } catch {}
+  }
+  useEffect(() => { load(); }, []);
+
+  async function post(payload) {
+    setBusy(true); setMsg({ msg: '', tone: '' });
+    try {
+      const r = await fetch('/api/auth/2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json().catch(() => ({}));
+      setBusy(false);
+      if (!r.ok) { setMsg({ msg: d.error || 'ไม่สำเร็จ', tone: 'err' }); return null; }
+      return d;
+    } catch {
+      setBusy(false);
+      setMsg({ msg: 'เครือข่ายขัดข้อง', tone: 'err' });
+      return null;
+    }
+  }
+
+  async function start() {
+    const d = await post({ action: 'start' });
+    if (d) { setEnroll(d); setCode(''); }
+  }
+
+  async function verify(e) {
+    e.preventDefault();
+    const d = await post({ action: 'verify', code });
+    if (d) {
+      setEnroll(null); setCode('');
+      setMsg({ msg: '✓ เปิดใช้ 2FA เรียบร้อย — ครั้งต่อไปที่เข้าสู่ระบบจะถามรหัสจากแอป', tone: 'ok' });
+      load();
+    }
+  }
+
+  async function disable(e) {
+    e.preventDefault();
+    if (!confirm('ปิดการยืนยันตัวตนสองขั้น?')) return;
+    const d = await post({ action: 'disable', code });
+    if (d) {
+      setCode('');
+      setMsg({ msg: 'ปิด 2FA แล้ว', tone: 'ok' });
+      load();
+    }
+  }
+
+  if (!status) return <div className="card" style={{ padding: 24, maxWidth: 520, fontSize: 13, color: 'var(--ink-3)' }}>กำลังโหลด…</div>;
+
+  return (
+    <div className="card" style={{ padding: 28, maxWidth: 520 }}>
+      {msg.msg && <StatusBox tone={msg.tone}>{msg.msg}</StatusBox>}
+
+      {status.required && !status.enabled && (
+        <div style={{ background: '#F0E4C5', border: '1px solid #E6D4A8', color: '#6B5121', borderRadius: 6, padding: '10px 14px', fontSize: 12.5, marginBottom: 16, lineHeight: 1.55 }}>
+          ⚠ นโยบายของระบบบังคับใช้ 2FA สำหรับผู้ดูแลระบบ — กรุณาตั้งค่าด้านล่าง
+        </div>
+      )}
+
+      {status.enabled ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 999, background: 'var(--moss, #4a7c59)' }} />
+            <span style={{ fontSize: 14, fontWeight: 500 }}>เปิดใช้งานอยู่</span>
+          </div>
+          <form onSubmit={disable}>
+            <Field label="ปิด 2FA — ยืนยันด้วยรหัสจากแอปก่อน">
+              <input
+                type="text" inputMode="numeric" maxLength={6} value={code}
+                onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="000000" style={{ ...inputStyle, width: 160, fontFamily: 'var(--font-mono)', letterSpacing: '0.3em', textAlign: 'center' }}
+              />
+            </Field>
+            <button type="submit" className="btn" disabled={busy || code.length !== 6} style={{ color: 'var(--clay)' }}>
+              ปิดการใช้งาน 2FA
+            </button>
+          </form>
+        </>
+      ) : enroll ? (
+        <>
+          <div style={{ fontSize: 13.5, fontWeight: 500, marginBottom: 12 }}>1) สแกน QR ด้วยแอป Authenticator</div>
+          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 16 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={enroll.qr} alt="2FA QR" width={180} height={180} style={{ borderRadius: 8, border: '1px solid var(--rule)' }} />
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>หรือกรอก secret เอง:</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, background: 'var(--surface-2)', padding: '8px 10px', borderRadius: 6, wordBreak: 'break-all', userSelect: 'all' }}>
+                {enroll.secret}
+              </div>
+            </div>
+          </div>
+          <form onSubmit={verify}>
+            <Field label="2) กรอกรหัส 6 หลักจากแอปเพื่อยืนยัน">
+              <input
+                type="text" inputMode="numeric" maxLength={6} value={code}
+                onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="000000" autoFocus
+                style={{ ...inputStyle, width: 160, fontFamily: 'var(--font-mono)', letterSpacing: '0.3em', textAlign: 'center' }}
+              />
+            </Field>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="submit" className="btn primary" disabled={busy || code.length !== 6}>
+                {busy ? 'กำลังตรวจ…' : 'ยืนยันและเปิดใช้'}
+              </button>
+              <button type="button" className="btn" onClick={() => { setEnroll(null); setCode(''); }}>ยกเลิก</button>
+            </div>
+          </form>
+        </>
+      ) : (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 999, background: 'var(--rule-2)' }} />
+            <span style={{ fontSize: 14, color: 'var(--ink-2)' }}>ยังไม่ได้เปิดใช้</span>
+          </div>
+          <button className="btn primary" onClick={start} disabled={busy}>
+            {busy ? 'กำลังสร้าง…' : '🔐 เปิดใช้ 2FA'}
+          </button>
+        </>
+      )}
     </div>
   );
 }

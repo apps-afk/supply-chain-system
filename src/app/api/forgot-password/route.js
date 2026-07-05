@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server';
-import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../lib/auth-messages';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../lib/auth';
+import { requireAuth } from '../../../lib/api-auth';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
 import { appendAudit } from '../../../lib/workspace';
 
 async function requireAdmin() {
-  const s = await getServerSession(authOptions);
-  if (!s?.user) return { err: NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 }) };
-  if (s.user.role !== 'admin') return { err: NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 }) };
-  return { session: s };
+  const gate = await requireAuth(['admin']);
+  return gate.ok ? { session: gate.session } : { err: gate.response };
 }
 
 // List pending forgot-password requests so admin can action them.

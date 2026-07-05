@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '../../../../lib/crud';
 import { supabase, isSupabaseConfigured } from '../../../../lib/supabase';
-import { appendAudit } from '../../../../lib/workspace';
+import { appendAudit, stripPrivateSettings } from '../../../../lib/workspace';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,7 +27,12 @@ export async function GET() {
   const dump = { exported_at: new Date().toISOString(), by: session.user.email, tables: {} };
   for (const t of TABLES) {
     const { data, error } = await supabase.from(t).select('*');
-    dump.tables[t] = error ? { error: error.message } : data;
+    // Backups must never carry 2FA secrets — strip the server-private keys
+    // out of the settings blob (same rule as password hashes below).
+    const rows = t === 'workspace_settings' && Array.isArray(data)
+      ? data.map(r => ({ ...r, settings: stripPrivateSettings(r.settings) }))
+      : data;
+    dump.tables[t] = error ? { error: error.message } : rows;
   }
   // users WITHOUT credentials — a backup must never carry password hashes.
   {

@@ -1,15 +1,12 @@
 import { NextResponse } from 'next/server';
-import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../../lib/auth-messages';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../../lib/auth';
+import { requireAuth } from '../../../../lib/api-auth';
 import { updatePassword } from '../../../../lib/users';
 import { appendAudit } from '../../../../lib/workspace';
 
 export async function POST(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
-  }
+  const gate = await requireAuth();
+  if (!gate.ok) return gate.response;
+  const session = gate.session;
   try {
     const { oldPassword, newPassword } = await request.json();
     if (!oldPassword || !newPassword) {

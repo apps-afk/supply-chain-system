@@ -19,11 +19,18 @@ const SEV = {
   low:    { bg: 'rgba(100,116,139,0.10)',bd: 'rgba(100,116,139,0.30)',fg: '#475569', label: 'เล็กน้อย' },
 };
 
-export default function AiAssistPanel({ kind, payload, title, hint }) {
+export default function AiAssistPanel({ kind, payload, title, hint, initialResult }) {
   const [cfg, setCfg]         = useState(null);
   const [busy, setBusy]       = useState(false);
-  const [result, setResult]   = useState(null);
+  const [result, setResult]   = useState(initialResult || null);
   const [err, setErr]         = useState('');
+
+  // A stored result (e.g. auto-evaluated on upload, or run by a colleague)
+  // arrives async with the parent's data load — adopt it unless the user
+  // already ran a fresh analysis in this session.
+  useEffect(() => {
+    if (initialResult) setResult(prev => prev || initialResult);
+  }, [initialResult]);
 
   useEffect(() => {
     let alive = true;
@@ -144,6 +151,9 @@ export default function AiAssistPanel({ kind, payload, title, hint }) {
 
           <div style={{ fontSize: 11, color: 'var(--ink-4, #999)' }}>
             AI ช่วยวิเคราะห์เท่านั้น — การตัดสินใจสุดท้ายเป็นของผู้ใช้ · โมเดล: {result.model || '—'}
+            {result.by ? ` · โดย ${result.by}` : ''}
+            {result.at ? ` · ${new Date(result.at).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}` : ''}
+            {result.auto ? ' · วิเคราะห์อัตโนมัติตอนอัปโหลด' : ''}
           </div>
         </div>
       )}

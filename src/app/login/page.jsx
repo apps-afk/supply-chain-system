@@ -52,6 +52,8 @@ export default function LoginPage() {
   // Login
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
+  const [otp, setOtp]           = useState('');
+  const [needOtp, setNeedOtp]   = useState(false);   // 2FA-enrolled account
 
   // Register
   const [rName,  setRName]  = useState('');
@@ -90,9 +92,18 @@ export default function LoginPage() {
   async function handleLogin(e) {
     e.preventDefault(); setError('');
     setLoading(true);
-    const res = await signIn('credentials', { email, password, redirect: false });
+    const res = await signIn('credentials', { email, password, otp, redirect: false });
     if (res?.error) {
-      setError(res.error.startsWith('อีเมล') ? res.error : (ERRORS[res.error] || ERRORS.default));
+      // Account has 2FA enabled — password was correct, now ask for the
+      // 6-digit code from the authenticator app.
+      if (res.error === 'OTP_REQUIRED') {
+        setNeedOtp(true);
+        setError('');
+        setLoading(false);
+        return;
+      }
+      setError(res.error.startsWith('อีเมล') || res.error.startsWith('รหัส') || res.error.startsWith('IP') || res.error.startsWith('ลอง') || res.error.startsWith('พยายาม') || res.error.startsWith('อนุญาต')
+        ? res.error : (ERRORS[res.error] || ERRORS.default));
       setLoading(false);
     } else {
       // Hard navigate — replace() so the /login entry doesn't stay in history.
@@ -262,8 +273,24 @@ export default function LoginPage() {
               <input type="password" value={password} onChange={e => setPassword(e.target.value)}
                 placeholder="••••••••" required style={S.input} autoComplete="current-password" />
 
+              {needOtp && (
+                <>
+                  <div style={{ background: 'var(--teal-soft, #e6f4f1)', border: '1px solid var(--rule)', borderRadius: 6, padding: '10px 12px', fontSize: 12.5, color: 'var(--ink-2)', marginBottom: 12, lineHeight: 1.5 }}>
+                    🔐 บัญชีนี้เปิดใช้ 2FA — กรอกรหัส 6 หลักจากแอป Authenticator
+                  </div>
+                  <label style={S.label}>รหัส OTP (6 หลัก)</label>
+                  <input
+                    type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6}
+                    value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, ''))}
+                    placeholder="000000" required autoFocus
+                    style={{ ...S.input, fontFamily: 'var(--font-mono)', letterSpacing: '0.35em', textAlign: 'center', fontSize: 18 }}
+                    autoComplete="one-time-code"
+                  />
+                </>
+              )}
+
               <button type="submit" disabled={loading} style={{ ...S.submitBtn, opacity: loading ? 0.7 : 1 }}>
-                {loading ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'}
+                {loading ? 'กำลังเข้าสู่ระบบ…' : (needOtp ? 'ยืนยันรหัส OTP' : 'เข้าสู่ระบบ')}
               </button>
             </form>
           </div>

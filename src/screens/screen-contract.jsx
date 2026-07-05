@@ -652,6 +652,21 @@ function UploadContractModal({ suppliers, projects, onClose, go, onSaved }) {
         return;
       }
 
+      // 3) Auto AI review (workspace policy ai.autoEvaluateOnUpload) — fire
+      // and forget: the result is persisted server-side into the contract's
+      // notes and shows up in the review step. Failure here never blocks the
+      // upload flow (no key / budget spent → silently skipped).
+      try {
+        const pol = await fetch('/api/workspace/policy').then(r => r.ok ? r.json() : null);
+        if (pol?.autoEvaluateOnUpload) {
+          fetch('/api/ai/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'contract', contract_id: created.id, auto: true }),
+          }).catch(() => {});
+        }
+      } catch { /* policy unavailable → skip auto-run */ }
+
       // success
       setBusy(false);
       if (onSaved) onSaved(created.id);
@@ -863,14 +878,17 @@ export function ScreenContract({ go }) {
   const [linkedPoIds, setLinkedPoIds] = useState([]);
   // Free-text part of contracts.notes (legacy plain text or payload.memo)
   const [memo, setMemo] = useState('');
+  // Stored AI review (payload.ai) — written server-side by /api/ai/analyze
+  const [aiResult, setAiResult] = useState(null);
   const allChecked = REVIEW_CHECKLIST.every(item => checks[item.key]);
 
   // Hydrate phase/checks/legal/memo from a contract row. JSON notes with a
   // .workflow payload win; legacy plain-text notes become memo and the phase
   // falls back to the DB status mapping.
   function hydrateFromContract(c) {
-    const { workflow, memo: m } = parseContractNotes(c?.notes);
+    const { workflow, memo: m, payload } = parseContractNotes(c?.notes);
     setMemo(m);
+    setAiResult(payload?.ai || null);
     if (workflow) {
       setPhase(CT_STATUS[workflow.phase] ? workflow.phase : (DB_TO_BUCKET[c?.status] || 'Uploaded'));
       setChecks(workflow.checks || {});
@@ -1383,6 +1401,7 @@ export function ScreenContract({ go }) {
                   payload={{ contract_id: contract.id }}
                   title="ให้ AI ช่วยอ่าน/สรุปสัญญา และแนะนำข้อที่ควรแก้"
                   hint="AI จะอ่านไฟล์สัญญา (หรือข้อมูลที่บันทึกไว้) แล้วสรุปสาระสำคัญและชี้จุดเสี่ยง — จะใช้หรือข้ามก็ได้ ติ๊กเช็คลิสต์เองแล้วกดต่อได้เลย"
+                  initialResult={aiResult}
                 />
               )}
               <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:24 }}>

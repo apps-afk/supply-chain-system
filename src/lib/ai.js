@@ -109,20 +109,30 @@ function parseAnalysis(msg) {
   };
 }
 
-async function run({ model, system, content }) {
+// explanationLevel (workspace setting) → answer length. 'short' keeps
+// summaries to a couple of sentences; 'detailed' allows a fuller review.
+const LEVELS = {
+  short:    { maxTokens: 1024, note: 'ตอบแบบกระชับที่สุด — สรุปไม่เกิน 2 ประโยค และเฉพาะประเด็นสำคัญจริง ๆ' },
+  medium:   { maxTokens: 2048, note: 'ตอบกระชับพอดี อ่านง่าย' },
+  detailed: { maxTokens: 4096, note: 'ตอบละเอียด ครอบคลุมทุกประเด็นที่พบ พร้อมเหตุผลประกอบ' },
+};
+
+async function run({ model, system, content, level }) {
   const anthropic = client();
   if (!anthropic) throw Object.assign(new Error('ยังไม่ได้ตั้งค่า AI'), { code: 'no_key' });
+  const lv = LEVELS[level] || LEVELS.medium;
   const msg = await anthropic.messages.create({
     model,
-    max_tokens: 2048,
-    system,
+    max_tokens: lv.maxTokens,
+    system: system + ' ' + lv.note,
     messages: [{ role: 'user', content }],
     // Constrain the reply to our schema. Supported on Opus 4.8 / Sonnet 5 /
     // Haiku 4.5. We deliberately do NOT set thinking/effort so the same call
     // works across all three models.
     output_config: { format: { type: 'json_schema', schema: ANALYSIS_SCHEMA } },
   });
-  return { ...parseAnalysis(msg), model };
+  const tokensUsed = (msg?.usage?.input_tokens || 0) + (msg?.usage?.output_tokens || 0);
+  return { ...parseAnalysis(msg), model, tokensUsed };
 }
 
 /**
@@ -130,7 +140,7 @@ async function run({ model, system, content }) {
  * block; otherwise the structured metadata is analysed as text (so this still
  * works when Drive isn't configured or the contract has no file).
  */
-export async function analyzeContract({ model, pdf, meta }) {
+export async function analyzeContract({ model, pdf, meta, level }) {
   const content = [];
   if (pdf?.buffer && pdf.mimeType === 'application/pdf') {
     content.push({
@@ -148,7 +158,7 @@ export async function analyzeContract({ model, pdf, meta }) {
       '\n\nข้อมูลประกอบจากระบบ:\n' + (metaLines || '(ไม่มี)') +
       '\n\nโปรดสรุปสาระสำคัญ และระบุข้อที่ควรแก้ไข/ระวัง เป็นภาษาไทย.',
   });
-  return run({ model, system: SYSTEM_CONTRACT, content });
+  return run({ model, system: SYSTEM_CONTRACT, content, level });
 }
 
 // Build a compact, readable table of the comparison for the model — cheaper
@@ -183,10 +193,11 @@ export function summarizeComparison(cmp) {
   return lines.join('\n');
 }
 
-export async function analyzeComparison({ model, cmp }) {
+export async function analyzeComparison({ model, cmp, level }) {
   const table = summarizeComparison(cmp);
   return run({
     model,
+    level,
     system: SYSTEM_COMPARE,
     content: [{
       type: 'text',

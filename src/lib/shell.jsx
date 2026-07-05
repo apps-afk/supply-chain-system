@@ -212,8 +212,39 @@ function SidebarImpl({ current, onNav }) {
 export const Sidebar = React.memo(SidebarImpl);
 
 /* ----------------------- Topbar ----------------------- */
+
+// Nag banner when workspace policy requires 2FA for admins and the current
+// admin hasn't enrolled yet. Enrollment itself lives in Account settings.
+function TwoFaNag({ go }) {
+  const { data: session } = useSession();
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (session?.user?.role !== 'admin') return;
+    let alive = true;
+    fetch('/api/auth/2fa').then(r => r.ok ? r.json() : null).then(d => {
+      if (alive && d && d.required && !d.enabled) setShow(true);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [session?.user?.role]);
+  if (!show) return null;
+  return (
+    <div style={{
+      background: '#F0E4C5', borderBottom: '1px solid #E6D4A8', color: '#6B5121',
+      padding: '8px 20px', fontSize: 12.5, display: 'flex', alignItems: 'center', gap: 10,
+    }}>
+      <span>⚠ นโยบายระบบบังคับใช้ 2FA สำหรับผู้ดูแลระบบ — บัญชีของคุณยังไม่ได้ตั้งค่า</span>
+      <button className="btn sm" onClick={() => go && go('settings-account')} style={{ fontSize: 12 }}>
+        ตั้งค่า 2FA เลย
+      </button>
+      <button onClick={() => setShow(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B5121', marginLeft: 'auto' }}>✕</button>
+    </div>
+  );
+}
+
 function TopbarImpl({ crumbs, onNav, go }) {
   return (
+    <>
+    <TwoFaNag go={go} />
     <div className="topbar">
       <div className="crumb">
         {crumbs.map((c, i) => (
@@ -229,6 +260,7 @@ function TopbarImpl({ crumbs, onNav, go }) {
         <UserMenu onNav={onNav} />
       </div>
     </div>
+    </>
   );
 }
 // Memoised so it doesn't re-render when the inner screen state changes

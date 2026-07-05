@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../lib/auth-messages';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../lib/auth';
+import { FORBIDDEN_MESSAGE, requireAuth } from '../../../lib/api-auth';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
 import { deleteFile } from '../../../lib/gdrive';
 import { appendAudit } from '../../../lib/workspace';
@@ -10,8 +8,9 @@ export const runtime = 'nodejs';
 
 // List attachments — supports filtering by entity_type, entity_id, category
 export async function GET(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
+  const gate = await requireAuth();
+  if (!gate.ok) return gate.response;
+  const session = gate.session;
   if (!isSupabaseConfigured) return NextResponse.json({ items: [] });
 
   const url = new URL(request.url);
@@ -40,8 +39,9 @@ export async function GET(request) {
 
 // Delete one attachment by id — removes from Drive and DB
 export async function DELETE(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
+  const gate = await requireAuth();
+  if (!gate.ok) return gate.response;
+  const session = gate.session;
 
   try {
     const { id } = await request.json();

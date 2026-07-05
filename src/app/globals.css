@@ -514,4 +514,35 @@ input, textarea, select { font-family: inherit; }
     box-shadow: none !important;
     border: none !important;
   }
+  /* Printable modal documents (e.g. DPA): flatten the overlay so only the
+     document content reaches the page. */
+  body.print-doc-mode .modal-print-overlay {
+    position: static !important;
+    background: #fff !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+  body.print-doc-mode .modal-print-overlay > div {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+  /* Leak-tracing watermark (workspace policy: watermarkDownloads) —
+     stamped on every printed page footer. */
+  body.print-doc-mode .print-watermark {
+    display: block !important;
+    position: fixed;
+    bottom: 6px; left: 0; right: 0;
+    text-align: center;
+    font-size: 9px;
+    color: rgba(20, 18, 14, 0.45);
+    letter-spacing: 0.03em;
+    z-index: 9999;
+  }
 }
+
+/* Hidden on screen — only the print stylesheet reveals it. */
+.print-watermark { display: none; }

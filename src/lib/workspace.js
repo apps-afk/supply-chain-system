@@ -12,12 +12,13 @@ const DEFAULTS = {
     timezone: 'Asia/Bangkok',
     logoUrl: null,
   },
+  // AI assist (contract review + price-comparison analysis). Only settings
+  // that are actually enforced live here — the model, whether contract AI
+  // runs automatically on upload, and how verbose the answers are.
   ai: {
-    defaultModel: 'claude-haiku-4-5',
+    defaultModel: 'claude-opus-4-8',
     autoEvaluateOnUpload: true,
-    recomputeOnRequirementChange: true,
     explanationLevel: 'medium',
-    showConfidence: false,
   },
   security: {
     require2FA: false,
@@ -105,6 +106,63 @@ export async function updateSettings(patch) {
   return current;
 }
 
+// Server-private keys stored inside the settings blob that must NEVER leave
+// the server (TOTP secrets) or be written by a client PATCH (usage counters).
+export const PRIVATE_SETTINGS_KEYS = ['totp'];
+export const SERVER_ONLY_SETTINGS_KEYS = ['totp', 'aiUsageMeter'];
+
+export function stripPrivateSettings(settings) {
+  const out = { ...(settings || {}) };
+  for (const k of PRIVATE_SETTINGS_KEYS) delete out[k];
+  return out;
+}
+
+/* ============================================================
+   2FA (TOTP) enrollment store — lives under settings.totp:
+     { [emailLower]: { secret, enabled, enabledAt, pendingSecret } }
+   No users-table migration needed; the service-role-only settings row is
+   as protected as the users table, and every API path strips this key.
+   ============================================================ */
+
+export async function getTotp(email) {
+  const s = await getSettings();
+  return (s.totp || {})[String(email || '').toLowerCase()] || null;
+}
+
+export async function setTotp(email, entry) {
+  const key = String(email || '').toLowerCase();
+  const s = await getSettings();
+  const totp = { ...(s.totp || {}) };
+  if (entry === null) delete totp[key];
+  else totp[key] = { ...(totp[key] || {}), ...entry };
+  return updateSettings({ totp });
+}
+
+/* ============================================================
+   AI usage meter — monthly token counter under settings.aiUsageMeter:
+     { month: 'YYYY-MM', tokens: N }
+   Written only by the server after each model call; the admin page reads
+   it to show spend vs the configured monthly budget.
+   ============================================================ */
+
+export async function recordAiUsage(tokens) {
+  const n = Number(tokens) || 0;
+  if (n <= 0) return;
+  const month = new Date().toISOString().slice(0, 7);
+  const s = await getSettings();
+  const cur = s.aiUsageMeter && s.aiUsageMeter.month === month
+    ? Number(s.aiUsageMeter.tokens) || 0 : 0;
+  await updateSettings({ aiUsageMeter: { month, tokens: cur + n } });
+}
+
+export async function getAiUsage() {
+  const month = new Date().toISOString().slice(0, 7);
+  const s = await getSettings();
+  const used = s.aiUsageMeter && s.aiUsageMeter.month === month
+    ? Number(s.aiUsageMeter.tokens) || 0 : 0;
+  return { month, tokens: used, budget: Number(s.aiUsage?.monthlyTokenBudget) || 0 };
+}
+
 /* ============================================================
    Audit log
    ============================================================ */
@@ -119,10 +177,30 @@ export async function appendAudit(entry) {
       metadata: { changes: e.changes },
       timestamp: e.timestamp,
     }).then(({ error }) => { if (error) console.error('audit insert:', error.message); });
+    pruneAuditLog().catch(() => {});
     return;
   }
   ensureMem();
   globalThis.__ieAuditLog.push(e);
+}
+
+// Enforce security.auditLogRetentionDays: opportunistically delete entries
+// older than the configured window, at most once per hour per instance so
+// the hot path never pays for it twice.
+async function pruneAuditLog() {
+  if (!isSupabaseConfigured) return;
+  const now = Date.now();
+  if (globalThis.__ieAuditPrunedAt && now - globalThis.__ieAuditPrunedAt < 60 * 60 * 1000) return;
+  globalThis.__ieAuditPrunedAt = now;
+  try {
+    const s = await getSettings();
+    const days = Number(s.security?.auditLogRetentionDays) || 365;
+    const cutoff = new Date(now - days * 86400000).toISOString();
+    const { error } = await supabase.from('audit_log').delete().lt('timestamp', cutoff);
+    if (error) console.error('audit prune:', error.message);
+  } catch (e) {
+    console.error('audit prune:', e.message);
+  }
 }
 
 export async function getAuditLog(limit = 100) {

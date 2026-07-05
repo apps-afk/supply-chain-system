@@ -1,24 +1,20 @@
 import { NextResponse } from 'next/server';
-import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../../lib/auth-messages';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../../lib/auth';
+import { requireAuth } from '../../../../lib/api-auth';
 import { getProfile, updateProfile } from '../../../../lib/users';
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
-  }
+  const gate = await requireAuth();
+  if (!gate.ok) return gate.response;
+  const session = gate.session;
   const profile = await getProfile(session.user.email);
   if (!profile) return NextResponse.json({ error: 'ไม่พบบัญชี' }, { status: 404 });
   return NextResponse.json({ profile });
 }
 
 export async function PATCH(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user?.email) {
-    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
-  }
+  const gate = await requireAuth();
+  if (!gate.ok) return gate.response;
+  const session = gate.session;
   try {
     const body = await request.json();
     const safe = {};

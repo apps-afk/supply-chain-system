@@ -1036,13 +1036,32 @@ export function Row({ label, value, last }) {
 // Browser print-to-PDF: hide everything except the .print-area, open the
 // print dialog (user picks "Save as PDF"), then restore. Reliable Thai
 // rendering with zero PDF-library weight.
-export function printDoc(title) {
+//
+// When workspace policy "ใส่ลายน้ำเอกสารที่ดาวน์โหลด" is on, a leak-tracing
+// watermark (who printed + when) is stamped into the printed output.
+export async function printDoc(title) {
   const prev = document.title;
   if (title) document.title = title;
+
+  let wm = null;
+  try {
+    const { getExportPolicy } = await import('../lib/table-utils');
+    const policy = await getExportPolicy();
+    if (policy.watermarkDownloads && policy.email) {
+      wm = document.createElement('div');
+      wm.className = 'print-watermark';
+      const now = new Date();
+      wm.textContent = `ดาวน์โหลดโดย ${policy.email} · ${now.toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })} · Initial Estate (เอกสารภายใน)`;
+      document.body.appendChild(wm);
+    }
+  } catch { /* policy unavailable → print without watermark */ }
+
   document.body.classList.add('print-doc-mode');
   const cleanup = () => {
     document.body.classList.remove('print-doc-mode');
     document.title = prev;
+    if (wm && wm.parentNode) wm.parentNode.removeChild(wm);
+    wm = null;
     window.removeEventListener('afterprint', cleanup);
   };
   window.addEventListener('afterprint', cleanup);

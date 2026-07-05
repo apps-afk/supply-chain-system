@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireAuth } from '../../../../lib/api-auth';
 import { WRITER_ROLES } from '../../../../lib/permissions';
 import { supabase, isSupabaseConfigured } from '../../../../lib/supabase';
-import { getSettings, appendAudit } from '../../../../lib/workspace';
+import { getSettings, appendAudit, recordAiUsage, getAiUsage } from '../../../../lib/workspace';
 import { isGDriveConfigured, getFileBytes } from '../../../../lib/gdrive';
 import { rateLimit, clientKey } from '../../../../lib/rate-limit';
 import { hasApiKey, resolveModel, analyzeContract, analyzeComparison } from '../../../../lib/ai';
@@ -15,6 +15,26 @@ const NO_KEY = () => NextResponse.json(
   { error: 'ยังไม่ได้ตั้งค่า AI — กรุณาใส่ ANTHROPIC_API_KEY (ติดต่อ admin) หรือดำเนินการต่อโดยไม่ใช้ AI ก็ได้', code: 'no_key' },
   { status: 503 }
 );
+
+// Persist the latest AI review into the contract's notes JSON (merged, not
+// clobbered — the same blob carries the review-workflow state). The detail
+// screen shows this stored result so a team member's run is visible to all.
+async function persistContractAnalysis(contractId, analysis) {
+  try {
+    const { data: row } = await supabase
+      .from('contracts').select('notes').eq('id', contractId).maybeSingle();
+    let payload = {};
+    try {
+      const parsed = JSON.parse(row?.notes || '');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) payload = parsed;
+      else if (row?.notes) payload = { memo: String(row.notes) };
+    } catch { if (row?.notes) payload = { memo: String(row.notes) }; }
+    payload.ai = analysis;
+    await supabase.from('contracts').update({ notes: JSON.stringify(payload) }).eq('id', contractId);
+  } catch (e) {
+    console.error('[ai.analyze] persist failed:', e.message);
+  }
+}
 
 export async function POST(request) {
   // Writers only (admin/procurement/manager) — same gate as document writes.
@@ -39,8 +59,30 @@ export async function POST(request) {
   catch { return NextResponse.json({ error: 'invalid JSON' }, { status: 400 }); }
 
   const kind = body?.kind;
+  // Automatic runs (e.g. auto-evaluate on upload) respect the monthly token
+  // budget: when spent, autos stop but MANUAL review keeps working — exactly
+  // what the settings page promises ("ยังทำมือได้").
+  const isAuto = body?.auto === true;
+
   let model = 'claude-opus-4-8';
-  try { model = resolveModel((await getSettings())?.ai?.defaultModel); } catch { /* default */ }
+  let level = 'medium';
+  try {
+    const s = await getSettings();
+    model = resolveModel(s?.ai?.defaultModel);
+    level = s?.ai?.explanationLevel || 'medium';
+  } catch { /* defaults */ }
+
+  if (isAuto) {
+    try {
+      const u = await getAiUsage();
+      if (u.budget > 0 && u.tokens >= u.budget) {
+        return NextResponse.json(
+          { error: 'งบ token AI รายเดือนหมดแล้ว — การวิเคราะห์อัตโนมัติหยุดชั่วคราว (กดวิเคราะห์เองได้)', code: 'budget' },
+          { status: 429 }
+        );
+      }
+    } catch { /* budget unreadable → allow */ }
+  }
 
   try {
     if (kind === 'contract') {
@@ -76,11 +118,18 @@ export async function POST(request) {
         'วันสิ้นสุด': contract.end_date,
         'การรับประกัน': contract.warranty,
         'สถานะ': contract.status,
-        'หมายเหตุ': contract.notes,
       };
-      const result = await analyzeContract({ model, pdf, meta });
-      await appendAudit({ actor: gate.user.email, action: 'ai.analyze', target: `contract/${id}`, changes: { model, withPdf: !!pdf } });
-      return NextResponse.json({ ok: true, kind, ...result, source: pdf ? 'pdf' : 'fields' });
+      const result = await analyzeContract({ model, pdf, meta, level });
+      await recordAiUsage(result.tokensUsed).catch(() => {});
+      const stored = {
+        summary: result.summary, issues: result.issues, recommendation: result.recommendation,
+        model: result.model, source: pdf ? 'pdf' : 'fields',
+        at: new Date().toISOString(), by: gate.user.email, auto: isAuto,
+      };
+      await persistContractAnalysis(id, stored);
+      await appendAudit({ actor: gate.user.email, action: 'ai.analyze', target: `contract/${id}`,
+                          changes: { model, withPdf: !!pdf, auto: isAuto, tokens: result.tokensUsed } });
+      return NextResponse.json({ ok: true, kind, ...stored });
     }
 
     if (kind === 'comparison') {
@@ -91,9 +140,15 @@ export async function POST(request) {
         .from('comparisons').select('*').eq('id', id).maybeSingle();
       if (!cmp) return NextResponse.json({ error: 'ไม่พบการเปรียบเทียบ' }, { status: 404 });
 
-      const result = await analyzeComparison({ model, cmp });
-      await appendAudit({ actor: gate.user.email, action: 'ai.analyze', target: `comparison/${id}`, changes: { model } });
-      return NextResponse.json({ ok: true, kind, ...result });
+      const result = await analyzeComparison({ model, cmp, level });
+      await recordAiUsage(result.tokensUsed).catch(() => {});
+      await appendAudit({ actor: gate.user.email, action: 'ai.analyze', target: `comparison/${id}`,
+                          changes: { model, tokens: result.tokensUsed } });
+      return NextResponse.json({
+        ok: true, kind,
+        summary: result.summary, issues: result.issues, recommendation: result.recommendation,
+        model: result.model, at: new Date().toISOString(), by: gate.user.email,
+      });
     }
 
     return NextResponse.json({ error: 'kind ไม่ถูกต้อง (contract|comparison)' }, { status: 400 });

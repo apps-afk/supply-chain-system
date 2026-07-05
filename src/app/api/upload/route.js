@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
-import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../lib/auth-messages';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../lib/auth';
+import { requireAuth } from '../../../lib/api-auth';
 import { uploadToCategory, CATEGORIES, isGDriveConfigured } from '../../../lib/gdrive';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
 import { appendAudit } from '../../../lib/workspace';
-import { canWrite } from '../../../lib/permissions';
+import { WRITER_ROLES } from '../../../lib/permissions';
 
 const MAX_MB = 25;
 // Accept PDF, Word documents, and common image formats.
@@ -78,13 +76,9 @@ export const maxDuration = 60;    // PDFs can take a bit on slow links
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
-  }
-  if (!canWrite(session.user.role)) {
-    return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
-  }
+  const gate = await requireAuth(WRITER_ROLES);
+  if (!gate.ok) return gate.response;
+  const session = gate.session;
   if (!isGDriveConfigured) {
     return NextResponse.json({
       error: 'ยังไม่ได้ตั้งค่า Google Drive — ติดต่อ admin'

@@ -86,9 +86,56 @@ export function Pager({ page, pages, setPage, total }) {
   );
 }
 
+/* ---- Workspace export policy (settings-workspace → security) ----------
+   Every CSV export honours the admin-set policy: row cap (maxBulkExport),
+   PII masking (maskPII), and the sensitive-column block
+   (restrictedFieldsBlock). Fetched once per page-load; if the endpoint is
+   unreachable we fall back to conservative defaults. */
+let _policyPromise = null;
+export function getExportPolicy() {
+  if (!_policyPromise) {
+    _policyPromise = fetch('/api/workspace/policy')
+      .then(r => (r.ok ? r.json() : null))
+      .catch(() => null)
+      .then(p => p || { maskPII: true, restrictedFieldsBlock: true, maxBulkExport: 1000, watermarkDownloads: true });
+  }
+  return _policyPromise;
+}
+
+const SENSITIVE_COL = /บัตรประชาชน|เลขประจำตัว|citizen|id.?card|เงินเดือน|salary|บัญชีธนาคาร|เลขบัญชี|bank.?(acc|no)|iban/i;
+const PII_COL = /อีเมล|email|โทร|phone|mobile|เบอร์|contact/i;
+
+export function maskPIIValue(v) {
+  const s = v == null ? '' : String(v);
+  if (!s) return s;
+  if (s.includes('@')) {
+    const [u, d] = s.split('@');
+    return `${u.slice(0, 1)}***@${(d || '').slice(0, 1)}***`;
+  }
+  const digits = s.replace(/\D/g, '');
+  if (digits.length >= 6) return s.slice(0, 3) + '***' + s.slice(-2);
+  return s.slice(0, 1) + '***';
+}
+
 // CSV export with a UTF-8 BOM so Thai text opens correctly in Excel.
 // columns: [{ key, label }] — value taken from row[key] (or fn(row) if key is a function).
-export function exportCSV(filename, columns, rows) {
+// Async (fire-and-forget from onClick) because it consults the export policy.
+export async function exportCSV(filename, columns, rows) {
+  const policy = await getExportPolicy();
+
+  // Sensitive-column block: national-ID / salary / bank columns never leave
+  // the system when the policy says so.
+  let cols = columns;
+  if (policy.restrictedFieldsBlock) {
+    cols = columns.filter(c => !SENSITIVE_COL.test(`${c.label || ''} ${typeof c.key === 'string' ? c.key : ''}`));
+  }
+
+  // Bulk-leak cap: export at most maxBulkExport rows per file.
+  let outRows = rows;
+  const cap = Number(policy.maxBulkExport) || 0;
+  let truncated = false;
+  if (cap > 0 && rows.length > cap) { outRows = rows.slice(0, cap); truncated = true; }
+
   const esc = v => {
     let s = v == null ? '' : String(v);
     // Formula-injection guard: a cell starting with = + - @ (or tab/CR) is
@@ -97,10 +144,15 @@ export function exportCSV(filename, columns, rows) {
     if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const head = columns.map(c => esc(c.label)).join(',');
-  const body = rows.map(r =>
-    columns.map(c => esc(typeof c.key === 'function' ? c.key(r) : r[c.key])).join(',')
-  ).join('\n');
+  const cell = (c, r) => {
+    let v = typeof c.key === 'function' ? c.key(r) : r[c.key];
+    if (policy.maskPII && PII_COL.test(`${c.label || ''} ${typeof c.key === 'string' ? c.key : ''}`)) {
+      v = maskPIIValue(v);
+    }
+    return esc(v);
+  };
+  const head = cols.map(c => esc(c.label)).join(',');
+  const body = outRows.map(r => cols.map(c => cell(c, r)).join(',')).join('\n');
   const blob = new Blob(['\ufeff' + head + '\n' + body], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -108,4 +160,8 @@ export function exportCSV(filename, columns, rows) {
   document.body.appendChild(a); a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+
+  if (truncated) {
+    alert(`ส่งออก ${cap.toLocaleString()} รายการแรกจากทั้งหมด ${rows.length.toLocaleString()} รายการ — ตามนโยบาย "จำกัด export ครั้งละ" (ผู้ดูแลปรับได้ที่ ตั้งค่าพื้นที่ทำงาน)`);
+  }
 }

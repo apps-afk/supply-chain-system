@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../lib/auth-messages';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '../../../lib/auth';
+import { FORBIDDEN_MESSAGE, requireAuth } from '../../../lib/api-auth';
 import {
   listUsers, updateUserRole, deleteUser, adminCreateUser, adminResetPassword,
 } from '../../../lib/users';
@@ -10,21 +8,14 @@ import { appendAudit } from '../../../lib/workspace';
 const DOMAIN = 'initialestate.com';
 
 async function requireAdmin() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    return { err: NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 }) };
-  }
-  if (session.user.role !== 'admin') {
-    return { err: NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 }) };
-  }
-  return { session };
+  const gate = await requireAuth(['admin']);
+  return gate.ok ? { session: gate.session } : { err: gate.response };
 }
 
 export async function GET(request) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
-  }
+  const gate = await requireAuth();
+  if (!gate.ok) return gate.response;
+  const session = gate.session;
   // `?scope=contacts` returns a minimal directory (name + email) that any
   // authenticated user may read — used by RFQ/contact pickers. Full user
   // management data stays admin-only.

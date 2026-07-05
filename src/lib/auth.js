@@ -3,7 +3,9 @@ import CredentialsProvider from 'next-auth/providers/credentials';
 import { validateUser } from './users';
 import { NEXTAUTH_SECRET } from './auth-config';
 import { rateLimit } from './rate-limit';
-import { appendAudit } from './workspace';
+import { appendAudit, getTotp } from './workspace';
+import { getPolicy, ipAllowed } from './policy';
+import { verifyTOTP } from './totp';
 
 // SECURITY: if NEXTAUTH_SECRET isn't set in production, auth-config.js falls
 // back to a guessable dev string — sessions become forgeable. We WARN loudly
@@ -29,6 +31,7 @@ const providers = [
     credentials: {
       email:    { label: 'อีเมล',    type: 'email'    },
       password: { label: 'รหัสผ่าน', type: 'password' },
+      otp:      { label: 'รหัส OTP', type: 'text'     },
     },
     async authorize(credentials, req) {
       if (!credentials?.email || !credentials?.password) return null;
@@ -56,11 +59,45 @@ const providers = [
       if (tooMany) {
         throw new Error('พยายามเข้าสู่ระบบบ่อยเกินไป — กรุณารอ 5 นาทีแล้วลองใหม่');
       }
+
+      // Workspace IP allowlist applies to the login door too, not just the
+      // API (requireAuth). Fail-open on a settings-read error — a broken DB
+      // must not lock everyone out.
+      try {
+        const sec = (await getPolicy()).security || {};
+        if (String(sec.ipAllowlist || '').trim() && !ipAllowed(ip, sec.ipAllowlist)) {
+          throw Object.assign(new Error(`IP ของคุณ (${ip}) ไม่อยู่ในรายการที่อนุญาต — ติดต่อผู้ดูแลระบบ`), { ipBlocked: true });
+        }
+      } catch (e) { if (e.ipBlocked) throw e; }
+
       const user = await validateUser(credentials.email, credentials.password);
       if (!user) {
         await appendAudit({ actor: key, action: 'auth.login_failed', target: 'credentials' }).catch(() => {});
         throw new Error('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
       }
+
+      // Two-factor: users who enrolled a TOTP authenticator must supply a
+      // valid 6-digit code. The password is verified FIRST (above) so this
+      // never becomes an enumeration oracle for enrollment status.
+      try {
+        const t = await getTotp(key);
+        if (t?.enabled && t.secret) {
+          const otp = String(credentials.otp || '').replace(/\s/g, '');
+          if (!otp) throw Object.assign(new Error('OTP_REQUIRED'), { otpFlow: true });
+          if (!rateLimit(`otp:${ip}:${key}`, { limit: 10, windowMs: 5 * 60 * 1000 })) {
+            throw Object.assign(new Error('ลองรหัส OTP บ่อยเกินไป — รอ 5 นาที'), { otpFlow: true });
+          }
+          if (!verifyTOTP(t.secret, otp)) {
+            await appendAudit({ actor: key, action: 'auth.otp_failed', target: 'credentials' }).catch(() => {});
+            throw Object.assign(new Error('รหัส OTP ไม่ถูกต้อง'), { otpFlow: true });
+          }
+        }
+      } catch (e) {
+        if (e.otpFlow) throw e;
+        // Settings store unreachable → allow password-only login rather than
+        // locking the whole company out on a transient DB error.
+      }
+
       await appendAudit({ actor: key, action: 'auth.login', target: 'credentials' }).catch(() => {});
       return user;
     },
@@ -114,6 +151,9 @@ export const authOptions = {
           } catch { /* transient */ }
         }
         token.role = role || 'user';
+        // Sign-in timestamp — requireAuth enforces the workspace's
+        // sessionTimeoutHours policy against this.
+        token.loginAt = Date.now();
         if (token.email) roleCache.set(token.email.toLowerCase(), { role: token.role, at: Date.now() });
         return token;
       }
@@ -146,6 +186,7 @@ export const authOptions = {
         session.user.id = token.sub;
         session.user.role = token.role;
       }
+      session.loginAt = token.loginAt || null;
       return session;
     },
   },

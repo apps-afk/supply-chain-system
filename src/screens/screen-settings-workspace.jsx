@@ -47,12 +47,15 @@ export function ScreenSettingsWorkspace({ go }) {
   const [subProc, setSubProc]     = useState([]);
   const [team, setTeam]           = useState([]);
   const [dsar, setDsar]           = useState({ queue: [], stats: { pending: 0, avgDays: 4 } });
+  const [aiUsage, setAiUsage]     = useState(null);   // { month, tokens, budget }
+  const [yourIp, setYourIp]       = useState('');
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
   const [toast, setToast]         = useState(null);
   const [showDsar, setShowDsar]   = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const [showAudit, setShowAudit] = useState(false);
+  const [showDpa, setShowDpa]     = useState(false);
 
   async function load() {
     setLoading(true);
@@ -61,15 +64,18 @@ export function ScreenSettingsWorkspace({ go }) {
         fetch('/api/workspace').then(r => r.json()).catch(() => ({})),
         fetch('/api/users').then(r => r.json()).catch(() => ({})),
         fetch('/api/workspace/dsar').then(r => r.json()).catch(() => ({})),
+        fetch('/api/workspace/policy').then(r => r.json()).catch(() => ({})),
       ];
-      const [ws, us, dq] = await Promise.all(requests);
+      const [ws, us, dq, pol] = await Promise.all(requests);
       if (ws.settings) {
         setSettings(ws.settings);
         setOriginal(JSON.parse(JSON.stringify(ws.settings)));
       }
+      if (ws.aiUsage) setAiUsage(ws.aiUsage);
       if (ws.subProcessors) setSubProc(ws.subProcessors);
       if (us.users) setTeam(us.users);
       if (dq.queue) setDsar({ queue: dq.queue, stats: dq.stats });
+      if (pol.yourIp) setYourIp(pol.yourIp);
     } catch {}
     setLoading(false);
   }
@@ -104,6 +110,7 @@ export function ScreenSettingsWorkspace({ go }) {
       else {
         setOriginal(JSON.parse(JSON.stringify(data.settings)));
         setSettings(data.settings);
+        if (data.aiUsage) setAiUsage(data.aiUsage);
         setToast({ msg: 'บันทึกเรียบร้อย', tone: 'ok' });
         setTimeout(() => setToast(null), 2500);
       }
@@ -181,7 +188,7 @@ export function ScreenSettingsWorkspace({ go }) {
 
       {/* Row 2: Security & Data Protection */}
       <Card title="ความปลอดภัยและการปกป้องข้อมูล" subtitle="ตั้งค่าการป้องกันข้อมูลรั่วไหล และการเข้าถึงระบบ" style={{ marginTop: 24 }}>
-        <SecuritySection s={settings.security} on={(k, v) => patch(`security.${k}`, v)} />
+        <SecuritySection s={settings.security} on={(k, v) => patch(`security.${k}`, v)} yourIp={yourIp} />
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--rule)',
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
           <div>
@@ -199,7 +206,7 @@ export function ScreenSettingsWorkspace({ go }) {
 
       {/* Row 3: AI Usage Controls */}
       <Card title="การควบคุมการใช้ AI" subtitle="งบประมาณ, ข้อมูลส่วนตัว, และนโยบายการตรวจสอบของมนุษย์" style={{ marginTop: 24 }}>
-        <AIUsageSection s={settings.aiUsage} on={(k, v) => patch(`aiUsage.${k}`, v)} />
+        <AIUsageSection s={settings.aiUsage} on={(k, v) => patch(`aiUsage.${k}`, v)} usage={aiUsage} />
       </Card>
 
       {/* Row 4: Privacy & DSR */}
@@ -208,7 +215,9 @@ export function ScreenSettingsWorkspace({ go }) {
           dsar={dsar}
           subProc={subProc}
           settings={settings.privacy}
+          team={team}
           onShowDsar={() => setShowDsar(true)}
+          onShowDpa={() => setShowDpa(true)}
         />
       </Card>
 
@@ -237,6 +246,7 @@ export function ScreenSettingsWorkspace({ go }) {
       )}
       {showForgot && <ForgotQueueModal onClose={() => setShowForgot(false)} />}
       {showAudit  && <AuditLogModal   onClose={() => setShowAudit(false)} />}
+      {showDpa    && <DpaModal orgName={settings.org?.name || 'Initial Estate'} subProc={subProc} onClose={() => setShowDpa(false)} />}
     </div>
   );
 }
@@ -423,24 +433,73 @@ function AuditLogModal({ onClose }) {
 
 function OrgInfoSection({ s, on }) {
   const initials = (s.name || 'IE').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
+  const fileRef = React.useRef(null);
+  const [logoErr, setLogoErr] = useState('');
+
+  // Real logo upload: read the file, downscale to 128px on a canvas, store
+  // as a small PNG data-URL in settings (no external storage needed). The
+  // server re-validates format and size.
+  async function pickLogo(e) {
+    setLogoErr('');
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(f.type)) { setLogoErr('รองรับ PNG / JPEG / WebP เท่านั้น'); return; }
+    try {
+      const url = URL.createObjectURL(f);
+      const img = await new Promise((res, rej) => {
+        const i = new Image();
+        i.onload = () => res(i); i.onerror = rej; i.src = url;
+      });
+      const size = 128;
+      const scale = Math.min(size / img.width, size / img.height, 1);
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      const dataUrl = canvas.toDataURL('image/png');
+      if (dataUrl.length > 200 * 1024) { setLogoErr('รูปซับซ้อนเกินไป — ลองรูปที่เรียบง่ายกว่านี้'); return; }
+      on('logoUrl', dataUrl);   // saved via the normal "บันทึกการเปลี่ยนแปลง" button
+    } catch {
+      setLogoErr('อ่านไฟล์รูปไม่สำเร็จ');
+    }
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div style={{
-          width: 56, height: 56, borderRadius: 10,
-          background: 'var(--ochre)', color: 'white',
-          display: 'grid', placeItems: 'center',
-          fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600,
-        }}>{initials}</div>
-        <button type="button" className="btn" style={{ fontSize: 13 }}>อัปโหลดโลโก้</button>
+        {s.logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={s.logoUrl} alt="โลโก้" width={56} height={56}
+               style={{ borderRadius: 10, objectFit: 'contain', border: '1px solid var(--rule)', background: '#fff' }} />
+        ) : (
+          <div style={{
+            width: 56, height: 56, borderRadius: 10,
+            background: 'var(--ochre)', color: 'white',
+            display: 'grid', placeItems: 'center',
+            fontFamily: 'var(--font-serif)', fontSize: 22, fontWeight: 600,
+          }}>{initials}</div>
+        )}
+        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={pickLogo} style={{ display: 'none' }} />
+        <button type="button" className="btn" style={{ fontSize: 13 }} onClick={() => fileRef.current?.click()}>
+          อัปโหลดโลโก้
+        </button>
+        {s.logoUrl && (
+          <button type="button" className="btn ghost" style={{ fontSize: 13, color: 'var(--clay)' }} onClick={() => on('logoUrl', null)}>
+            ลบโลโก้
+          </button>
+        )}
       </div>
+      {logoErr && <div style={{ fontSize: 12, color: '#8B2A1A' }}>{logoErr}</div>}
 
-      <Field label="ชื่อบริษัท" hint="แสดงในระบบและในอีเมลที่ส่งถึงผู้ใช้และผู้ขาย">
+      <Field label="ชื่อบริษัท" hint="แสดงในระบบและเอกสารที่พิมพ์ (เช่น ลายน้ำ)">
         <input style={inputStyle} value={s.name} onChange={e => on('name', e.target.value)} />
       </Field>
 
-      <Field label="โดเมนอีเมล" hint="ใช้ตรวจหาเพื่อนร่วมงานจากโดเมนนี้โดยอัตโนมัติ">
-        <input style={inputStyle} value={s.domain} onChange={e => on('domain', e.target.value)} />
+      <Field label="โดเมนอีเมล" hint="โดเมนที่อนุญาตให้เข้าสู่ระบบ — กำหนดตายตัวในระบบ (แก้ไม่ได้จากหน้านี้เพื่อความปลอดภัย)">
+        <input style={{ ...inputStyle, background: 'var(--surface-2)', color: 'var(--ink-3)' }} value={s.domain} disabled />
       </Field>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -489,24 +548,18 @@ function AIDefaultsSection({ s, on }) {
             : '⚠ ยังไม่ได้ใส่ ANTHROPIC_API_KEY — เลือกโมเดลไว้ก่อนได้ แต่ปุ่ม AI จะยังใช้ไม่ได้จนกว่าจะตั้งค่า key ใน Vercel'}
         </div>
       )}
-      <Field label="โมเดลเริ่มต้น" hint="ใช้ประเมินใบเสนอราคาและสัญญาทุกฉบับ สามารถกำหนดเฉพาะโครงการได้">
+      <Field label="โมเดลเริ่มต้น" hint="ใช้กับปุ่ม AI ตรวจสัญญา และ AI วิเคราะห์เทียบราคา ทั้งระบบ">
         <Select value={s.defaultModel} onChange={v => on('defaultModel', v)} options={MODELS} />
       </Field>
 
       <ToggleRow
-        label="คัดกรองอัตโนมัติเมื่ออัปโหลด"
-        hint="เริ่มการประเมิน AI ทันทีเมื่ออัปโหลดใบเสนอราคา"
+        label="AI ตรวจสัญญาอัตโนมัติเมื่ออัปโหลด"
+        hint="เมื่ออัปโหลดสัญญาใหม่ ระบบจะให้ AI อ่านและสรุปให้ทันที — ผลรอไว้ในขั้นตอนตรวจสอบ (หยุดอัตโนมัติเมื่องบ token หมด)"
         value={s.autoEvaluateOnUpload}
         onChange={v => on('autoEvaluateOnUpload', v)}
       />
-      <ToggleRow
-        label="คำนวณคะแนนใหม่เมื่อ RFQ เปลี่ยน"
-        hint="จัดอันดับผู้ขายใหม่อัตโนมัติเมื่อแก้ไขเงื่อนไข RFQ"
-        value={s.recomputeOnRequirementChange}
-        onChange={v => on('recomputeOnRequirementChange', v)}
-      />
 
-      <Field label="ระดับคำอธิบาย">
+      <Field label="ระดับคำอธิบาย" hint="กำหนดความยาวคำตอบของ AI — สั้น = สรุป 1-2 ประโยค · ละเอียด = วิเคราะห์ครบทุกประเด็น">
         <Segmented
           value={s.explanationLevel}
           onChange={v => on('explanationLevel', v)}
@@ -517,44 +570,37 @@ function AIDefaultsSection({ s, on }) {
           ]}
         />
       </Field>
-
-      <ToggleRow
-        label="แสดงช่วงความมั่นใจ"
-        hint="แสดงค่า ± ข้างคะแนน"
-        value={s.showConfidence}
-        onChange={v => on('showConfidence', v)}
-      />
     </div>
   );
 }
 
-function SecuritySection({ s, on }) {
+function SecuritySection({ s, on, yourIp }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       <ToggleRow
         label="บังคับใช้ 2FA สำหรับผู้ดูแลระบบ"
-        hint="ต้องยืนยันรหัส OTP ทุกครั้งที่ login (แนะนำ)"
+        hint="Admin ทุกคนจะเห็นแถบเตือนให้ตั้งค่า 2FA (แอป Authenticator) — บัญชีที่ตั้งค่าแล้วต้องกรอกรหัส 6 หลักทุกครั้งที่เข้าสู่ระบบ · ตั้งค่าของตัวเองได้ที่ ตั้งค่า → บัญชีของฉัน"
         value={s.require2FA}
         onChange={v => on('require2FA', v)}
         divider
       />
       <ToggleRow
-        label="ปิดบังข้อมูลส่วนบุคคล (PII) ในรายงาน"
-        hint="ชื่อ-อีเมล-โทรศัพท์จะถูกแสดงบางส่วน เช่น s***@i***.com"
+        label="ปิดบังข้อมูลส่วนบุคคล (PII) ในไฟล์ export"
+        hint="คอลัมน์อีเมล/เบอร์โทรใน CSV ที่ส่งออกจะถูกปิดบังบางส่วน เช่น s***@i***"
         value={s.maskPII}
         onChange={v => on('maskPII', v)}
         divider
       />
       <ToggleRow
         label="ใส่ลายน้ำเอกสารที่ดาวน์โหลด"
-        hint="ฝังชื่อผู้ดาวน์โหลด + เวลาเข้า PDF เพื่อตามรอยข้อมูลรั่ว"
+        hint="พิมพ์/บันทึก PDF จากระบบจะมีชื่อผู้ดาวน์โหลด + เวลา ประทับท้ายทุกหน้า เพื่อตามรอยข้อมูลรั่ว"
         value={s.watermarkDownloads}
         onChange={v => on('watermarkDownloads', v)}
         divider
       />
       <ToggleRow
         label="บล็อก field ที่ละเอียดอ่อนจาก export"
-        hint="ห้าม export คอลัมน์เลขประจำตัวประชาชน, เงินเดือน, ข้อมูลธนาคาร"
+        hint="คอลัมน์เลขบัตรประชาชน / เงินเดือน / บัญชีธนาคาร จะถูกตัดออกจากไฟล์ CSV อัตโนมัติ"
         value={s.restrictedFieldsBlock}
         onChange={v => on('restrictedFieldsBlock', v)}
         divider
@@ -563,7 +609,7 @@ function SecuritySection({ s, on }) {
       <div style={{ padding: '16px 0', borderBottom: '1px solid var(--rule)' }}>
         <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>หมดเวลา Session</div>
         <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 10 }}>
-          ออกจากระบบอัตโนมัติเมื่อไม่ได้ใช้งานนานเกินที่กำหนด
+          นับจากเวลาเข้าสู่ระบบ — เกินกำหนดแล้วทุกคำขอจะถูกปฏิเสธจนกว่าจะ login ใหม่
         </div>
         <Segmented
           value={s.sessionTimeoutHours}
@@ -595,7 +641,9 @@ function SecuritySection({ s, on }) {
       <div style={{ padding: '16px 0', borderBottom: '1px solid var(--rule)' }}>
         <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>IP allowlist</div>
         <div style={{ fontSize: 12, color: 'var(--ink-3)', marginBottom: 10 }}>
-          ระบุ IP ที่อนุญาตเข้าระบบ (คั่นด้วยจุลภาค) — เว้นว่าง = ไม่จำกัด
+          ระบุ IPv4 หรือ CIDR ที่อนุญาต (คั่นด้วยจุลภาค) — เว้นว่าง = ไม่จำกัด ·
+          บังคับใช้ทั้งหน้า login และทุก API · ระบบจะไม่ยอมบันทึกรายการที่บล็อกตัวคุณเอง
+          {yourIp && <> · IP ปัจจุบันของคุณ: <strong style={{ fontFamily: 'var(--font-mono)' }}>{yourIp}</strong></>}
         </div>
         <textarea
           rows={2}
@@ -627,7 +675,10 @@ function SecuritySection({ s, on }) {
   );
 }
 
-function AIUsageSection({ s, on }) {
+function AIUsageSection({ s, on, usage }) {
+  const used = usage?.tokens || 0;
+  const budget = Number(s.monthlyTokenBudget) || 0;
+  const pct = budget > 0 ? Math.min(100, Math.round(used / budget * 100)) : 0;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       <div style={{ padding: '4px 0 16px', borderBottom: '1px solid var(--rule)' }}>
@@ -635,7 +686,7 @@ function AIUsageSection({ s, on }) {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>งบ token รายเดือน</div>
             <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-              จำกัดค่าใช้จ่าย AI — ถ้าใช้ครบจะหยุดคัดกรองอัตโนมัติ (ยังทำมือได้)
+              จำกัดค่าใช้จ่าย AI — ถ้าใช้ครบ การวิเคราะห์อัตโนมัติจะหยุด (กดวิเคราะห์เองยังได้) · 0 = ไม่จำกัด
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -648,11 +699,27 @@ function AIUsageSection({ s, on }) {
             <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>tokens</span>
           </div>
         </div>
+        {/* Live usage meter — counted server-side from every real AI call */}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--ink-3)', marginBottom: 5 }}>
+            <span>ใช้ไปเดือนนี้ ({usage?.month || new Date().toISOString().slice(0, 7)})</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>
+              {used.toLocaleString()}{budget > 0 ? ` / ${budget.toLocaleString()} (${pct}%)` : ' tokens'}
+            </span>
+          </div>
+          <div style={{ height: 6, borderRadius: 999, background: 'var(--rule)', overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', width: budget > 0 ? `${pct}%` : (used > 0 ? '4%' : '0%'),
+              background: pct >= 90 ? 'var(--clay)' : 'var(--teal)',
+              transition: 'width 0.4s',
+            }} />
+          </div>
+        </div>
       </div>
 
       <ToggleRow
         label="อนุญาตให้ผู้ให้บริการ AI เก็บข้อมูลเพื่อฝึกโมเดล"
-        hint="ปิดไว้เพื่อความปลอดภัย — Anthropic ไม่ใช้ข้อมูลฝึกโมเดลโดยค่าเริ่มต้น"
+        hint="บันทึกนโยบายไว้เป็นหลักฐาน PDPA — Anthropic ไม่ใช้ข้อมูล API ฝึกโมเดลอยู่แล้ว แนะนำให้ปิดไว้"
         value={s.allowTrainingData}
         onChange={v => on('allowTrainingData', v)}
         tone={s.allowTrainingData ? 'warn' : 'ok'}
@@ -660,14 +727,14 @@ function AIUsageSection({ s, on }) {
       />
       <ToggleRow
         label="ต้องให้คนตรวจสอบก่อนตัดสินใจสำคัญ"
-        hint="AI เสนอผลได้แต่การอนุมัติสุดท้ายต้องเป็นคน (Human-in-the-loop)"
+        hint="ระบบออกแบบตามหลักนี้อยู่แล้ว — AI แนะนำได้อย่างเดียว การอนุมัติ/บันทึกทุกจุดเป็นการกดของคนเสมอ"
         value={s.requireHumanReview}
         onChange={v => on('requireHumanReview', v)}
         divider
       />
       <ToggleRow
         label="บล็อกผู้ให้บริการ AI ภายนอกที่ไม่ได้รับอนุมัติ"
-        hint="ป้องกันการเรียก API ของ OpenAI, Gemini, ฯลฯ ที่ยังไม่ได้เซ็น DPA"
+        hint="ระบบเชื่อมต่อเฉพาะ Anthropic (มี DPA) — ไม่มีการเรียก OpenAI/Gemini ในโค้ด · ตั้งค่านี้เป็นบันทึกนโยบาย"
         value={s.blockExternalProviders}
         onChange={v => on('blockExternalProviders', v)}
         divider
@@ -689,7 +756,21 @@ function AIUsageSection({ s, on }) {
   );
 }
 
-function PrivacySection({ dsar, subProc, settings, onShowDsar }) {
+function PrivacySection({ dsar, subProc, settings, team, onShowDsar, onShowDpa }) {
+  // Real consent-records export: every user account + the privacy-notice
+  // version they accepted at registration. Goes through exportCSV so the
+  // workspace export policy (masking/caps) applies here too.
+  async function exportConsentCSV() {
+    const { exportCSV } = await import('../lib/table-utils');
+    const stamp = new Date().toISOString().slice(0, 10);
+    exportCSV(`consent-records-${stamp}.csv`, [
+      { key: 'name',       label: 'ชื่อ' },
+      { key: r => r.email, label: 'อีเมล' },
+      { key: 'role',       label: 'สิทธิ์' },
+      { key: r => r.createdAt || r.created_at || '', label: 'วันที่สมัคร (ยอมรับประกาศความเป็นส่วนตัว)' },
+      { key: () => settings.consentVersion, label: 'เวอร์ชันประกาศ' },
+    ], team || []);
+  }
   return (
     <div>
       {/* DSAR Row */}
@@ -712,16 +793,16 @@ function PrivacySection({ dsar, subProc, settings, onShowDsar }) {
 
       <PrivacyRow
         title="บันทึกความยินยอม"
-        desc={`ผู้ใช้และผู้ขายทุกคนยอมรับประกาศความเป็นส่วนตัวเมื่อสมัคร — บันทึกแก้ไขไม่ได้ (เวอร์ชัน ${settings.consentVersion}) ส่งออกได้`}
-        action="ส่งออกบันทึกความยินยอม"
-        onAction={() => alert('ส่งออกบันทึกความยินยอม — ฟังก์ชันนี้จะ generate CSV ในระบบจริง')}
+        desc={`ผู้ใช้ทุกคนยอมรับประกาศความเป็นส่วนตัวเมื่อสมัคร (เวอร์ชัน ${settings.consentVersion}) — ส่งออกรายชื่อ + วันที่ยอมรับเป็น CSV`}
+        action="ส่งออกบันทึกความยินยอม (CSV)"
+        onAction={exportConsentCSV}
       />
 
       <PrivacyRow
         title="ข้อตกลงประมวลผลข้อมูล (DPA)"
-        desc="DPA มาตรฐานพร้อมดาวน์โหลด จำเป็นสำหรับความสัมพันธ์ผู้ควบคุม-ผู้ประมวลผลข้อมูล"
-        action="ดาวน์โหลด DPA (PDF)"
-        onAction={() => alert('ดาวน์โหลด DPA — ฟังก์ชันนี้จะส่งไฟล์ PDF ในระบบจริง')}
+        desc="DPA มาตรฐานพร้อมพิมพ์/บันทึกเป็น PDF — จำเป็นสำหรับความสัมพันธ์ผู้ควบคุม-ผู้ประมวลผลข้อมูล"
+        action="เปิดเอกสาร DPA (พิมพ์/PDF)"
+        onAction={onShowDpa}
         footer={
           <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 8 }}>ผู้ประมวลผลรอง</div>
@@ -777,10 +858,9 @@ function TeamMini({ members }) {
         const initials = (m.name || m.email).slice(0, 2).toUpperCase();
         const roleShort = {
           admin: 'ผู้ดูแล',
-          hr_manager: 'หัวหน้างาน',
           procurement: 'จัดซื้อ',
-          accountant: 'บัญชี',
           manager: 'ผู้จัดการ',
+          account: 'บัญชี (อ่าน)',
           user: 'ผู้ดู',
         }[m.role] || m.role;
         return (
@@ -833,6 +913,14 @@ function ModalShell({ title, children, onClose, wide }) {
 }
 
 function DsarModal({ dsar, onClose, onResolved }) {
+  // Log a new request received outside the system (email/phone/paper) so the
+  // 30-day PDPA clock is tracked here.
+  const [adding, setAdding]   = useState(false);
+  const [nEmail, setNEmail]   = useState('');
+  const [nType, setNType]     = useState('access');
+  const [nNote, setNNote]     = useState('');
+  const [busy, setBusy]       = useState(false);
+
   async function resolve(id) {
     if (!confirm('ทำเครื่องหมายว่าตอบกลับคำขอนี้แล้ว?')) return;
     const res = await fetch('/api/workspace/dsar', {
@@ -842,6 +930,25 @@ function DsarModal({ dsar, onClose, onResolved }) {
     });
     if (res.ok) onResolved();
     else alert('ไม่สำเร็จ');
+  }
+
+  async function addRequest(e) {
+    e.preventDefault();
+    if (!nEmail.trim()) return;
+    setBusy(true);
+    const res = await fetch('/api/workspace/dsar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ applicantEmail: nEmail.trim(), type: nType, note: nNote.trim() }),
+    });
+    setBusy(false);
+    if (res.ok) {
+      setAdding(false); setNEmail(''); setNNote(''); setNType('access');
+      onResolved();   // refetch queue
+    } else {
+      const d = await res.json().catch(() => ({}));
+      alert(d.error || 'บันทึกไม่สำเร็จ');
+    }
   }
   return (
     <div style={{
@@ -856,8 +963,44 @@ function DsarModal({ dsar, onClose, onResolved }) {
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 18 }}>
           <div style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 500 }}>คิวคำขอ DSAR</div>
-          <button className="btn ghost sm" onClick={onClose}>ปิด</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn sm" onClick={() => setAdding(a => !a)}>{adding ? 'ยกเลิก' : '+ บันทึกคำขอใหม่'}</button>
+            <button className="btn ghost sm" onClick={onClose}>ปิด</button>
+          </div>
         </div>
+
+        {adding && (
+          <form onSubmit={addRequest} style={{
+            display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end',
+            background: 'var(--surface-2)', border: '1px solid var(--rule)',
+            borderRadius: 8, padding: '12px 14px', marginBottom: 16,
+          }}>
+            <div style={{ flex: '1 1 200px' }}>
+              <label style={{ display: 'block', fontSize: 11.5, fontWeight: 500, color: 'var(--ink-2)', marginBottom: 4 }}>อีเมลเจ้าของข้อมูล</label>
+              <input type="email" required value={nEmail} onChange={e => setNEmail(e.target.value)}
+                     placeholder="someone@example.com" style={{ ...inputStyle, padding: '8px 10px', fontSize: 13 }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 11.5, fontWeight: 500, color: 'var(--ink-2)', marginBottom: 4 }}>ประเภท</label>
+              <select value={nType} onChange={e => setNType(e.target.value)}
+                      style={{ ...inputStyle, padding: '8px 10px', fontSize: 13, width: 140 }}>
+                {Object.entries(DSAR_TYPE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: '1 1 180px' }}>
+              <label style={{ display: 'block', fontSize: 11.5, fontWeight: 500, color: 'var(--ink-2)', marginBottom: 4 }}>หมายเหตุ</label>
+              <input value={nNote} onChange={e => setNNote(e.target.value)}
+                     placeholder="เช่น แจ้งทางอีเมลเมื่อ 3 ก.ค." style={{ ...inputStyle, padding: '8px 10px', fontSize: 13 }} />
+            </div>
+            <button type="submit" className="btn primary sm" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก'}</button>
+          </form>
+        )}
+
+        {dsar.queue.length === 0 && (
+          <div style={{ padding: 30, textAlign: 'center', color: 'var(--ink-3)', fontSize: 13 }}>
+            ยังไม่มีคำขอ — เมื่อได้รับคำขอ (ทางอีเมล/โทร) กด "+ บันทึกคำขอใหม่" เพื่อเริ่มนับ 30 วันตาม PDPA
+          </div>
+        )}
         <table className="tbl">
           <thead>
             <tr>
@@ -903,6 +1046,79 @@ function DsarModal({ dsar, onClose, onResolved }) {
             })}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   DPA document — printable Thai Data Processing Agreement.
+   Uses the same print-to-PDF pipeline as Compare/PO documents.
+   ============================================================ */
+
+function DpaModal({ orgName, subProc, onClose }) {
+  async function print() {
+    const { printDoc } = await import('./screen-compare-create-pricedb');
+    printDoc(`DPA_${orgName.replace(/\s+/g, '_')}`);
+  }
+  const today = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+  const P = ({ children }) => <p style={{ fontSize: 13, lineHeight: 1.75, color: 'var(--ink-2)', margin: '0 0 10px' }}>{children}</p>;
+  const H = ({ children }) => <div style={{ fontSize: 13.5, fontWeight: 600, margin: '16px 0 6px', color: 'var(--ink)' }}>{children}</div>;
+  return (
+    <div className="print-area modal-print-overlay" style={{
+      position: 'fixed', inset: 0, background: 'rgba(20,18,14,0.5)',
+      display: 'grid', placeItems: 'center', zIndex: 100, padding: 16,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: 'var(--surface)', padding: 32, borderRadius: 12,
+        width: '100%', maxWidth: 760, maxHeight: '88vh', overflowY: 'auto',
+        boxShadow: '0 16px 48px -12px rgba(20,18,14,0.3)',
+      }}>
+        <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 20, fontWeight: 500 }}>ข้อตกลงการประมวลผลข้อมูลส่วนบุคคล (DPA)</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn primary sm" onClick={print}>พิมพ์ / บันทึก PDF</button>
+            <button className="btn ghost sm" onClick={onClose}>ปิด</button>
+          </div>
+        </div>
+
+        <div style={{ textAlign: 'center', marginBottom: 18 }}>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: 18, fontWeight: 600 }}>ข้อตกลงการประมวลผลข้อมูลส่วนบุคคล</div>
+          <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 4 }}>Data Processing Agreement (DPA) · จัดทำ ณ วันที่ {today}</div>
+        </div>
+
+        <P><strong>{orgName}</strong> (ในฐานะ "ผู้ควบคุมข้อมูลส่วนบุคคล") ใช้ระบบ Supply Chain นี้ในการเก็บและประมวลผลข้อมูลของพนักงาน ผู้ขาย (Supplier) และคู่สัญญา ตามพระราชบัญญัติคุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562 (PDPA) โดยมีผู้ให้บริการภายนอกทำหน้าที่ "ผู้ประมวลผลข้อมูลส่วนบุคคล" ตามรายการท้ายข้อตกลงนี้</P>
+
+        <H>1. ขอบเขตข้อมูลที่ประมวลผล</H>
+        <P>ข้อมูลบัญชีผู้ใช้ (ชื่อ อีเมล เบอร์โทร สิทธิ์การใช้งาน), ข้อมูลผู้ขายและผู้ติดต่อ, เอกสารจัดซื้อ (ใบเสนอราคา สัญญา ใบสั่งซื้อ), และบันทึกการใช้งานระบบ (audit log)</P>
+
+        <H>2. วัตถุประสงค์</H>
+        <P>เพื่อบริหารงานจัดซื้อจัดจ้าง เก็บสัญญา เปรียบเทียบราคา ติดตามการชำระเงิน และตรวจสอบย้อนหลังตามกฎหมายและนโยบายภายใน เท่านั้น — ไม่มีการขายหรือแบ่งปันข้อมูลเพื่อการตลาด</P>
+
+        <H>3. ผู้ประมวลผลรอง (Sub-processors)</H>
+        <div style={{ margin: '6px 0 12px' }}>
+          {(subProc || []).map(p => (
+            <div key={p.code} style={{ fontSize: 12.5, color: 'var(--ink-2)', padding: '6px 10px', background: 'var(--surface-2)', borderRadius: 6, marginBottom: 6 }}>
+              <strong>{p.name}</strong> — {p.purpose} · ที่ตั้ง: {p.region}{p.note ? ` · ${p.note}` : ''}
+            </div>
+          ))}
+        </div>
+
+        <H>4. มาตรการความปลอดภัย</H>
+        <P>การเข้าถึงจำกัดด้วยบัญชีโดเมนบริษัท + รหัสผ่าน (รองรับ 2FA), การกำหนดสิทธิ์ตามบทบาท, การเข้ารหัสการส่งข้อมูล (TLS), บันทึกการเข้าถึงและแก้ไข (audit log) ตามระยะเวลาที่กำหนด, การจำกัดและปิดบังข้อมูลในการส่งออก และการสำรองข้อมูลสม่ำเสมอ</P>
+
+        <H>5. สิทธิของเจ้าของข้อมูล</H>
+        <P>เจ้าของข้อมูลมีสิทธิขอเข้าถึง แก้ไข ส่งออก หรือลบข้อมูลของตน (DSAR) โดยแจ้งผ่านผู้ดูแลระบบ — บริษัทจะดำเนินการภายใน 30 วันตามที่ PDPA กำหนด</P>
+
+        <H>6. การแจ้งเหตุละเมิด</H>
+        <P>หากพบการรั่วไหลของข้อมูลส่วนบุคคล ผู้ดูแลระบบจะประเมินและแจ้งสำนักงานคณะกรรมการคุ้มครองข้อมูลส่วนบุคคลภายใน 72 ชั่วโมงตามหลักเกณฑ์ พร้อมแจ้งเจ้าของข้อมูลเมื่อมีความเสี่ยงสูง</P>
+
+        <H>7. ระยะเวลาเก็บรักษา</H>
+        <P>เอกสารจัดซื้อและสัญญาเก็บตามอายุความทางกฎหมาย บันทึกการใช้งานเก็บตามนโยบาย retention ที่ตั้งค่าในระบบ ข้อมูลที่พ้นระยะจะถูกลบหรือทำให้ไม่ระบุตัวตน</P>
+
+        <div style={{ marginTop: 28, paddingTop: 16, borderTop: '1px solid var(--rule)', fontSize: 11.5, color: 'var(--ink-3)' }}>
+          เอกสารฉบับนี้สร้างจากระบบ Supply Chain ของ {orgName} · พิมพ์เมื่อ {today} · สำหรับใช้ประกอบการปฏิบัติตาม PDPA ภายในองค์กร
+        </div>
       </div>
     </div>
   );
