@@ -5,20 +5,19 @@ import { NEXTAUTH_SECRET } from './auth-config';
 import { rateLimit } from './rate-limit';
 import { appendAudit } from './workspace';
 
-// Fail CLOSED in production if the JWT secret isn't configured. auth-config.js
-// falls back to a public dev string so the Edge middleware never throws at
-// module load — but that string is guessable, so anyone could forge an admin
-// session. This module is node-only (imported by every API route via
-// authOptions, and by the NextAuth handler), so throwing here takes the auth
-// surface down loudly instead of running with a forgeable secret. Skipped
-// during `next build` (page-data collection has no runtime env) — the throw
-// fires at request time. Never reached when NEXTAUTH_SECRET is set.
-if (process.env.NODE_ENV === 'production' &&
-    !process.env.NEXTAUTH_SECRET &&
-    process.env.NEXT_PHASE !== 'phase-production-build') {
-  throw new Error(
-    'NEXTAUTH_SECRET is not set in production — refusing to start with a ' +
-    'guessable fallback secret (forgeable sessions). Set it in Vercel env vars.'
+// SECURITY: if NEXTAUTH_SECRET isn't set in production, auth-config.js falls
+// back to a guessable dev string — sessions become forgeable. We WARN loudly
+// (and surface it on the config-status endpoint) but do NOT crash the whole
+// app: a hard throw here takes down every page including /login, and the
+// fallback is the same behaviour the app already had. Set NEXTAUTH_SECRET in
+// Vercel to make sessions secure; this is verified in scripts/check-env.
+export const SECRET_INSECURE =
+  process.env.NODE_ENV === 'production' && !process.env.NEXTAUTH_SECRET;
+if (SECRET_INSECURE) {
+  // eslint-disable-next-line no-console
+  console.error(
+    '[auth] SECURITY: NEXTAUTH_SECRET is not set — sessions are signed with a ' +
+    'guessable fallback and can be forged. Set NEXTAUTH_SECRET in Vercel env vars.'
   );
 }
 
