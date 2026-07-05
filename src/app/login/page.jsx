@@ -54,7 +54,6 @@ export default function LoginPage() {
   const { status } = useSession();
 
   const [mode, setMode]       = useState('login');
-  const [showDemo, setShowDemo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
   const [success, setSuccess] = useState(false);
@@ -226,28 +225,10 @@ export default function LoginPage() {
           <InitialEstateLogo width={188} />
         </div>
 
-        {/* Demo hint — collapsed by default to avoid showing default creds prominently */}
-        {showDemo ? (
-          <div style={S.demoBox}>
-            <span style={{ opacity: 0.6 }}>🔑</span>
-            <span>ทดลองใช้: <strong>admin@initialestate.com</strong> / <strong>Admin1234!</strong></span>
-            <button
-              onClick={() => setShowDemo(false)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ink-4)', fontSize: 11, padding: 0, marginLeft: 4 }}
-              title="ซ่อน"
-            >×</button>
-          </div>
-        ) : (
-          <button
-            onClick={() => setShowDemo(true)}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--ink-4)', fontSize: 11, textAlign: 'center',
-              width: '100%', padding: '4px 0', marginBottom: 12,
-              fontFamily: 'var(--font-sans)',
-            }}
-          >ดูบัญชีทดลอง</button>
-        )}
+        {/* The old demo-credentials hint is gone: the builtin admin only
+            accepts logins when ADMIN_PASSWORD is set in the environment
+            (security hardening), so advertising a default password here was
+            both misleading and unsafe on a production system. */}
 
         {/* Tabs */}
         <div style={S.tabs}>
@@ -372,7 +353,6 @@ const S = {
   topAccent: { position: 'fixed', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg,#2B3060 0%,#C09535 50%,#2B3060 100%)' },
   card:    { background: 'var(--surface)', borderRadius: 12, border: '1px solid var(--rule)', boxShadow: '0 8px 40px -12px rgba(20,18,14,0.16),0 2px 8px -2px rgba(20,18,14,0.06)', padding: '40px 40px 32px', width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column' },
   logoWrap: { display: 'flex', justifyContent: 'center', marginBottom: 20, paddingBottom: 20, borderBottom: '1px solid var(--rule)' },
-  demoBox: { display: 'flex', alignItems: 'center', gap: 8, background: '#F0E4C5', border: '1px solid #E6D4A8', borderRadius: 6, padding: '8px 12px', fontSize: 12, color: '#6B5121', marginBottom: 16 },
   tabs:    { display: 'flex', marginBottom: 20, borderBottom: '1px solid var(--rule)' },
   tab:     { flex: 1, padding: '10px 0', background: 'none', border: 'none', borderBottom: '2px solid transparent', marginBottom: -1, fontSize: 14, fontWeight: 500, color: 'var(--ink-3)', cursor: 'pointer', fontFamily: 'var(--font-sans)', transition: 'color .15s,border-color .15s' },
   tabActive: { color: 'var(--teal)', borderBottomColor: 'var(--teal)' },
