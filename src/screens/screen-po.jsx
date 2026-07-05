@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { Icons, Chip, money } from '../lib/shell';
+import { Icons, Chip, money, safeHref } from '../lib/shell';
 import { printDoc } from './screen-compare-create-pricedb';
 import { usePermissions } from '../lib/use-permissions';
 import { useTableView, Th, Pager } from '../lib/table-utils';
@@ -1059,7 +1059,7 @@ function BillingCard({ po, canWrite, busy, transition, attachments, onUploaded }
                 <span style={{ color:'var(--ink-3)' }}>📄</span>
                 <span style={{ flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{a.filename}</span>
                 {a.drive_view_link && (
-                  <a href={a.drive_view_link} target="_blank" rel="noreferrer" className="btn sm">เปิดดู</a>
+                  <a href={safeHref(a.drive_view_link)} target="_blank" rel="noreferrer" className="btn sm">เปิดดู</a>
                 )}
               </div>
             ))}

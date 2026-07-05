@@ -20,8 +20,14 @@ export function rateLimit(key, { limit, windowMs }) {
   return true;
 }
 
-// Best-effort client key for unauthenticated endpoints.
+// Client IP for rate-limit keys. On Vercel, `x-real-ip` and the LAST hop of
+// `x-forwarded-for` are set by the platform edge and can't be spoofed by the
+// client; a client-supplied `x-forwarded-for` only prepends hops. We prefer
+// x-real-ip, then the last XFF hop, so header spoofing can't rotate the key.
 export function clientKey(request) {
+  const realIp = request.headers.get('x-real-ip');
+  if (realIp) return realIp.trim();
   const fwd = request.headers.get('x-forwarded-for') || '';
-  return fwd.split(',')[0].trim() || 'unknown';
+  const hops = fwd.split(',').map(s => s.trim()).filter(Boolean);
+  return hops.length ? hops[hops.length - 1] : 'unknown';
 }

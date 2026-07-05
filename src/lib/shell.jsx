@@ -770,6 +770,14 @@ export function Av({ initials, kind }) {
   );
 }
 
+// Scheme allowlist for user/DB-sourced hrefs (e.g. Google Drive links). Only
+// http(s) passes; a tampered `javascript:`/`data:` link renders inert (#) so
+// a second-order XSS via a poisoned attachment row can't fire.
+export function safeHref(url) {
+  if (typeof url !== 'string') return undefined;
+  return /^https?:\/\//i.test(url.trim()) ? url : undefined;
+}
+
 export function money(n, opts = {}) {
   const { decimals = 0, sign = false } = opts;
   if (n == null) return "—";

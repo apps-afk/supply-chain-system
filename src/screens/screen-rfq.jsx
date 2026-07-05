@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { Icons, Chip, Av, Spark, Delta, money } from '../lib/shell';
+import { Icons, Chip, Av, Spark, Delta, money, safeHref } from '../lib/shell';
 import { downloadRfqExcel, ExcelDocPreview, nextRfqNo } from './screen-rfq-create';
 import { findUnit } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
@@ -899,7 +899,7 @@ export function ScreenRFQConfirm({ go }) {
               </>
               ); })()}
               {uploadOk.viewLink && (
-                <a href={uploadOk.viewLink} target="_blank" rel="noreferrer" className="btn sm">
+                <a href={safeHref(uploadOk.viewLink)} target="_blank" rel="noreferrer" className="btn sm">
                   {Icons.external} เปิดดู
                 </a>
               )}

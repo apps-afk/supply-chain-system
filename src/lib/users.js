@@ -262,16 +262,11 @@ export async function updateProfile(currentEmail, patch) {
   return { emailChanged };
 }
 
-export async function forceResetPassword(email, newPassword) {
-  const key = email.toLowerCase();
-  if (BUILTIN.find(b => b.email.toLowerCase() === key)) {
-    throw new Error('บัญชีระบบเปลี่ยนรหัสผ่านได้ผ่านตัวแปร ADMIN_PASSWORD ใน Vercel เท่านั้น');
-  }
-  const u = await findByEmail(key);
-  if (!u) throw new Error('ไม่พบบัญชีผู้ใช้');
-  await updateUser(key, { salt: '', hash: makeHash(newPassword) });
-  return true;
-}
+// forceResetPassword (set a new password without the old one for a logged-in
+// user) was removed: a stolen session must not be enough to take over an
+// account. Self-service change now always requires the current password
+// (auth/change-password); genuine "forgot" goes through the admin-actioned
+// forgot-password queue.
 
 /* ===== Admin functions ===== */
 

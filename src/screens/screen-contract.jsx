@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { Icons, Av, money } from '../lib/shell';
+import { Icons, Av, money, safeHref } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
 import { useTableView, Th, Pager, exportCSV } from '../lib/table-utils';
@@ -513,7 +513,7 @@ export function ScreenContractList({ go }) {
                   </td>
                   <td onClick={e => e.stopPropagation()}>
                     {latest && latest.drive_view_link ? (
-                      <a href={latest.drive_view_link} target="_blank" rel="noopener noreferrer"
+                      <a href={safeHref(latest.drive_view_link)} target="_blank" rel="noopener noreferrer"
                          style={{ fontSize:11.5, color:'var(--teal)', textDecoration:'none' }}>
                         📄 Drive {atts.length > 1 && `(${atts.length})`}
                       </a>
@@ -1479,7 +1479,7 @@ export function ScreenContract({ go }) {
                       </div>
                     </div>
                     {att.drive_view_link && (
-                      <a href={att.drive_view_link} target="_blank" rel="noreferrer" className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }}>{Icons.external}</a>
+                      <a href={safeHref(att.drive_view_link)} target="_blank" rel="noreferrer" className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }}>{Icons.external}</a>
                     )}
                   </div>
                 ))}
@@ -1631,7 +1631,7 @@ function ContractArchive({ contracts, currentId, attachmentsByContract, supplier
                   </td>
                   <td onClick={e => e.stopPropagation()}>
                     {latest && latest.drive_view_link ? (
-                      <a href={latest.drive_view_link} target="_blank" rel="noopener noreferrer"
+                      <a href={safeHref(latest.drive_view_link)} target="_blank" rel="noopener noreferrer"
                          style={{ fontSize:11.5, color:'var(--teal)', textDecoration:'none' }}>
                         📄 Drive {atts.length > 1 && `(${atts.length})`}
                       </a>
@@ -1716,7 +1716,7 @@ function ActiveContractView({ contract, attachments, memo, linkedPoIds, onSaveLi
                     </div>
                   </div>
                   {a.drive_view_link && (
-                    <a href={a.drive_view_link} target="_blank" rel="noopener noreferrer" className="btn ghost sm">
+                    <a href={safeHref(a.drive_view_link)} target="_blank" rel="noopener noreferrer" className="btn ghost sm">
                       เปิดใน Drive ↗
                     </a>
                   )}

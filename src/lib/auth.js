@@ -31,7 +31,7 @@ const providers = [
       email:    { label: 'อีเมล',    type: 'email'    },
       password: { label: 'รหัสผ่าน', type: 'password' },
     },
-    async authorize(credentials) {
+    async authorize(credentials, req) {
       if (!credentials?.email || !credentials?.password) return null;
       // Defense in depth: strict shape + explicit domain check. The shape
       // regex rejects wildcard/whitespace tricks (e.g. "%@initialestate.com")
@@ -40,9 +40,21 @@ const providers = [
       if (!/^[^\s@%_]+@[^\s@%_]+\.[^\s@%_]+$/.test(email) || !email.endsWith(`@${DOMAIN}`)) {
         throw new Error(`อนุญาตเฉพาะบัญชี @${DOMAIN} เท่านั้น`);
       }
-      const key = credentials.email.toLowerCase();
-      // Brute-force brake: 8 attempts per 5 minutes per email.
-      if (!rateLimit(`login:${key}`, { limit: 8, windowMs: 5 * 60 * 1000 })) {
+      const key = email;
+      // Platform-set client IP (spoof-resistant on Vercel) for the limiters.
+      const h = req?.headers || {};
+      const realIp = h['x-real-ip'];
+      const fwd = (h['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+      const ip = (realIp || fwd[fwd.length - 1] || 'unknown').trim();
+      // Two brakes so neither axis alone enables abuse:
+      //   - per IP+email (8/5min): normal brute-force brake on one account
+      //   - per IP overall (40/5min): stops spraying many emails from one host
+      //     AND prevents a victim-lockout DoS (an attacker can't lock someone
+      //     else's account without also burning their own IP budget).
+      const tooMany =
+        !rateLimit(`login:${ip}:${key}`, { limit: 8, windowMs: 5 * 60 * 1000 }) ||
+        !rateLimit(`loginip:${ip}`,      { limit: 40, windowMs: 5 * 60 * 1000 });
+      if (tooMany) {
         throw new Error('พยายามเข้าสู่ระบบบ่อยเกินไป — กรุณารอ 5 นาทีแล้วลองใหม่');
       }
       const user = await validateUser(credentials.email, credentials.password);

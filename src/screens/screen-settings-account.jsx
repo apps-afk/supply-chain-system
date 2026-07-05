@@ -22,8 +22,10 @@ export function ScreenSettingsAccount() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg,    setProfileMsg]    = useState({ msg: '', tone: '' });
 
-  /* Password state */
-  const [pwdMode,  setPwdMode]  = useState('change');  // 'change' | 'forgot'
+  /* Password state — changing a password ALWAYS requires the current one.
+     There is no "reset without old password while logged in" path: a stolen
+     session cookie must not be enough to lock the real owner out. Users who
+     truly forgot use the login-page forgot-password flow (admin-actioned). */
   const [oldPwd,   setOldPwd]   = useState('');
   const [newPwd,   setNewPwd]   = useState('');
   const [newPwd2,  setNewPwd2]  = useState('');
@@ -96,28 +98,16 @@ export function ScreenSettingsAccount() {
 
     setSavingPwd(true);
     try {
-      let res;
-      if (pwdMode === 'change') {
-        res = await fetch('/api/auth/change-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }),
-        });
-      } else {
-        res = await fetch('/api/account/reset-password', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newPassword: newPwd }),
-        });
-      }
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldPassword: oldPwd, newPassword: newPwd }),
+      });
       const data = await res.json();
       if (!res.ok) {
         setPwdMsg({ msg: data.error || 'เปลี่ยนรหัสผ่านไม่สำเร็จ', tone: 'err' });
       } else {
-        setPwdMsg({
-          msg: pwdMode === 'change' ? 'เปลี่ยนรหัสผ่านสำเร็จ' : 'รีเซ็ตรหัสผ่านสำเร็จ',
-          tone: 'ok',
-        });
+        setPwdMsg({ msg: 'เปลี่ยนรหัสผ่านสำเร็จ', tone: 'ok' });
         setOldPwd(''); setNewPwd(''); setNewPwd2('');
       }
     } catch {
@@ -237,29 +227,24 @@ export function ScreenSettingsAccount() {
 
       {/* Password */}
       <section style={{ marginTop: 48 }}>
-        <h2 className="h-section">
-          {pwdMode === 'change' ? 'เปลี่ยนรหัสผ่าน' : 'รีเซ็ตรหัสผ่าน (ลืมรหัสปัจจุบัน)'}
-        </h2>
+        <h2 className="h-section">เปลี่ยนรหัสผ่าน</h2>
         <p style={{ fontSize: 13, color: 'var(--ink-3)', marginTop: 4, marginBottom: 16 }}>
-          {pwdMode === 'change'
-            ? 'แนะนำให้ใช้รหัสผ่านอย่างน้อย 8 ตัวอักษร ผสมตัวอักษร ตัวเลข และสัญลักษณ์'
-            : 'เพราะคุณเข้าสู่ระบบอยู่แล้ว ไม่ต้องใช้รหัสผ่านเดิมเพื่อรีเซ็ต'}
+          ต้องยืนยันรหัสผ่านปัจจุบันก่อนทุกครั้ง · แนะนำอย่างน้อย 8 ตัวอักษร ผสมตัวอักษร ตัวเลข และสัญลักษณ์
+          <br />ลืมรหัสผ่านปัจจุบัน? ออกจากระบบแล้วใช้ "ลืมรหัสผ่าน" ที่หน้าเข้าสู่ระบบ (ผู้ดูแลจะรีเซ็ตให้)
         </p>
 
         <form onSubmit={savePassword} className="card" style={{ padding: 28, maxWidth: 520 }}>
           {pwdMsg.msg && <StatusBox tone={pwdMsg.tone}>{pwdMsg.msg}</StatusBox>}
 
-          {pwdMode === 'change' && (
-            <Field label="รหัสผ่านปัจจุบัน">
-              <input
-                type="password" value={oldPwd}
-                onChange={e => setOldPwd(e.target.value)}
-                style={inputStyle}
-                required
-                autoComplete="current-password"
-              />
-            </Field>
-          )}
+          <Field label="รหัสผ่านปัจจุบัน">
+            <input
+              type="password" value={oldPwd}
+              onChange={e => setOldPwd(e.target.value)}
+              style={inputStyle}
+              required
+              autoComplete="current-password"
+            />
+          </Field>
 
           <Field label="รหัสผ่านใหม่" hint="อย่างน้อย 8 ตัวอักษร">
             <input
@@ -279,33 +264,12 @@ export function ScreenSettingsAccount() {
             />
           </Field>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, gap: 12, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              onClick={() => {
-                setPwdMode(pwdMode === 'change' ? 'forgot' : 'change');
-                setOldPwd(''); setNewPwd(''); setNewPwd2('');
-                setPwdMsg({ msg: '', tone: '' });
-              }}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--teal)', fontSize: 13, fontWeight: 500,
-                fontFamily: 'var(--font-sans)', padding: 4,
-                textDecoration: 'underline',
-              }}
-            >
-              {pwdMode === 'change'
-                ? 'ลืมรหัสผ่านปัจจุบัน?'
-                : '← กลับไปใช้รหัสเดิม'}
-            </button>
-
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginTop: 8 }}>
             <button
               type="submit" className="btn primary"
               disabled={savingPwd}
             >
-              {savingPwd
-                ? 'กำลังบันทึก…'
-                : pwdMode === 'change' ? 'บันทึกรหัสผ่านใหม่' : 'รีเซ็ตรหัสผ่าน'}
+              {savingPwd ? 'กำลังบันทึก…' : 'บันทึกรหัสผ่านใหม่'}
             </button>
           </div>
         </form>

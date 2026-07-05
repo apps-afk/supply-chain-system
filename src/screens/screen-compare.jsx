@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { Icons, Chip, money } from '../lib/shell';
+import { Icons, Chip, money, safeHref } from '../lib/shell';
 import { printDoc } from './screen-compare-create-pricedb';
 import { nextPoNo } from './screen-po';
 import { usePermissions } from '../lib/use-permissions';
@@ -484,7 +484,7 @@ export function ScreenCompare({ go }) {
                   </div>
                 </div>
                 {a.drive_view_link && (
-                  <a href={a.drive_view_link} target="_blank" rel="noreferrer" className="btn sm">
+                  <a href={safeHref(a.drive_view_link)} target="_blank" rel="noreferrer" className="btn sm">
                     {Icons.external} เปิดดู
                   </a>
                 )}
