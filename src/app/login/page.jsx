@@ -41,6 +41,49 @@ const GoogleIcon = () => (
   </svg>
 );
 
+/* Password field with a show/hide toggle — lets the user inspect what they
+   actually typed after a failed attempt instead of blind-retyping. */
+function PasswordInput({ value, onChange, placeholder = '••••••••', autoComplete, autoFocus, required = true, minLength, marginBottom = 12 }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: 'relative', marginBottom }}>
+      <input
+        type={show ? 'text' : 'password'}
+        value={value} onChange={onChange}
+        placeholder={placeholder} required={required} minLength={minLength}
+        autoComplete={autoComplete} autoFocus={autoFocus}
+        style={{ ...S.input, marginBottom: 0, paddingRight: 44 }}
+      />
+      <button
+        type="button"
+        onClick={() => setShow(s => !s)}
+        aria-label={show ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+        title={show ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+        tabIndex={-1}
+        style={{
+          position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+          background: 'none', border: 'none', cursor: 'pointer', padding: 6,
+          display: 'grid', placeItems: 'center', color: 'var(--ink-4)',
+        }}
+      >
+        {show ? (
+          /* eye-off */
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+          </svg>
+        ) : (
+          /* eye */
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        )}
+      </button>
+    </div>
+  );
+}
+
 const ERRORS = {
   AccessDenied:     'อนุญาตเฉพาะบัญชี @initialestate.com เท่านั้น',
   OAuthSignin:      'ไม่สามารถเชื่อมต่อ Google ได้ กรุณาลองใหม่',
@@ -263,8 +306,8 @@ export default function LoginPage() {
                 <label style={S.label}>รหัสผ่าน</label>
                 <button type="button" style={S.forgotLink} onClick={() => setShowForgot(true)}>ลืมรหัสผ่าน?</button>
               </div>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••" required style={S.input} autoComplete="current-password" />
+              <PasswordInput value={password} onChange={e => setPassword(e.target.value)}
+                autoComplete="current-password" />
 
               {needOtp && (
                 <>
@@ -313,11 +356,11 @@ export default function LoginPage() {
               <input type="email" value={rEmail} onChange={e => setREmail(e.target.value)}
                 placeholder="yourname@initialestate.com" required style={S.input} autoComplete="email" />
               <label style={{ ...S.label, marginTop: 4 }}>รหัสผ่าน <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>(อย่างน้อย 8 ตัว)</span></label>
-              <input type="password" value={rPass} onChange={e => setRPass(e.target.value)}
-                placeholder="อย่างน้อย 8 ตัวอักษร" required minLength={8} style={S.input} autoComplete="new-password" />
+              <PasswordInput value={rPass} onChange={e => setRPass(e.target.value)}
+                placeholder="อย่างน้อย 8 ตัวอักษร" minLength={8} autoComplete="new-password" />
               <label style={{ ...S.label, marginTop: 4 }}>ยืนยันรหัสผ่าน</label>
-              <input type="password" value={rPass2} onChange={e => setRPass2(e.target.value)}
-                placeholder="••••••••" required style={{ ...S.input, marginBottom: 16 }} autoComplete="new-password" />
+              <PasswordInput value={rPass2} onChange={e => setRPass2(e.target.value)}
+                autoComplete="new-password" marginBottom={16} />
               <button type="submit" disabled={loading} style={{ ...S.submitBtn, opacity: loading ? 0.7 : 1 }}>
                 {loading ? 'กำลังสมัคร…' : 'สมัครสมาชิก'}
               </button>
