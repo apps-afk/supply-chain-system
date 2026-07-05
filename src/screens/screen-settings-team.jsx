@@ -199,7 +199,16 @@ function UserRow({ u, me, onChangeRole, onDelete, onResetPwd }) {
           }}>{initials}</div>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--ink)' }}>{u.name}</div>
-            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>{status}</div>
+            <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
+              {status}
+              {u.legacyHash && (
+                <span title="บัญชีนี้ยังใช้รหัสผ่านรูปแบบเก่า — จะอัพเกรดเป็นแบบปลอดภัยอัตโนมัติเมื่อเข้าสู่ระบบครั้งถัดไป"
+                  style={{ marginLeft: 6, padding: '0 6px', borderRadius: 3, background: 'var(--ochre-soft)',
+                           color: '#6B5121', fontSize: 9.5, fontWeight: 600, cursor: 'help' }}>
+                  รหัสรูปแบบเก่า
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </td>

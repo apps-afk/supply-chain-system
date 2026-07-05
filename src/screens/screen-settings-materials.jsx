@@ -40,6 +40,10 @@ export function ScreenSettingsMaterials({ go }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr]         = useState('');
   const [q, setQ]             = useState('');
+  // Shadow materials (id 'mat_sc_…') are FK stand-ins created by the RFQ
+  // flow so subcontract prices can enter price_points — hidden here so they
+  // can't be edited/deleted as if they were real materials.
+  const [hiddenShadows, setHiddenShadows] = useState(0);
 
   // Collapse state per main / per sub. Default: collapsed — user clicks
   // to drill in. Search auto-expands everything so matches are visible.
@@ -66,7 +70,12 @@ export function ScreenSettingsMaterials({ go }) {
       const mc = await mcRes.json();
       const sc = await scRes.json();
       if (!mRes.ok) setErr(m.error || 'โหลดข้อมูลไม่สำเร็จ');
-      else setItems(m.items || []);
+      else {
+        const all = m.items || [];
+        const visible = all.filter(it => !String(it.id || '').startsWith('mat_sc_'));
+        setItems(visible);
+        setHiddenShadows(all.length - visible.length);
+      }
       if (uRes.ok) setUnits(u.items || []);
       if (mcRes.ok) setMainCats(mc.items || []);
       if (scRes.ok) setSubCats(sc.items || []);
@@ -338,6 +347,12 @@ export function ScreenSettingsMaterials({ go }) {
           </div>
         )}
       </div>
+
+      {hiddenShadows > 0 && (
+        <div style={{ fontSize:12, color:'var(--ink-4)', marginTop:8 }}>
+          ซ่อนรายการงานจ้างเหมา {hiddenShadows} รายการ (ราคาเข้าระบบผ่าน RFQ · จัดการที่เมนูงานจ้างเหมา)
+        </div>
+      )}
 
       {/* ---------- Modals ---------- */}
       {(editing?.level === 'main' || adding?.level === 'main') && (

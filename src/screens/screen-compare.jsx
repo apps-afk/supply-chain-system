@@ -116,27 +116,38 @@ export function ScreenCompare({ go }) {
         price: it.prices?.[winner.id] != null ? Number(it.prices[winner.id]) : null,
       }));
       const amount = poItems.reduce((s2, it) => s2 + (it.price != null ? it.price * it.qty : 0), 0);
+      // The PO number is computed client-side, so two concurrent creates can
+      // pick the same slot. If the POST loses the running-number race
+      // (409 / "duplicate"/"ซ้ำ"), fetch a fresh number and retry once.
+      async function postOnce(no) {
+        const r = await fetch('/api/purchase-orders', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            no,
+            comparison_id: cmp.id,
+            project_id: cmp.project_id || null,
+            // pseudo ids (rfq_*) aren't real supplier rows — keep the name only
+            supplier_id: String(winner.id || '').startsWith('rfq_') ? null : (winner.id || null),
+            supplier_name: winner.name,
+            title: `สั่งซื้อตาม ${cmp.no} · ${winner.name}`,
+            status: 'ordered',
+            items_json: poItems,
+            amount,
+            notes: '',
+            ordered_at: new Date().toLocaleDateString('sv-SE'),
+          }),
+        });
+        const d = await r.json().catch(() => ({}));
+        return { ok: r.ok, status: r.status, d };
+      }
       const no = await nextPoNo();
-      const r = await fetch('/api/purchase-orders', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          no,
-          comparison_id: cmp.id,
-          project_id: cmp.project_id || null,
-          // pseudo ids (rfq_*) aren't real supplier rows — keep the name only
-          supplier_id: String(winner.id || '').startsWith('rfq_') ? null : (winner.id || null),
-          supplier_name: winner.name,
-          title: `สั่งซื้อตาม ${cmp.no} · ${winner.name}`,
-          status: 'ordered',
-          items_json: poItems,
-          amount,
-          notes: '',
-          ordered_at: new Date().toLocaleDateString('sv-SE'),
-        }),
-      });
-      const d = await r.json();
-      if (!r.ok) { setErr(d.error || 'สร้างใบสั่งซื้อไม่สำเร็จ'); setPoBusy(false); return; }
-      try { localStorage.setItem('po.currentId', d.item.id); } catch {}
+      let attempt = await postOnce(no);
+      if (!attempt.ok && (attempt.status === 409 || /duplicate|ซ้ำ/i.test(attempt.d.error || ''))) {
+        const fresh = await nextPoNo();
+        attempt = await postOnce(fresh);
+      }
+      if (!attempt.ok) { setErr(attempt.d.error || 'สร้างใบสั่งซื้อไม่สำเร็จ'); setPoBusy(false); return; }
+      try { localStorage.setItem('po.currentId', attempt.d.item.id); } catch {}
       go('po-detail');
     } catch { setErr('เครือข่ายขัดข้อง'); }
     setPoBusy(false);
@@ -201,7 +212,9 @@ export function ScreenCompare({ go }) {
     try {
       const r = await fetch('/api/comparisons', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: cmp.id, status: next }),
+        // _expect = optimistic lock: the server rejects with 409 if someone
+        // else changed the status since this screen loaded it.
+        body: JSON.stringify({ id: cmp.id, status: next, _expect: { status: cmp.status } }),
       });
       const d = await r.json();
       if (!r.ok) setErr(d.error || 'เปลี่ยนสถานะไม่สำเร็จ');

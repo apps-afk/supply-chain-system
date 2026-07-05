@@ -271,9 +271,14 @@ export async function listUsers() {
   const reg = await listRegistered();
   // Strip credential material before this ever reaches a route handler —
   // password hashes/salts must never be serialized to the browser, even
-  // for admins.
+  // for admins. We DO surface a boolean flag for accounts still on the
+  // legacy SHA-256 scheme (they upgrade to bcrypt automatically on next
+  // login) so the team screen can nudge those users to log in.
   return [...BUILTIN.map(applyBuiltinMeta), ...reg].map(
-    ({ hash, salt, password, ...safe }) => safe
+    ({ hash, salt, password, ...safe }) => ({
+      ...safe,
+      legacyHash: typeof hash === 'string' && hash.length > 0 && !hash.startsWith('$2'),
+    })
   );
 }
 

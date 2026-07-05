@@ -227,15 +227,27 @@ export function ScreenCompareCreateRFQ({ go }) {
       total_low, total_high,
       notes: '',
     };
-    try {
+    // The CMP number is computed client-side, so two concurrent creates can
+    // pick the same slot. If the POST loses the running-number race
+    // (409 / "duplicate"/"ซ้ำ"), recompute a fresh number and retry once.
+    async function postOnce(no) {
       const res = await fetch('/api/comparisons', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, no }),
       });
-      const data = await res.json();
-      if (!res.ok) { setSubmitErr(data.error || 'บันทึกไม่สำเร็จ'); setSubmitting(false); return; }
-      setGeneratedNo(cmpNo);
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    }
+    try {
+      let usedNo = cmpNo;
+      let attempt = await postOnce(usedNo);
+      if (!attempt.ok && (attempt.status === 409 || /duplicate|ซ้ำ/i.test(attempt.data.error || ''))) {
+        usedNo = await makeCmpNo(); // re-fetches /api/comparisons for a fresh free slot
+        attempt = await postOnce(usedNo);
+      }
+      if (!attempt.ok) { setSubmitErr(attempt.data.error || 'บันทึกไม่สำเร็จ'); setSubmitting(false); return; }
+      setGeneratedNo(usedNo);
       setGenerated(true);
     } catch {
       setSubmitErr('เครือข่ายขัดข้อง');

@@ -4,6 +4,7 @@ import { Icons, Av, money } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
 import { useTableView, Th, Pager, exportCSV } from '../lib/table-utils';
+import { PO_STATUS } from './screen-po';
 /*
   Contract module — upload-driven manual review workflow.
 
@@ -857,6 +858,8 @@ export function ScreenContract({ go }) {
   const [checks, setChecks] = useState({});
   // Send-to-legal record: { to, note, sentAt, by } — persisted with workflow
   const [legal, setLegal] = useState(null);
+  // Linked purchase-order ids — persisted as workflow.linked_po_ids
+  const [linkedPoIds, setLinkedPoIds] = useState([]);
   // Free-text part of contracts.notes (legacy plain text or payload.memo)
   const [memo, setMemo] = useState('');
   const allChecked = REVIEW_CHECKLIST.every(item => checks[item.key]);
@@ -871,10 +874,12 @@ export function ScreenContract({ go }) {
       setPhase(CT_STATUS[workflow.phase] ? workflow.phase : (DB_TO_BUCKET[c?.status] || 'Uploaded'));
       setChecks(workflow.checks || {});
       setLegal(workflow.legal || null);
+      setLinkedPoIds(Array.isArray(workflow.linked_po_ids) ? workflow.linked_po_ids : []);
     } else {
       setPhase(DB_TO_BUCKET[c?.status] || 'Uploaded');
       setChecks({});
       setLegal(null);
+      setLinkedPoIds([]);
     }
   }
 
@@ -884,12 +889,14 @@ export function ScreenContract({ go }) {
   // the row's CURRENT notes right before the PATCH and merge — a save from
   // another tab never gets overwritten, and legacy plain-text notes are kept
   // as memo instead of being wiped.
-  // `patch`           — partial workflow: { phase?, checks?, legal? }
-  // `opts.appendMemo` — extra line appended to the memo free text
-  // `opts.fields`     — extra contract columns to PATCH in the same call
+  // `patch`             — partial workflow: { phase?, checks?, legal?, linked_po_ids? }
+  // `opts.appendMemo`   — extra line appended to the memo free text
+  // `opts.fields`       — extra contract columns to PATCH in the same call
+  // `opts.expectStatus` — optimistic lock for STATUS-CHANGING calls: server
+  //                       returns 409 if the row's status no longer matches
   async function persistWorkflow(patch = {}, opts = {}) {
     if (!contract) return { ok:false, error:'ไม่มีสัญญา' };
-    const wf = { phase, checks, legal, ...patch };
+    const wf = { phase, checks, legal, linked_po_ids: linkedPoIds, ...patch };
     let base = {};        // preserve any other top-level keys in the payload
     let memoNow = memo;
     try {
@@ -909,11 +916,14 @@ export function ScreenContract({ go }) {
     try {
       const r = await fetch('/api/contracts', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: contract.id, notes: nextNotes, ...(opts.fields || {}) }),
+        body: JSON.stringify({
+          id: contract.id, notes: nextNotes, ...(opts.fields || {}),
+          ...(opts.expectStatus ? { _expect: { status: opts.expectStatus } } : {}),
+        }),
       });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        return { ok:false, error: d.error || 'บันทึกไม่สำเร็จ' };
+        return { ok:false, error: d.error || 'บันทึกไม่สำเร็จ', conflict: r.status === 409 };
       }
       setMemo(memoNow);
       const rowPatch = { notes: nextNotes, ...(opts.fields || {}) };
@@ -932,6 +942,14 @@ export function ScreenContract({ go }) {
     if (!r.ok) alert(`บันทึกสถานะไม่สำเร็จ: ${r.error || 'ไม่ทราบสาเหตุ'}`);
   }
 
+  // Persist the linked-PO id list into workflow.linked_po_ids (merge-safe
+  // via persistWorkflow) — local state only updates after the save succeeds.
+  async function saveLinkedPos(nextIds) {
+    const r = await persistWorkflow({ linked_po_ids: nextIds });
+    if (r.ok) setLinkedPoIds(nextIds);
+    return r;
+  }
+
   // ===== Lifecycle actions (active → expired / terminated) =====
 
   async function markExpired() {
@@ -940,9 +958,16 @@ export function ScreenContract({ go }) {
     try {
       const r = await fetch('/api/contracts', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: contract.id, status: 'expired' }),
+        // _expect — optimistic lock: reject (409) if someone else already
+        // changed the status; local state stays untouched.
+        body: JSON.stringify({ id: contract.id, status: 'expired', _expect: { status: contract.status } }),
       });
-      if (!r.ok) { const d = await r.json().catch(() => ({})); alert(`บันทึกไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`); return; }
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 409) { setErr(d.error || 'สถานะสัญญาถูกเปลี่ยนโดยผู้ใช้อื่น'); return; }
+        alert(`บันทึกไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`);
+        return;
+      }
       setContract(c => c ? { ...c, status: 'expired' } : c);
       setAllContracts(cs => cs.map(x => x.id === contract.id ? { ...x, status: 'expired' } : x));
     } catch (e) {
@@ -958,8 +983,12 @@ export function ScreenContract({ go }) {
     if (!confirm(`ยืนยันยกเลิกสัญญา "${contract.title || contract.no}"?\n\nเหตุผล: ${reason.trim()}`)) return;
     const stamp = `[ยกเลิกสัญญา ${fmtDate(new Date().toISOString())}${user?.email ? ` โดย ${user.email}` : ''}] ${reason.trim()}`;
     // Single PATCH: status + reason appended into the notes memo (clobber-safe)
-    const r = await persistWorkflow({}, { appendMemo: stamp, fields: { status: 'terminated' } });
-    if (!r.ok) alert(`บันทึกไม่สำเร็จ: ${r.error || 'ไม่ทราบสาเหตุ'}`);
+    // + optimistic lock — 409 if someone else changed the status first.
+    const r = await persistWorkflow({}, { appendMemo: stamp, fields: { status: 'terminated' }, expectStatus: contract.status });
+    if (!r.ok) {
+      if (r.conflict) { setErr(r.error); return; }
+      alert(`บันทึกไม่สำเร็จ: ${r.error || 'ไม่ทราบสาเหตุ'}`);
+    }
   }
 
   async function loadAttachments(contractId) {
@@ -1081,7 +1110,8 @@ export function ScreenContract({ go }) {
         const pr = await fetch('/api/contracts', {
           method:'PATCH',
           headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ id: contract.id, status:'active', signed_at: new Date().toISOString().slice(0,10) }),
+          // _expect — optimistic lock: 409 if the status changed elsewhere.
+          body: JSON.stringify({ id: contract.id, status:'active', signed_at: new Date().toISOString().slice(0,10), _expect: { status: contract.status } }),
         });
         if (!pr.ok) {
           const pd = await pr.json().catch(() => ({}));
@@ -1149,6 +1179,9 @@ export function ScreenContract({ go }) {
           contract={contract}
           attachments={attachments}
           memo={memo}
+          linkedPoIds={linkedPoIds}
+          onSaveLinks={saveLinkedPos}
+          go={go}
           onMarkExpired={markExpired}
           onTerminate={terminateContract}
           onUploadAddon={async (file) => {
@@ -1298,10 +1331,16 @@ export function ScreenContract({ go }) {
                             id: contract.id,
                             status: 'active',
                             signed_at: new Date().toISOString().slice(0,10),
+                            // Optimistic lock — 409 if the status changed elsewhere
+                            _expect: { status: contract.status },
                           }),
                         });
                         const d = await r.json();
-                        if (!r.ok) { alert(`บันทึกไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`); return; }
+                        if (!r.ok) {
+                          if (r.status === 409) { setErr(d.error || 'สถานะสัญญาถูกเปลี่ยนโดยผู้ใช้อื่น'); return; }
+                          alert(`บันทึกไม่สำเร็จ: ${d.error || 'ไม่ทราบสาเหตุ'}`);
+                          return;
+                        }
                         setContract(d.item || { ...contract, status:'active', signed_at: new Date().toISOString().slice(0,10) });
                         setPhase('Final');
                         // Record the skip in the notes workflow too, so a
@@ -1616,7 +1655,7 @@ function ContractArchive({ contracts, currentId, attachmentsByContract, supplier
    as well as lifecycle statuses 'expired' / 'terminated'.
    Clean archive view: file list + simple actions. No phase stepper.
    ---------------------------------------------------------- */
-function ActiveContractView({ contract, attachments, memo, onUploadAddon, onMarkExpired, onTerminate }) {
+function ActiveContractView({ contract, attachments, memo, linkedPoIds, onSaveLinks, go, onUploadAddon, onMarkExpired, onTerminate }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const inputRef = React.useRef(null);
@@ -1725,6 +1764,13 @@ function ActiveContractView({ contract, attachments, memo, onUploadAddon, onMark
             </>
           )}
         </div>
+
+        <LinkedPOSection
+          linkedPoIds={linkedPoIds || []}
+          onSaveLinks={onSaveLinks}
+          go={go}
+          canWrite={canWrite}
+        />
       </div>
 
       <aside>
@@ -1753,6 +1799,247 @@ function ActiveContractView({ contract, attachments, memo, onUploadAddon, onMark
           )}
         </div>
       </aside>
+    </div>
+  );
+}
+
+/* ----------------------------------------------------------
+   LinkedPOSection — "PO ที่เชื่อมโยง" card in the active-contract view.
+   Ids live in workflow.linked_po_ids inside contracts.notes (saved via the
+   clobber-safe persistWorkflow helper). Rows link straight to po-detail;
+   ids whose PO no longer exists render as "(ถูกลบแล้ว)".
+   ---------------------------------------------------------- */
+function LinkedPOSection({ linkedPoIds, onSaveLinks, go, canWrite }) {
+  const [pos, setPos] = useState([]);
+  const [posLoaded, setPosLoaded] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/purchase-orders');
+        const d = await r.json();
+        if (r.ok) setPos(d.items || []);
+      } catch { /* ignore — missing POs render as deleted */ }
+      setPosLoaded(true);
+    })();
+  }, []);
+
+  const poById = useMemo(() => {
+    const m = new Map();
+    for (const p of pos) m.set(p.id, p);
+    return m;
+  }, [pos]);
+
+  function openPO(id) {
+    try { window.localStorage.setItem('po.currentId', id); } catch {}
+    go('po-detail');
+  }
+
+  async function removeLink(id) {
+    setErr('');
+    const r = await onSaveLinks(linkedPoIds.filter(x => x !== id));
+    if (!r.ok) setErr(r.error || 'บันทึกไม่สำเร็จ');
+  }
+
+  return (
+    <div className="card" style={{ padding:28, marginBottom:24 }}>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
+        <div>
+          <div className="eyebrow" style={{ marginBottom:4 }}>ใบสั่งซื้อ</div>
+          <h3 className="h-card" style={{ margin:0 }}>PO ที่เชื่อมโยง ({linkedPoIds.length})</h3>
+        </div>
+        {canWrite && (
+          <button className="btn sm" onClick={() => { setErr(''); setPickerOpen(true); }}>
+            {Icons.external} เชื่อมกับ PO
+          </button>
+        )}
+      </div>
+
+      {err && (
+        <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, marginBottom:12 }}>{err}</div>
+      )}
+
+      {linkedPoIds.length === 0 ? (
+        <div style={{ padding:20, textAlign:'center', fontSize:13, color:'var(--ink-3)', background:'var(--surface-2)', borderRadius:6 }}>
+          ยังไม่มี PO ที่เชื่อมโยงกับสัญญานี้
+        </div>
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {linkedPoIds.map(id => {
+            const p = poById.get(id);
+            if (!p) {
+              // PO id no longer exists in the fetched list (deleted) —
+              // muted row, not clickable. While loading, show a placeholder.
+              return (
+                <div key={id} style={{
+                  display:'flex', alignItems:'center', gap:12,
+                  padding:'10px 14px', background:'var(--surface-2)',
+                  border:'1px dashed var(--rule-2)', borderRadius:6,
+                }}>
+                  <span className="font-mono" style={{ fontSize:11.5, color:'var(--ink-4)' }}>
+                    {posLoaded ? 'PO (ถูกลบแล้ว)' : 'กำลังโหลด…'}
+                  </span>
+                  {canWrite && posLoaded && (
+                    <button className="btn ghost sm" onClick={() => removeLink(id)}
+                      title="เอาออกจากรายการ" style={{ marginLeft:'auto', color:'var(--ink-4)', padding:'2px 6px' }}>×</button>
+                  )}
+                </div>
+              );
+            }
+            const st = PO_STATUS[p.status] || PO_STATUS.ordered;
+            return (
+              <div key={id}
+                onClick={() => openPO(id)}
+                style={{
+                  display:'flex', alignItems:'center', gap:12, cursor:'pointer',
+                  padding:'10px 14px', background:'var(--surface-2)',
+                  border:'1px solid var(--rule)', borderRadius:6,
+                }}>
+                <span className="font-mono" style={{ fontSize:12, color:'var(--teal)', fontWeight:500, flexShrink:0 }}>{p.no || '—'}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:12.5, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.title || '—'}</div>
+                  <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>{p.supplier_name || '—'}</div>
+                </div>
+                <span className="num" style={{ fontSize:12.5, fontWeight:500, flexShrink:0 }}>
+                  {p.amount != null ? money(p.amount) : '—'}
+                </span>
+                <span style={{
+                  display:'inline-flex', alignItems:'center', gap:6, flexShrink:0,
+                  fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
+                  background: st.bg, color: st.fg, whiteSpace:'nowrap',
+                }}>
+                  <span style={{ width:6, height:6, borderRadius:999, background: st.dot }} />
+                  {st.label}
+                </span>
+                {canWrite && (
+                  <button className="btn ghost sm"
+                    onClick={e => { e.stopPropagation(); removeLink(id); }}
+                    title="เอาออกจากรายการ" style={{ color:'var(--ink-4)', padding:'2px 6px' }}>×</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {pickerOpen && (
+        <LinkPOModal
+          pos={pos}
+          initial={linkedPoIds}
+          onSave={onSaveLinks}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* =================== Link-PO picker modal =================== */
+
+function LinkPOModal({ pos, initial, onSave, onClose }) {
+  const [q, setQ] = useState('');
+  // Selection starts from the current linked ids — ids whose PO was deleted
+  // stay in the set untouched (they're not listed, so they can't be unticked
+  // here; remove them from the section row instead).
+  const [sel, setSel] = useState(() => new Set(initial));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const filtered = useMemo(() => {
+    const v = q.trim().toLowerCase();
+    if (!v) return pos;
+    return pos.filter(p =>
+      (p.no || '').toLowerCase().includes(v) ||
+      (p.title || '').toLowerCase().includes(v) ||
+      (p.supplier_name || '').toLowerCase().includes(v));
+  }, [pos, q]);
+
+  function toggle(id) {
+    setSel(s => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function save() {
+    setBusy(true); setErr('');
+    const r = await onSave([...sel]);
+    setBusy(false);
+    if (!r.ok) { setErr(r.error || 'บันทึกไม่สำเร็จ'); return; }
+    onClose();
+  }
+
+  return (
+    <div onClick={onClose} style={{
+      position:'fixed', inset:0, background:'rgba(20,18,14,0.32)',
+      display:'grid', placeItems:'center', zIndex:50,
+    }}>
+      <div onClick={e=>e.stopPropagation()} className="card"
+           style={{ width:640, padding:0, boxShadow:'var(--sh-pop)', maxHeight:'85vh', display:'flex', flexDirection:'column' }}>
+        <div style={{ padding:'18px 24px', borderBottom:'1px solid var(--rule)' }}>
+          <div className="eyebrow" style={{ marginBottom:4 }}>เชื่อมสัญญากับใบสั่งซื้อ</div>
+          <h3 className="h-section">เลือก PO ที่เกี่ยวข้องกับสัญญานี้</h3>
+        </div>
+        <div style={{ padding:'14px 24px', borderBottom:'1px solid var(--rule)' }}>
+          <SettingsSearchBox value={q} onChange={setQ} placeholder="ค้นหาเลขที่ PO / ชื่องาน / Supplier…" />
+        </div>
+        <div style={{ padding:'8px 24px', overflowY:'auto', flex:1 }}>
+          {err && (
+            <div style={{ background:'#FDE8E4', color:'#8B2A1A', padding:'10px 14px', borderRadius:6, fontSize:13, margin:'8px 0' }}>{err}</div>
+          )}
+          {filtered.length === 0 ? (
+            <div style={{ textAlign:'center', padding:28, color:'var(--ink-3)', fontSize:12.5 }}>
+              ไม่พบใบสั่งซื้อ
+            </div>
+          ) : filtered.map(p => {
+            const st = PO_STATUS[p.status] || PO_STATUS.ordered;
+            const checked = sel.has(p.id);
+            return (
+              <label key={p.id} style={{
+                display:'flex', alignItems:'center', gap:12,
+                padding:'10px 12px', margin:'6px 0', borderRadius:8, cursor:'pointer',
+                border:`1px solid ${checked ? 'var(--teal)' : 'var(--rule-2)'}`,
+                background: checked ? 'var(--teal-soft)' : 'var(--surface)',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(p.id)}
+                  style={{ width:16, height:16, accentColor:'var(--teal)', flexShrink:0 }}
+                />
+                <span className="font-mono" style={{ fontSize:12, color:'var(--ink-2)', fontWeight:500, flexShrink:0 }}>{p.no || '—'}</span>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:12.5, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.title || '—'}</div>
+                  <div style={{ fontSize:11, color:'var(--ink-3)', marginTop:2 }}>{p.supplier_name || '—'}</div>
+                </div>
+                <span className="num" style={{ fontSize:12.5, fontWeight:500, flexShrink:0 }}>
+                  {p.amount != null ? money(p.amount) : '—'}
+                </span>
+                <span style={{
+                  display:'inline-flex', alignItems:'center', gap:6, flexShrink:0,
+                  fontSize:11, fontWeight:500, padding:'2px 10px', borderRadius:999,
+                  background: st.bg, color: st.fg, whiteSpace:'nowrap',
+                }}>
+                  <span style={{ width:6, height:6, borderRadius:999, background: st.dot }} />
+                  {st.label}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        <div style={{ padding:'14px 24px', borderTop:'1px solid var(--rule)', background:'var(--surface-2)', display:'flex', justifyContent:'flex-end', alignItems:'center', gap:8 }}>
+          <span style={{ marginRight:'auto', fontSize:12, color:'var(--ink-3)' }}>
+            เลือกแล้ว <strong style={{ color:'var(--ink)' }}>{sel.size}</strong> รายการ
+          </span>
+          <button className="btn ghost" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={busy}>
+            {busy ? 'กำลังบันทึก…' : <>{Icons.check} บันทึกการเชื่อมโยง</>}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

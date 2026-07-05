@@ -88,15 +88,48 @@ export function createCrudRoutes(table, opts = {}) {
   // roles get 403 from requireWriter.
   const writeGuard    = opts.writeRole === 'session' ? requireWriter : requireAdmin;
 
-  async function list() {
+  async function list(req) {
     const { err } = await requireSession();
     if (err) return err;
     if (!isSupabaseConfigured) return NextResponse.json({ items: [] });
 
-    const { data, error } = await supabase
-      .from(table).select('*').order(orderBy, { ascending: orderDir === 'asc' });
+    // Optional server-side pagination: ?limit=&offset=. Without params the
+    // full list returns exactly as before (screens that compute stats over
+    // the whole table keep working); with limit the response adds `total`
+    // so callers can render pagers as data grows.
+    let limit = 0, offset = 0;
+    try {
+      const sp = new URL(req.url).searchParams;
+      limit  = Math.min(Math.max(parseInt(sp.get('limit')  || '0', 10) || 0, 0), 1000);
+      offset = Math.max(parseInt(sp.get('offset') || '0', 10) || 0, 0);
+    } catch { /* no URL (older callers) → full list */ }
+
+    let query = supabase
+      .from(table)
+      .select('*', limit ? { count: 'exact' } : undefined)
+      .order(orderBy, { ascending: orderDir === 'asc' });
+    if (limit) query = query.range(offset, offset + limit - 1);
+
+    const { data, error, count } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ items: data || [] });
+    return NextResponse.json(
+      limit ? { items: data || [], total: count ?? 0, limit, offset }
+            : { items: data || [] }
+    );
+  }
+
+  // Unique-violation (two people saving the same running number at once)
+  // deserves a human answer, not a raw constraint name. The message keeps
+  // the tokens "duplicate"/"ซ้ำ" so existing retry regexes keep matching.
+  function friendlyDbError(error) {
+    if (/duplicate key|unique constraint/i.test(error.message || '')) {
+      return NextResponse.json(
+        { error: 'เลขที่เอกสารซ้ำ (duplicate) — มีการบันทึกพร้อมกัน กรุณากดบันทึกอีกครั้ง ระบบจะออกเลขใหม่ให้',
+          code: 'duplicate' },
+        { status: 409 }
+      );
+    }
+    return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
   async function create(req) {
@@ -112,7 +145,7 @@ export function createCrudRoutes(table, opts = {}) {
     payload.id = body.id || newId(idPrefix);
 
     const { data, error } = await supabase.from(table).insert(payload).select().single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error) return friendlyDbError(error);
     await appendAudit({ actor: session.user.email, action: `${table}.create`, target: payload.id });
     return NextResponse.json({ ok: true, item: data });
   }
@@ -128,12 +161,34 @@ export function createCrudRoutes(table, opts = {}) {
     if (!body.id) return NextResponse.json({ error: 'ต้องระบุ id' }, { status: 400 });
 
     const payload = pickFields(body, allowedFields);
+
+    // Optimistic lock on state transitions: `_expect: { status: '<current>' }`
+    // turns the update into compare-and-swap — if someone else already moved
+    // the document, no row matches and the caller gets a 409 instead of
+    // silently clobbering the other person's transition.
+    let query = supabase.from(table).update(payload).eq('id', body.id);
+    const expectStatus = body._expect && typeof body._expect.status === 'string'
+      ? body._expect.status : null;
+    if (expectStatus !== null) query = query.eq('status', expectStatus);
+
     // .single() returns an error when no rows match — use maybeSingle so we
-    // can distinguish "DB error" from "row gone" and return a proper 404.
-    const { data, error } = await supabase
-      .from(table).update(payload).eq('id', body.id).select().maybeSingle();
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    if (!data) return NextResponse.json({ error: 'ไม่พบรายการ' }, { status: 404 });
+    // can distinguish "DB error" from "row gone" and return a proper 404/409.
+    const { data, error } = await query.select().maybeSingle();
+    if (error) return friendlyDbError(error);
+    if (!data) {
+      if (expectStatus !== null) {
+        // Row exists but the status moved under us → conflict, not not-found.
+        const { data: still } = await supabase
+          .from(table).select('id').eq('id', body.id).maybeSingle();
+        if (still) {
+          return NextResponse.json(
+            { error: 'เอกสารถูกแก้ไขโดยผู้อื่นระหว่างที่คุณดูอยู่ — กรุณารีเฟรชหน้าแล้วลองใหม่', code: 'conflict' },
+            { status: 409 }
+          );
+        }
+      }
+      return NextResponse.json({ error: 'ไม่พบรายการ' }, { status: 404 });
+    }
     await appendAudit({ actor: session.user.email, action: `${table}.update`, target: body.id });
     return NextResponse.json({ ok: true, item: data });
   }

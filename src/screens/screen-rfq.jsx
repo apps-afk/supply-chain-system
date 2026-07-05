@@ -570,23 +570,67 @@ export function ScreenRFQConfirm({ go }) {
     if (!silent) setCondsBusy(false);
   }
 
-  // Save the reviewed prices into the Price DB (Material items only — the
-  // price_points table links to materials).
+  // Save the reviewed prices into the Price DB. price_points.material_id has
+  // an FK to materials(id), so SubContract rows go through a "shadow material"
+  // (deterministic id 'mat_sc_' + itemCode, category งานจ้างเหมา) created on
+  // the fly — then both kinds share the same price_points POST loop.
   async function savePrices() {
     if (!rfq) return;
     if (Object.keys(matByCode).length === 0) {
       setSavePxMsg('โหลดข้อมูลวัสดุไม่สำเร็จ — รีเฟรชหน้าแล้วลองใหม่');
       return;
     }
-    const rows = items.filter(it => it.save && Number(it.newP) > 0 && it.source === 'Material' && matByCode[it.itemCode]);
-    if (rows.length === 0) {
-      setSavePxMsg('ไม่มีรายการวัสดุที่มีราคา (>0) ให้บันทึก · งานจ้างเหมายังไม่รองรับ Price DB');
+    const matRows = items.filter(it => it.save && Number(it.newP) > 0 && it.source === 'Material' && matByCode[it.itemCode]);
+    const scRows  = items.filter(it => it.save && Number(it.newP) > 0 && it.source === 'SubContract' && it.itemCode);
+    if (matRows.length === 0 && scRows.length === 0) {
+      setSavePxMsg('ไม่มีรายการที่มีราคา (>0) ให้บันทึก');
       return;
     }
     setSavePxBusy(true); setSavePxMsg('');
-    let ok = 0; const errs = [];
-    for (const it of rows) {
-      const mat = matByCode[it.itemCode];
+    const errs = [];
+    // Resolve a material id for each subcontract row — reuse an existing row
+    // (real material or earlier shadow), else create the shadow material.
+    const scReady = [];               // { it, mat } — rows cleared for the price POST
+    const newShadows = {};            // code → matByCode entry, merged into state after
+    for (const it of scRows) {
+      const existing = matByCode[it.itemCode];
+      if (existing) { scReady.push({ it, mat: existing }); continue; }
+      const shadowId = 'mat_sc_' + it.itemCode;
+      const unit = findUnit(units, it.unit);
+      try {
+        const r = await fetch('/api/materials', {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            id: shadowId,
+            code: it.itemCode,
+            name: it.name || '',
+            main_category: 'งานจ้างเหมา',
+            category: 'งานจ้างเหมา',
+            unit_id: unit?.id || null,
+            notes: 'shadow:subcontract',
+            active: true,
+          }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          // Duplicate = the shadow already exists (e.g. saved from another
+          // RFQ) — that's success, use the deterministic id.
+          const isDup = r.status === 409 || /duplicate|ซ้ำ/i.test(d.error || '');
+          if (!isDup) { errs.push(`${it.name}: ${d.error || 'สร้างรายการงานจ้างเหมาไม่สำเร็จ'}`); continue; }
+        }
+        const mat = { id: shadowId, unit_id: unit?.id || null, name: it.name || '' };
+        newShadows[it.itemCode] = mat;
+        scReady.push({ it, mat });
+      } catch (e) { errs.push(`${it.name}: ${e.message}`); }
+    }
+    // Remember the shadows so a second click reuses them instead of re-POSTing.
+    if (Object.keys(newShadows).length > 0) setMatByCode(prev => ({ ...prev, ...newShadows }));
+    let okMat = 0, okSc = 0;
+    const toSave = [
+      ...matRows.map(it => ({ it, mat: matByCode[it.itemCode], isSc: false })),
+      ...scReady.map(({ it, mat }) => ({ it, mat, isSc: true })),
+    ];
+    for (const { it, mat, isSc } of toSave) {
       const unit = findUnit(units, it.unit);
       try {
         const r = await fetch('/api/prices', {
@@ -600,9 +644,11 @@ export function ScreenRFQConfirm({ go }) {
             source_id: rfq.no || '',
           }),
         });
-        if (r.ok) ok++; else { const d = await r.json().catch(()=>({})); errs.push(`${it.name}: ${d.error || 'ไม่สำเร็จ'}`); }
+        if (r.ok) { if (isSc) okSc++; else okMat++; }
+        else { const d = await r.json().catch(()=>({})); errs.push(`${it.name}: ${d.error || 'ไม่สำเร็จ'}`); }
       } catch (e) { errs.push(`${it.name}: ${e.message}`); }
     }
+    const ok = okMat + okSc;
     // Close the RFQ once prices are captured
     if (ok > 0) {
       try {
@@ -612,7 +658,8 @@ export function ScreenRFQConfirm({ go }) {
       } catch {}
       setPricesSaved(true);
     }
-    setSavePxMsg(`บันทึกเข้า Price DB สำเร็จ ${ok}/${rows.length} รายการ${errs.length ? ' · ' + errs.slice(0,3).join(' · ') : ''}`);
+    const total = matRows.length + scRows.length;
+    setSavePxMsg(`บันทึกแล้ว ${ok}/${total} รายการ (วัสดุ ${okMat} · งานจ้างเหมา ${okSc})${errs.length ? ' · ' + errs.slice(0,3).join(' · ') : ''}`);
     setSavePxBusy(false);
   }
 
@@ -625,7 +672,9 @@ export function ScreenRFQConfirm({ go }) {
     try {
       const r = await fetch('/api/rfqs', {
         method:'PATCH', headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ id: rfq.id, status: next }),
+        // Optimistic lock — only apply if the row still has the status we
+        // loaded; a 409 means someone else changed it first.
+        body: JSON.stringify({ id: rfq.id, status: next, _expect: { status: rfq.status } }),
       });
       const d = await r.json();
       if (!r.ok) { setErr(d.error || 'เปลี่ยนสถานะไม่สำเร็จ'); }
@@ -701,11 +750,14 @@ export function ScreenRFQConfirm({ go }) {
         notes: parsed?.memo || '',
       });
       // Draft → sent on download (same behaviour as the create screen).
+      // Guarded with _expect so we only ever bump draft→sent; a 409 means
+      // someone already marked it sent (or moved it on) — ignore silently,
+      // the download itself still happened.
       if (rfq.status === 'draft') {
         try {
           const r2 = await fetch('/api/rfqs', {
             method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: rfq.id, status: 'sent' }),
+            body: JSON.stringify({ id: rfq.id, status: 'sent', _expect: { status: 'draft' } }),
           });
           if (r2.ok) setRfq(rf => ({ ...rf, status: 'sent' }));
         } catch { /* best-effort */ }

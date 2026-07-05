@@ -28,6 +28,14 @@ export const PO_STATUS = {
   cancelled: { bg:'var(--clay-soft)',  fg:'#6B2D1A',         dot:'var(--clay)',  label:'ยกเลิก' },
 };
 
+// Contract DB status → Thai label (mirrors screen-contract.jsx DB_STATUS_LABEL)
+const CONTRACT_STATUS_LABEL = {
+  draft:      'ร่าง · รอตรวจ',
+  active:     'ใช้งานอยู่',
+  expired:    'หมดอายุ',
+  terminated: 'ยกเลิก',
+};
+
 function fmtDate(iso) {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleDateString('th-TH', { year:'numeric', month:'short', day:'numeric' }); }
@@ -515,6 +523,7 @@ export function ScreenPODetail({ go }) {
   const { canWrite, isAdmin } = usePermissions();
   const [po, setPo]             = useState(null);
   const [projects, setProjects] = useState([]);
+  const [contracts, setContracts] = useState([]);
   const [attachments, setAttachments] = useState([]);
   const [loading, setLoading]   = useState(true);
   const [err, setErr]           = useState('');
@@ -534,10 +543,11 @@ export function ScreenPODetail({ go }) {
     (async () => {
       try {
         const stashed = (typeof window !== 'undefined') ? localStorage.getItem('po.currentId') : null;
-        const [r, rP] = await Promise.all([fetch('/api/purchase-orders'), fetch('/api/projects')]);
+        const [r, rP, rC] = await Promise.all([fetch('/api/purchase-orders'), fetch('/api/projects'), fetch('/api/contracts')]);
         const d = await r.json();
         if (!r.ok) { setErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
         if (rP.ok) setProjects((await rP.json()).items || []);
+        if (rC.ok) setContracts((await rC.json()).items || []);
         const list = d.items || [];
         const picked = (stashed && list.find(x => x.id === stashed)) || list[0] || null;
         setPo(picked);
@@ -559,14 +569,30 @@ export function ScreenPODetail({ go }) {
     () => items.length > 0 && items.every(it => (recvMap[it.code] || 0) >= (Number(it.qty) || 0)),
     [items, recvMap]
   );
+  // Contracts linked to this PO — the link lives on the CONTRACT side, inside
+  // notes as JSON: { workflow: { linked_po_ids: [...] }, memo }.
+  const linkedContracts = useMemo(() => {
+    if (!po) return [];
+    return contracts.filter(c => {
+      try {
+        const parsed = JSON.parse(c.notes || '');
+        const ids = parsed?.workflow?.linked_po_ids;
+        return Array.isArray(ids) && ids.includes(po.id);
+      } catch { return false; }
+    });
+  }, [contracts, po]);
 
   async function transition(patch, confirmMsg) {
     if (!po || (confirmMsg && !confirm(confirmMsg))) return;
     setBusy(true); setErr('');
     try {
+      const body = { id: po.id, ...patch };
+      // Optimistic lock: only when the patch changes STATUS. Server compares
+      // and answers 409 (Thai message) if someone moved it first.
+      if (patch.status) body._expect = { status: po.status };
       const r = await fetch('/api/purchase-orders', {
         method:'PATCH', headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ id: po.id, ...patch }),
+        body: JSON.stringify(body),
       });
       const d = await r.json();
       if (!r.ok) setErr(d.error || 'บันทึกไม่สำเร็จ');
@@ -651,6 +677,12 @@ export function ScreenPODetail({ go }) {
             <span>Supplier <strong style={{ color:'var(--ink-2)' }}>{po.supplier_name || '—'}</strong></span>
             <span>โครงการ <strong style={{ color:'var(--ink-2)' }}>{proj ? (proj.code ? `${proj.code} · ${proj.name}` : proj.name) : '—'}</strong></span>
             <span>สั่งเมื่อ <strong style={{ color:'var(--ink-2)' }}>{fmtDate(po.ordered_at)}</strong></span>
+            {po.comparison_id && (
+              <span onClick={() => { try { localStorage.setItem('cmp.currentId', po.comparison_id); } catch {} go('compare-detail'); }}
+                style={{ color:'var(--teal-ink)', cursor:'pointer', fontWeight:500 }}>
+                ใบเปรียบเทียบต้นทาง ↗
+              </span>
+            )}
             {po.received_at && <span>รับของ <strong style={{ color:'var(--ink-2)' }}>{fmtDate(po.received_at)}</strong></span>}
             {po.closed_at && <span>ปิดงาน <strong style={{ color:'var(--ink-2)' }}>{fmtDate(po.closed_at)}</strong></span>}
           </div>
@@ -807,6 +839,33 @@ export function ScreenPODetail({ go }) {
           {/* Billing & payment */}
           <BillingCard po={po} canWrite={canWrite} busy={busy} transition={transition}
                        attachments={attachments} onUploaded={() => loadAttachments(po.id)} />
+        </div>
+      )}
+
+      {/* ---- Linked contracts (link is stored on the contract side) ---- */}
+      {linkedContracts.length > 0 && (
+        <div className="card" style={{ padding:0, marginTop:24 }}>
+          <div style={{ padding:'16px 20px', borderBottom:'1px solid var(--rule)' }}>
+            <h3 className="h-card">สัญญาที่เชื่อมโยง · {linkedContracts.length}</h3>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column' }}>
+            {linkedContracts.map((c, i) => (
+              <div key={c.id}
+                onClick={() => { try { localStorage.setItem('contract.currentId', c.id); } catch {} go('contract-detail'); }}
+                style={{ display:'flex', alignItems:'center', gap:14, padding:'12px 20px', cursor:'pointer',
+                         borderTop: i === 0 ? 'none' : '1px solid var(--rule)' }}>
+                <span className="font-mono" style={{ fontSize:11.5, color:'var(--ink-3)', minWidth:110 }}>{c.no || '—'}</span>
+                <span style={{ flex:1, fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.title || '—'}</span>
+                <span className="num" style={{ fontSize:12.5, fontWeight:500 }}>{c.amount != null ? money(Number(c.amount) || 0) : '—'}</span>
+                <span style={{ fontSize:11.5, color:'var(--ink-3)' }}>{CONTRACT_STATUS_LABEL[c.status] || c.status || '—'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {linkedContracts.length === 0 && po.status !== 'cancelled' && (
+        <div style={{ marginTop:12, fontSize:12, color:'var(--ink-4)' }}>
+          ยังไม่มีสัญญาเชื่อมโยง — เชื่อมได้จากหน้ารายละเอียดสัญญา (ปุ่ม 'เชื่อมกับ PO')
         </div>
       )}
 
