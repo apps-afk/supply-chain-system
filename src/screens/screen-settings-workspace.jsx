@@ -3,9 +3,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 
 const MODELS = [
+  { value: 'claude-opus-4-8',   label: 'Claude Opus 4.8 (ฉลาดที่สุด)' },
+  { value: 'claude-sonnet-5',   label: 'Claude Sonnet 5 (สมดุล)' },
   { value: 'claude-haiku-4-5',  label: 'Claude Haiku 4.5 (เร็ว, ราคาประหยัด)' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (สมดุล)' },
-  { value: 'claude-opus-4-7',   label: 'Claude Opus 4.7 (ฉลาดที่สุด)' },
 ];
 
 const COUNTRIES = [
@@ -465,8 +465,30 @@ function OrgInfoSection({ s, on }) {
 }
 
 function AIDefaultsSection({ s, on }) {
+  // Live status of the AI key so the admin knows whether the model picker is
+  // actually usable yet (the key is set in Vercel env, not here).
+  const [cfg, setCfg] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/ai/config').then(r => r.ok ? r.json() : null)
+      .then(d => { if (alive) setCfg(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {cfg && (
+        <div style={{
+          fontSize: 12.5, padding: '8px 12px', borderRadius: 8,
+          background: cfg.hasKey ? 'rgba(16,185,129,0.10)' : 'rgba(245,158,11,0.10)',
+          color: cfg.hasKey ? 'var(--teal, #0f766e)' : '#92400e',
+          border: `1px solid ${cfg.hasKey ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)'}`,
+        }}>
+          {cfg.hasKey
+            ? '✓ เชื่อมต่อ AI แล้ว (มี API key) — ปุ่ม “ให้ AI ช่วย…” ในหน้าสัญญาและเทียบราคาพร้อมใช้งาน'
+            : '⚠ ยังไม่ได้ใส่ ANTHROPIC_API_KEY — เลือกโมเดลไว้ก่อนได้ แต่ปุ่ม AI จะยังใช้ไม่ได้จนกว่าจะตั้งค่า key ใน Vercel'}
+        </div>
+      )}
       <Field label="โมเดลเริ่มต้น" hint="ใช้ประเมินใบเสนอราคาและสัญญาทุกฉบับ สามารถกำหนดเฉพาะโครงการได้">
         <Select value={s.defaultModel} onChange={v => on('defaultModel', v)} options={MODELS} />
       </Field>

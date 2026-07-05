@@ -172,3 +172,26 @@ export async function getFile(fileId) {
   });
   return res.data;
 }
+
+/**
+ * Download a file's raw bytes (for server-side use, e.g. sending a contract
+ * PDF to the AI reviewer). Returns { buffer, mimeType, name, size }.
+ */
+export async function getFileBytes(fileId) {
+  const drive = getClient();
+  const meta = await drive.files.get({
+    fileId,
+    fields: 'mimeType, name, size',
+    supportsAllDrives: true,
+  });
+  const res = await drive.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true },
+    { responseType: 'arraybuffer' }
+  );
+  return {
+    buffer: Buffer.from(res.data),
+    mimeType: meta.data.mimeType,
+    name: meta.data.name,
+    size: Number(meta.data.size) || 0,
+  };
+}

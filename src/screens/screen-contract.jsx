@@ -4,6 +4,7 @@ import { Icons, Av, money, safeHref } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
 import { useTableView, Th, Pager, exportCSV } from '../lib/table-utils';
+import AiAssistPanel from '../lib/ai-assist';
 import { PO_STATUS } from './screen-po';
 /*
   Contract module — upload-driven manual review workflow.
@@ -1376,6 +1377,14 @@ export function ScreenContract({ go }) {
               <p style={{ fontSize:13, color:'var(--ink-3)', margin:'0 0 20px', lineHeight:1.6 }}>
                 เปิดไฟล์สัญญา (แผงด้านขวา) เทียบกับข้อมูลที่บันทึกไว้ แล้วติ๊กยืนยันทุกข้อก่อนส่งต่อ
               </p>
+              {canWrite && contract && (
+                <AiAssistPanel
+                  kind="contract"
+                  payload={{ contract_id: contract.id }}
+                  title="ให้ AI ช่วยอ่าน/สรุปสัญญา และแนะนำข้อที่ควรแก้"
+                  hint="AI จะอ่านไฟล์สัญญา (หรือข้อมูลที่บันทึกไว้) แล้วสรุปสาระสำคัญและชี้จุดเสี่ยง — จะใช้หรือข้ามก็ได้ ติ๊กเช็คลิสต์เองแล้วกดต่อได้เลย"
+                />
+              )}
               <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:24 }}>
                 {REVIEW_CHECKLIST.map(item => (
                   <label key={item.key} style={{

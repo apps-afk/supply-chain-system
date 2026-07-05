@@ -4,6 +4,7 @@ import { Icons, Chip, money, safeHref } from '../lib/shell';
 import { printDoc } from './screen-compare-create-pricedb';
 import { nextPoNo } from './screen-po';
 import { usePermissions } from '../lib/use-permissions';
+import AiAssistPanel from '../lib/ai-assist';
 
 /*
   Compare detail — renders a saved comparison from /api/comparisons.
@@ -306,6 +307,16 @@ export function ScreenCompare({ go }) {
           )}
         </div>
       </div>
+
+      {/* Optional AI price analysis — skippable; approve manually anytime */}
+      {canWrite && cmp.status !== 'finalized' && (
+        <AiAssistPanel
+          kind="comparison"
+          payload={{ comparison_id: cmp.id }}
+          title="ให้ AI ช่วยวิเคราะห์การเทียบราคา และแนะนำผู้ขาย"
+          hint="AI จะดูราคารวมและราคาต่อรายการ ชี้จุดผิดปกติ แล้วแนะนำผู้ขายที่ควรเลือก — ไม่บังคับ กดอนุมัติเองได้เลย"
+        />
+      )}
 
       {/* Approval chain (P2) — sequential sign-off per approval_roles master */}
       {signRoles.length > 0 && (
