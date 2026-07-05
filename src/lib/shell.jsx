@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useId, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { buildAlerts } from './alerts';
 import { canApprove as roleCanApprove } from './permissions';
@@ -51,39 +51,45 @@ export const Icons = {
   book:      <Icon d="M3 3.5h4.5a2 2 0 0 1 1 .5L9 4.5l.5-.5a2 2 0 0 1 1-.5H15M3 3.5v9h4.5a2 2 0 0 1 1 .5L9 13.5l.5-.5a2 2 0 0 1 1-.5H15v-9" />,
 };
 
-/* ----------------------- Company Logo ----------------------- */
+/* ----------------------- Company Logo -----------------------
+   "INITIAL · DESIGNED FOR REAL YOU · SUPPLY CHAIN" lockup —
+   serif gold wordmark with the dark calligraphic swash forming
+   the N's diagonal, per the brand artwork. */
 export function InitialEstateLogo({ width = 148, style }) {
-  const uid = useId().replace(/:/g, '-');
-  const clipId = `ie-n${uid}`;
-  const h = Math.round(width * 46 / 148);
+  const h = Math.round(width * 92 / 210);
+  const GOLD = '#B07A3C';
+  const INK  = '#322E36';
   return (
-    <svg width={width} height={h} viewBox="0 0 148 46" fill="none" aria-label="Initial Estate" style={style}>
-      <defs>
-        <clipPath id={clipId}>
-          <path d="M6 -4 L23 -4 L29 37 L12 37 Z" />
-        </clipPath>
-      </defs>
-      {/* Gold INITIAL wordmark */}
-      <text x="0" y="28"
+    <svg width={width} height={h} viewBox="0 0 210 92" fill="none" aria-label="Initial Supply Chain" style={style}>
+      {/* INITIAL wordmark */}
+      <text x="105" y="36" textAnchor="middle"
         fontFamily="'IBM Plex Serif', Georgia, 'Times New Roman', serif"
-        fontSize="26" fontWeight="600" fill="#C09535">
+        fontSize="36" fontWeight="600" fill={GOLD} letterSpacing="1">
         INITIAL
       </text>
-      {/* Navy swoosh ribbon through N */}
-      <path d="M6 -4 L23 -4 L29 37 L12 37 Z" fill="#2B3060" />
-      {/* INITIAL in paper, clipped to swoosh area */}
-      <g clipPath={`url(#${clipId})`}>
-        <text x="0" y="28"
-          fontFamily="'IBM Plex Serif', Georgia, 'Times New Roman', serif"
-          fontSize="26" fontWeight="600" fill="#F5EFE2">
-          INITIAL
-        </text>
-      </g>
-      {/* ESTATE CO.,LTD. subtitle */}
-      <text x="0.5" y="42"
-        fontFamily="'IBM Plex Serif', Georgia, serif"
-        fontSize="7.5" fontWeight="500" fill="#2B3060" letterSpacing="2.6">
-        ESTATE CO.,LTD.
+      {/* Dark swash — the N's diagonal */}
+      <path d="M52 8
+               C 58 11.5, 63.5 20, 67.5 28
+               C 69.3 31.5, 70.8 35, 73 38.5
+               L 66.5 38.5
+               C 63 33.5, 58.5 25.5, 54.5 17.5
+               C 53 14, 51.5 10.5, 49.5 8 Z"
+            fill={INK} />
+      {/* Tagline */}
+      <text x="105" y="53" textAnchor="middle"
+        fontFamily="var(--font-sans), 'IBM Plex Sans', Arial, sans-serif"
+        fontSize="8.5" fontWeight="500" fill={GOLD} letterSpacing="3">
+        DESIGNED FOR REAL YOU
+      </text>
+      {/* Divider with centre dot */}
+      <line x1="24" y1="63" x2="97" y2="63" stroke={GOLD} strokeWidth="1.2" />
+      <circle cx="105" cy="63" r="2.3" fill={GOLD} />
+      <line x1="113" y1="63" x2="186" y2="63" stroke={GOLD} strokeWidth="1.2" />
+      {/* SUPPLY CHAIN */}
+      <text x="107" y="82" textAnchor="middle"
+        fontFamily="var(--font-sans), 'IBM Plex Sans', Arial, sans-serif"
+        fontSize="13" fontWeight="500" fill={INK} letterSpacing="5.5">
+        SUPPLY CHAIN
       </text>
     </svg>
   );

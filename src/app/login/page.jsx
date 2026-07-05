@@ -1,21 +1,33 @@
 'use client';
-import React, { useState, useEffect, useId } from 'react';
+import React, { useState, useEffect } from 'react';
 import { signIn, useSession } from 'next-auth/react';
 
-/* ---- Logo ---- */
+/* ---- Logo: INITIAL · DESIGNED FOR REAL YOU · SUPPLY CHAIN ---- */
 function InitialEstateLogo({ width = 200 }) {
-  const uid = useId().replace(/:/g, '-');
-  const clipId = `ll${uid}`;
-  const h = Math.round(width * 46 / 200);
+  const h = Math.round(width * 92 / 210);
+  const GOLD = '#B07A3C';
+  const INK  = '#322E36';
   return (
-    <svg width={width} height={h} viewBox="0 0 200 46" fill="none" aria-label="Initial Estate">
-      <defs><clipPath id={clipId}><path d="M8 -5 L31 -5 L39 40 L16 40 Z" /></clipPath></defs>
-      <text x="0" y="34" fontFamily="'IBM Plex Serif',Georgia,serif" fontSize="35" fontWeight="600" fill="#C09535">INITIAL</text>
-      <path d="M8 -5 L31 -5 L39 40 L16 40 Z" fill="#2B3060" />
-      <g clipPath={`url(#${clipId})`}>
-        <text x="0" y="34" fontFamily="'IBM Plex Serif',Georgia,serif" fontSize="35" fontWeight="600" fill="#F5EFE2">INITIAL</text>
-      </g>
-      <text x="1" y="44" fontFamily="'IBM Plex Serif',Georgia,serif" fontSize="9.5" fontWeight="500" fill="#2B3060" letterSpacing="3.2">ESTATE CO.,LTD.</text>
+    <svg width={width} height={h} viewBox="0 0 210 92" fill="none" aria-label="Initial Supply Chain">
+      <text x="105" y="36" textAnchor="middle"
+        fontFamily="'IBM Plex Serif', Georgia, 'Times New Roman', serif"
+        fontSize="36" fontWeight="600" fill={GOLD} letterSpacing="1">INITIAL</text>
+      <path d="M52 8
+               C 58 11.5, 63.5 20, 67.5 28
+               C 69.3 31.5, 70.8 35, 73 38.5
+               L 66.5 38.5
+               C 63 33.5, 58.5 25.5, 54.5 17.5
+               C 53 14, 51.5 10.5, 49.5 8 Z"
+            fill={INK} />
+      <text x="105" y="53" textAnchor="middle"
+        fontFamily="var(--font-sans), 'IBM Plex Sans', Arial, sans-serif"
+        fontSize="8.5" fontWeight="500" fill={GOLD} letterSpacing="3">DESIGNED FOR REAL YOU</text>
+      <line x1="24" y1="63" x2="97" y2="63" stroke={GOLD} strokeWidth="1.2" />
+      <circle cx="105" cy="63" r="2.3" fill={GOLD} />
+      <line x1="113" y1="63" x2="186" y2="63" stroke={GOLD} strokeWidth="1.2" />
+      <text x="107" y="82" textAnchor="middle"
+        fontFamily="var(--font-sans), 'IBM Plex Sans', Arial, sans-serif"
+        fontSize="13" fontWeight="500" fill={INK} letterSpacing="5.5">SUPPLY CHAIN</text>
     </svg>
   );
 }
