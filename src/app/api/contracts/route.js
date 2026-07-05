@@ -9,17 +9,41 @@ import { appendAudit } from '../../../lib/workspace';
 
 export const runtime = 'nodejs';   // googleapis (used in cascade delete) needs node runtime
 
+// Integrity guard (fraud audit): retention_released_by always follows the
+// session (can't be pinned on someone else), and the money terms of a
+// contract are frozen once it's no longer a draft.
+const TERM_FIELDS = ['amount', 'warranty', 'start_date', 'end_date', 'type_id',
+                     'supplier_id', 'currency'];
+
+function guardMutation(session, body, current, kind) {
+  if (body.retention_released_at !== undefined || body.retention_released_by !== undefined) {
+    body.retention_released_by = session.user.email;
+  }
+  if (kind === 'update' && current && current.status !== 'draft') {
+    for (const f of TERM_FIELDS) {
+      if (body[f] !== undefined && String(body[f]) !== String(current[f] ?? '')) {
+        return NextResponse.json(
+          { error: 'แก้ไขมูลค่า/เงื่อนไขสัญญาได้เฉพาะตอนสถานะ "ร่าง" เท่านั้น' },
+          { status: 409 }
+        );
+      }
+    }
+  }
+  return null;
+}
+
 const h = createCrudRoutes('contracts', {
   fields: ['no', 'project_id', 'supplier_id', 'type_id', 'title',
            'amount', 'currency', 'status', 'start_date', 'end_date',
            'signed_at', 'warranty', 'notes',
-           'retention_released_at', 'retention_released_by'],
+           'retention_released_at', 'retention_released_by', 'created_by'],
   orderBy: 'created_at',
   orderDir: 'desc',
   idPrefix: 'ct',
   // Contracts are uploaded by procurement users; only the DELETE handler
   // below remains admin-only because it cascades into Drive file deletes.
   writeRole: 'session',
+  guardMutation,
 });
 
 export const GET   = h.list;

@@ -53,6 +53,16 @@ export async function POST(request) {
   }
   if (!cmp) return NextResponse.json({ error: 'ไม่พบใบเปรียบเทียบ' }, { status: 404 });
 
+  // Segregation of duties (fraud audit): the person who created the
+  // comparison cannot approve it — an approval must involve a second human.
+  if (action === 'approve' && cmp.created_by &&
+      cmp.created_by.toLowerCase() === session.user.email.toLowerCase()) {
+    return NextResponse.json(
+      { error: 'ผู้สร้างใบเปรียบเทียบอนุมัติเอกสารของตนเองไม่ได้ — ต้องให้ผู้อนุมัติคนอื่นดำเนินการ' },
+      { status: 403 }
+    );
+  }
+
   const chain = roles || [];
   const target = chain.find(r => r.level === level);
   if (!target) {

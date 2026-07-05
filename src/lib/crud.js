@@ -63,11 +63,31 @@ function newId(prefix) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Compact, safe copy of a payload for the audit trail: scalar fields only
+// (skip *_json blobs so the log stays readable) so money-field changes like
+// amount / paid_amount / payment_status / status are captured verbatim.
+function auditableChanges(payload) {
+  const out = {};
+  for (const [k, v] of Object.entries(payload)) {
+    if (k.endsWith('_json')) { out[k] = '[changed]'; continue; }
+    if (v == null || typeof v !== 'object') out[k] = v;
+  }
+  return out;
+}
+
 export function createCrudRoutes(table, opts = {}) {
   const allowedFields = opts.fields || [];
   const orderBy       = opts.orderBy || 'created_at';
   const orderDir      = opts.orderDir || 'asc';
   const idPrefix      = opts.idPrefix || table;
+  // Server-authoritative fields: never trust the client for who created a
+  // record. If created_by is whitelisted it's always stamped from the
+  // session so authorship can't be forged (audit fraud finding).
+  const stampCreatedBy = allowedFields.includes('created_by');
+  // Optional per-route mutation guard: (session, body, currentRow|null,
+  // kind) → NextResponse to reject, or null/undefined to allow. Lets a route
+  // enforce immutability / financial rules without re-implementing CRUD.
+  const guardMutation = typeof opts.guardMutation === 'function' ? opts.guardMutation : null;
   // Default: writes are admin-only (safe default for master data). Pass
   // `writeRole: 'session'` for document tables (rfqs/comparisons/…) — since
   // P2 that means "any WRITER role" (admin/procurement/manager); read-only
@@ -97,7 +117,7 @@ export function createCrudRoutes(table, opts = {}) {
     if (limit) query = query.range(offset, offset + limit - 1);
 
     const { data, error, count } = await query;
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) { console.error(`[crud:${table}] list error:`, error.message); return NextResponse.json({ error: 'โหลดข้อมูลไม่สำเร็จ' }, { status: 500 }); }
     return NextResponse.json(
       limit ? { items: data || [], total: count ?? 0, limit, offset }
             : { items: data || [] }
@@ -115,7 +135,10 @@ export function createCrudRoutes(table, opts = {}) {
         { status: 409 }
       );
     }
-    return NextResponse.json({ error: error.message }, { status: 400 });
+    // Don't leak raw DB errors (table/column/constraint names) to clients —
+    // log the detail server-side, return a generic message.
+    console.error(`[crud:${table}] db error:`, error.message);
+    return NextResponse.json({ error: 'บันทึกข้อมูลไม่สำเร็จ' }, { status: 400 });
   }
 
   async function create(req) {
@@ -129,10 +152,18 @@ export function createCrudRoutes(table, opts = {}) {
 
     const payload = pickFields(body, allowedFields);
     payload.id = body.id || newId(idPrefix);
+    // Authorship is server-set, never client-supplied (anti-forgery).
+    if (stampCreatedBy) payload.created_by = session.user.email;
+
+    if (guardMutation) {
+      const rej = await guardMutation(session, body, null, 'create');
+      if (rej) return rej;
+    }
 
     const { data, error } = await supabase.from(table).insert(payload).select().single();
     if (error) return friendlyDbError(error);
-    await appendAudit({ actor: session.user.email, action: `${table}.create`, target: payload.id });
+    await appendAudit({ actor: session.user.email, action: `${table}.create`, target: payload.id,
+                        changes: auditableChanges(payload) });
     return NextResponse.json({ ok: true, item: data });
   }
 
@@ -147,6 +178,18 @@ export function createCrudRoutes(table, opts = {}) {
     if (!body.id) return NextResponse.json({ error: 'ต้องระบุ id' }, { status: 400 });
 
     const payload = pickFields(body, allowedFields);
+    // created_by is immutable after creation — never let an update rewrite it.
+    delete payload.created_by;
+
+    // Per-route mutation guard (immutability / financial rules). It gets the
+    // current row so it can compare against the requested change.
+    if (guardMutation) {
+      const { data: current } = await supabase
+        .from(table).select('*').eq('id', body.id).maybeSingle();
+      if (!current) return NextResponse.json({ error: 'ไม่พบรายการ' }, { status: 404 });
+      const rej = await guardMutation(session, body, current, 'update');
+      if (rej) return rej;
+    }
 
     // Optimistic lock on state transitions: `_expect: { status: '<current>' }`
     // turns the update into compare-and-swap — if someone else already moved
@@ -175,7 +218,8 @@ export function createCrudRoutes(table, opts = {}) {
       }
       return NextResponse.json({ error: 'ไม่พบรายการ' }, { status: 404 });
     }
-    await appendAudit({ actor: session.user.email, action: `${table}.update`, target: body.id });
+    await appendAudit({ actor: session.user.email, action: `${table}.update`, target: body.id,
+                        changes: auditableChanges(payload) });
     return NextResponse.json({ ok: true, item: data });
   }
 
@@ -193,7 +237,7 @@ export function createCrudRoutes(table, opts = {}) {
     // doesn't silently look "successful" — second caller now gets 404.
     const { data, error } = await supabase
       .from(table).delete().eq('id', body.id).select('id');
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    if (error) { console.error(`[crud:${table}] delete error:`, error.message); return NextResponse.json({ error: 'ลบไม่สำเร็จ' }, { status: 400 }); }
     if (!data || data.length === 0) {
       return NextResponse.json({ error: 'ไม่พบรายการ (อาจถูกลบไปแล้ว)' }, { status: 404 });
     }

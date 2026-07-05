@@ -9,6 +9,26 @@ import { appendAudit } from '../../../lib/workspace';
 
 export const runtime = 'nodejs';   // googleapis (used in cascade delete) needs node runtime
 
+// Immutability guard (fraud audit): once a comparison leaves 'draft'
+// (finalized/archived) its priced contents are frozen — nobody can get it
+// approved and then swap the winning supplier or prices underneath the
+// approval. Only notes/status stay editable (archive, upload-ref decision).
+const FROZEN_FIELDS = ['items_json', 'suppliers_json', 'total_low', 'total_high', 'project_id'];
+
+function guardMutation(session, body, current, kind) {
+  if (kind === 'update' && current && current.status !== 'draft') {
+    for (const f of FROZEN_FIELDS) {
+      if (body[f] !== undefined) {
+        return NextResponse.json(
+          { error: 'ใบเปรียบเทียบที่อนุมัติ/เก็บถาวรแล้ว แก้ไขรายการหรือราคาไม่ได้' },
+          { status: 409 }
+        );
+      }
+    }
+  }
+  return null;
+}
+
 const h = createCrudRoutes('comparisons', {
   fields: ['no', 'title', 'project_id', 'status', 'items_json',
            'suppliers_json', 'total_low', 'total_high', 'notes', 'created_by'],
@@ -18,6 +38,7 @@ const h = createCrudRoutes('comparisons', {
   // Comparison docs are operational data — non-admin users must be able to
   // create/edit them (otherwise the whole Compare module is read-only).
   writeRole: 'session',
+  guardMutation,
 });
 
 export const GET    = h.list;

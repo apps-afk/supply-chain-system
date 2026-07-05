@@ -446,21 +446,43 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
     if (!file) return;
     setBusy(true);
     try {
-      const XLSX = await import('xlsx');
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array' });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      if (!sheet) throw new Error('ไม่พบ sheet ใน Excel');
-      // header:1 → array-of-arrays so we can reuse the existing TSV parser
-      // raw:false → format dates / numbers as strings (so they survive
-      // the TSV round-trip without losing precision)
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false, raw: false, defval: '' });
-      // Convert AoA → TSV string and feed into the existing preview/parse
-      // pipeline. Strip cells of tabs/newlines so the round-trip survives.
-      const tsv = rows.map(r =>
-        r.map(c => String(c ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t')
-      ).join('\n');
-      setText(tsv);
+      // Read with ExcelJS (already used app-wide) instead of the `xlsx`
+      // package, which carries an unpatched prototype-pollution + ReDoS
+      // advisory and was the app's only remaining use of it.
+      const _xl = await import('exceljs');
+      const ExcelJS = _xl.default || _xl;
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await file.arrayBuffer());
+      const ws = wb.worksheets[0];
+      if (!ws) throw new Error('ไม่พบ sheet ใน Excel');
+
+      // Pull a plain string out of any ExcelJS cell value shape (rich text,
+      // hyperlink, formula result, date) — mirrors the old raw:false intent.
+      const cellText = (cell) => {
+        const v = cell?.value;
+        if (v == null) return '';
+        if (typeof v === 'object') {
+          if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join('');
+          if (v.text !== undefined) return String(v.text);
+          if (v.result !== undefined) return String(v.result);
+          if (v instanceof Date) return cell.text || v.toISOString();
+          return cell.text || '';
+        }
+        return String(v);
+      };
+
+      // Build array-of-arrays → TSV, matching the previous pipeline exactly.
+      // Only read the first worksheet (a Lookup sheet, if present, is ignored).
+      const lines = [];
+      const maxCol = ws.columnCount || 0;
+      ws.eachRow({ includeEmpty: false }, (row) => {
+        const cells = [];
+        for (let c = 1; c <= maxCol; c++) {
+          cells.push(cellText(row.getCell(c)).replace(/[\t\r\n]+/g, ' '));
+        }
+        if (cells.some(x => x.trim() !== '')) lines.push(cells.join('\t'));
+      });
+      setText(lines.join('\n'));
     } catch (e) {
       alert(`อ่านไฟล์ Excel ไม่สำเร็จ: ${e.message}`);
     }

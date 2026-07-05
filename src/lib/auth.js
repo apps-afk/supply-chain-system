@@ -5,6 +5,23 @@ import { NEXTAUTH_SECRET } from './auth-config';
 import { rateLimit } from './rate-limit';
 import { appendAudit } from './workspace';
 
+// Fail CLOSED in production if the JWT secret isn't configured. auth-config.js
+// falls back to a public dev string so the Edge middleware never throws at
+// module load — but that string is guessable, so anyone could forge an admin
+// session. This module is node-only (imported by every API route via
+// authOptions, and by the NextAuth handler), so throwing here takes the auth
+// surface down loudly instead of running with a forgeable secret. Skipped
+// during `next build` (page-data collection has no runtime env) — the throw
+// fires at request time. Never reached when NEXTAUTH_SECRET is set.
+if (process.env.NODE_ENV === 'production' &&
+    !process.env.NEXTAUTH_SECRET &&
+    process.env.NEXT_PHASE !== 'phase-production-build') {
+  throw new Error(
+    'NEXTAUTH_SECRET is not set in production — refusing to start with a ' +
+    'guessable fallback secret (forgeable sessions). Set it in Vercel env vars.'
+  );
+}
+
 const DOMAIN = 'initialestate.com';
 
 const providers = [
@@ -16,10 +33,11 @@ const providers = [
     },
     async authorize(credentials) {
       if (!credentials?.email || !credentials?.password) return null;
-      // Defense in depth: explicit domain check, even though validateUser
-      // only returns users from BUILTIN/registered (both go through the
-      // domain check at write-time) — guards against future provider changes.
-      if (!credentials.email.toLowerCase().endsWith(`@${DOMAIN}`)) {
+      // Defense in depth: strict shape + explicit domain check. The shape
+      // regex rejects wildcard/whitespace tricks (e.g. "%@initialestate.com")
+      // before the email ever reaches the DB lookup.
+      const email = credentials.email.toLowerCase();
+      if (!/^[^\s@%_]+@[^\s@%_]+\.[^\s@%_]+$/.test(email) || !email.endsWith(`@${DOMAIN}`)) {
         throw new Error(`อนุญาตเฉพาะบัญชี @${DOMAIN} เท่านั้น`);
       }
       const key = credentials.email.toLowerCase();

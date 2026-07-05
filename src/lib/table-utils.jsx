@@ -90,7 +90,11 @@ export function Pager({ page, pages, setPage, total }) {
 // columns: [{ key, label }] — value taken from row[key] (or fn(row) if key is a function).
 export function exportCSV(filename, columns, rows) {
   const esc = v => {
-    const s = v == null ? '' : String(v);
+    let s = v == null ? '' : String(v);
+    // Formula-injection guard: a cell starting with = + - @ (or tab/CR) is
+    // executed as a formula by Excel/Sheets. Prefix with a single quote so a
+    // supplier name like =HYPERLINK(...) stays inert text.
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const head = columns.map(c => esc(c.label)).join(',');

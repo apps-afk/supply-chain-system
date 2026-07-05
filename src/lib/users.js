@@ -20,6 +20,14 @@ function checkPassword(user, password) {
 }
 const NOW = () => new Date().toISOString();
 
+// Neutralize LIKE wildcards (% _ \\) so an email is matched literally by
+// PostgREST .ilike() — otherwise "%@initialestate.com" would match/mutate
+// many rows (injection finding).
+function likeEscape(s) {
+  return String(s).replace(/([\\%_])/g, '\\$1');
+}
+
+
 export const ROLES = [
   { value: 'admin',       label: 'ผู้ดูแลระบบ' },
   { value: 'hr_manager',  label: 'ผู้จัดการ HR' },
@@ -93,7 +101,7 @@ async function findByEmail(emailLower) {
     const { data, error } = await supabase
       .from('users')
       .select(DB_COLS)
-      .ilike('email', emailLower)
+      .ilike('email', likeEscape(emailLower))
       .maybeSingle();
     if (error) throw new Error(`DB error: ${error.message}`);
     return fromRow(data);
@@ -135,7 +143,7 @@ async function updateUser(emailLower, patch) {
     if (patch.salt      !== undefined) dbPatch.salt      = patch.salt;
     if (patch.hash      !== undefined) dbPatch.hash      = patch.hash;
     if (patch.lastLogin !== undefined) dbPatch.last_login = patch.lastLogin;
-    const { error } = await supabase.from('users').update(dbPatch).ilike('email', emailLower);
+    const { error } = await supabase.from('users').update(dbPatch).ilike('email', likeEscape(emailLower));
     if (error) throw new Error(error.message);
     return;
   }
@@ -146,7 +154,7 @@ async function updateUser(emailLower, patch) {
 
 async function deleteByEmail(emailLower) {
   if (isSupabaseConfigured) {
-    const { error } = await supabase.from('users').delete().ilike('email', emailLower);
+    const { error } = await supabase.from('users').delete().ilike('email', likeEscape(emailLower));
     if (error) throw new Error(error.message);
     return;
   }

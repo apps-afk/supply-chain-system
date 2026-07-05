@@ -26,6 +26,8 @@ function isBrowserNavigation(req) {
   return (req.headers.get('accept') ?? '').includes('text/html');
 }
 
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 export default function middleware(req, event) {
   const { pathname } = req.nextUrl;
 
@@ -34,6 +36,21 @@ export default function middleware(req, event) {
     if (pathname.startsWith('/api/auth/')) return NextResponse.next();
     if (isBrowserNavigation(req)) {
       return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
+    }
+    // CSRF belt-and-braces: for state-changing methods, if the browser sent an
+    // Origin, it must match this host. Same-origin fetch() sends a matching
+    // Origin; a cross-site page's fetch sends its own (blocked here even if a
+    // cookie somehow rode along). curl/scripts send no Origin → fall through
+    // to the handler's session check (they can't ride a victim's cookie).
+    if (MUTATING.has(req.method)) {
+      const origin = req.headers.get('origin');
+      if (origin) {
+        let ok = false;
+        try { ok = new URL(origin).host === req.headers.get('host'); } catch { ok = false; }
+        if (!ok) {
+          return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
+        }
+      }
     }
     return NextResponse.next(); // handlers enforce their own session checks
   }
