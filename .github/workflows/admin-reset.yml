@@ -1,0 +1,47 @@
+# Manual break-glass workflow: reset an account's password directly in the
+# production database and make sure NEXTAUTH_SECRET is set. Runs ONLY when a
+# repo member triggers it by hand (workflow_dispatch) — never automatically.
+name: Admin password reset (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      temp_password:
+        description: 'Temporary password to set (>=10 chars) — change it right after logging in'
+        required: true
+      target_email:
+        description: 'Account to reset'
+        required: false
+        default: 'pasit@initialestate.com'
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm install -g vercel
+      - name: Pull production env
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Reset password in database
+        env:
+          TEMP_PASSWORD: ${{ inputs.temp_password }}
+          TARGET_EMAIL: ${{ inputs.target_email }}
+        run: node scripts/admin-reset.mjs
+      - name: Ensure NEXTAUTH_SECRET exists (generated, never logged)
+        run: |
+          if vercel env ls production --token=${{ secrets.VERCEL_TOKEN }} 2>/dev/null | grep -q 'NEXTAUTH_SECRET'; then
+            echo "NEXTAUTH_SECRET already set — leaving as is"
+          else
+            node -e "process.stdout.write(require('crypto').randomBytes(48).toString('base64url'))" \
+              | vercel env add NEXTAUTH_SECRET production --token=${{ secrets.VERCEL_TOKEN }}
+            echo "NEXTAUTH_SECRET created (sessions will re-login once)"
+          fi
+      - name: Redeploy so env changes take effect
+        run: |
+          vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+          vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
