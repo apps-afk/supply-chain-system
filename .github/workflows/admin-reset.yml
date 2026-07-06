@@ -17,6 +17,8 @@ on:
 jobs:
   reset:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,7 +32,16 @@ jobs:
         env:
           TEMP_PASSWORD: ${{ inputs.temp_password }}
           TARGET_EMAIL: ${{ inputs.target_email }}
-        run: node scripts/admin-reset.mjs
+        run: |
+          set -o pipefail
+          node scripts/admin-reset.mjs 2>&1 | tee /tmp/reset-out.txt
+      - name: Report failure detail as commit comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY="admin-reset run failed:\n\`\`\`\n$(tail -c 900 /tmp/reset-out.txt 2>/dev/null || echo 'no output captured')\n\`\`\`"
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -f body="$(printf "$BODY")" || true
       - name: Ensure NEXTAUTH_SECRET exists (generated, never logged)
         run: |
           if vercel env ls production --token=${{ secrets.VERCEL_TOKEN }} 2>/dev/null | grep -q 'NEXTAUTH_SECRET'; then
