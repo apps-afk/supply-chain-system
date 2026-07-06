@@ -37,6 +37,9 @@ jobs:
           node-version: 20
       - run: npm install -g vercel
 
+      - name: Link Vercel project (vercel pull creates the link)
+        run: vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
+
       - name: Ensure NEXTAUTH_SECRET exists (generated, never logged)
         run: |
           if vercel env ls production --token=${{ secrets.VERCEL_TOKEN }} 2>/dev/null | grep -q 'NEXTAUTH_SECRET'; then
