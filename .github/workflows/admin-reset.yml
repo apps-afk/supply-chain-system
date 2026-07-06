@@ -33,7 +33,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           NAMES=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*' .vercel/.env.production.local | sort | tr '\n' ' ')
-          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -f body="pulled env keys: $NAMES" || true
+          PARSED=$(node -e "
+            const fs = require('fs');
+            const out = [];
+            for (const line of fs.readFileSync('.vercel/.env.production.local', 'utf8').split('\n')) {
+              const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line.trim());
+              if (m) out.push(m[1]);
+            }
+            console.log(out.sort().join(' '));
+          ")
+          FILEINFO=$(node -e "
+            const fs = require('fs');
+            const buf = fs.readFileSync('.vercel/.env.production.local');
+            console.log('bytes=' + buf.length, 'first20hex=' + buf.slice(0, 20).toString('hex'));
+          ")
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -f body="grep keys: $NAMES | parser keys: $PARSED | $FILEINFO" || true
       - name: Reset password in database
         env:
           TEMP_PASSWORD: ${{ inputs.temp_password }}
