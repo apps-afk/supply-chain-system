@@ -1,6 +1,14 @@
-# Manual break-glass workflow: reset an account's password directly in the
-# production database and make sure NEXTAUTH_SECRET is set. Runs ONLY when a
-# repo member triggers it by hand (workflow_dispatch) — never automatically.
+# Manual break-glass workflow: reset an account's password in production and
+# make sure NEXTAUTH_SECRET is set. Runs ONLY when a repo member triggers it
+# by hand (workflow_dispatch) — never automatically.
+#
+# How it works (Supabase creds are marked Sensitive in Vercel, so they can't
+# be pulled to CI — the reset must happen INSIDE the running app instead):
+#   1. generate a random MAINTENANCE_TOKEN (never logged) and add it to the
+#      Vercel env, deploy → the /api/maintenance/reset-password endpoint,
+#      which is a 404 in normal operation, becomes callable with that token
+#   2. call it once with the temp password from the workflow input
+#   3. remove MAINTENANCE_TOKEN and deploy again → endpoint is dead again
 name: Admin password reset (manual)
 
 on:
@@ -14,6 +22,9 @@ on:
         required: false
         default: 'pasit@initialestate.com'
 
+env:
+  SITE_URL: https://supplychain.initialestate.com
+
 jobs:
   reset:
     runs-on: ubuntu-latest
@@ -24,44 +35,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm ci
       - run: npm install -g vercel
-      - name: Pull production env
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-      - name: Debug — report pulled env KEY NAMES (never values)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          NAMES=$(grep -oE '^[A-Za-z_][A-Za-z0-9_]*' .vercel/.env.production.local | sort | tr '\n' ' ')
-          PARSED=$(node -e "
-            const fs = require('fs');
-            const out = [];
-            for (const line of fs.readFileSync('.vercel/.env.production.local', 'utf8').split('\n')) {
-              const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line.trim());
-              if (m) out.push(m[1]);
-            }
-            console.log(out.sort().join(' '));
-          ")
-          FILEINFO=$(node -e "
-            const fs = require('fs');
-            const buf = fs.readFileSync('.vercel/.env.production.local');
-            console.log('bytes=' + buf.length, 'first20hex=' + buf.slice(0, 20).toString('hex'));
-          ")
-          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -f body="grep keys: $NAMES | parser keys: $PARSED | $FILEINFO" || true
-      - name: Reset password in database
-        env:
-          TEMP_PASSWORD: ${{ inputs.temp_password }}
-          TARGET_EMAIL: ${{ inputs.target_email }}
-        run: |
-          set -o pipefail
-          node scripts/admin-reset.mjs 2>&1 | tee /tmp/reset-out.txt
-      - name: Report failure detail as commit comment
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          BODY="admin-reset run failed:\n\`\`\`\n$(tail -c 900 /tmp/reset-out.txt 2>/dev/null || echo 'no output captured')\n\`\`\`"
-          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -f body="$(printf "$BODY")" || true
+
       - name: Ensure NEXTAUTH_SECRET exists (generated, never logged)
         run: |
           if vercel env ls production --token=${{ secrets.VERCEL_TOKEN }} 2>/dev/null | grep -q 'NEXTAUTH_SECRET'; then
@@ -69,10 +44,54 @@ jobs:
           else
             node -e "process.stdout.write(require('crypto').randomBytes(48).toString('base64url'))" \
               | vercel env add NEXTAUTH_SECRET production --token=${{ secrets.VERCEL_TOKEN }}
-            echo "NEXTAUTH_SECRET created (sessions will re-login once)"
+            echo "NEXTAUTH_SECRET created (everyone re-logs-in once)"
           fi
-      - name: Redeploy so env changes take effect
+
+      - name: Arm maintenance mode (add one-time token)
+        run: |
+          TOKEN=$(node -e "process.stdout.write(require('crypto').randomBytes(32).toString('base64url'))")
+          echo "::add-mask::$TOKEN"
+          echo "MAINT_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          printf '%s' "$TOKEN" | vercel env add MAINTENANCE_TOKEN production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy with maintenance mode armed
         run: |
           vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
           vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
           vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Reset the password via the running app
+        env:
+          TEMP_PASSWORD: ${{ inputs.temp_password }}
+          TARGET_EMAIL: ${{ inputs.target_email }}
+        run: |
+          set -o pipefail
+          BODY=$(node -e "console.log(JSON.stringify({ email: process.env.TARGET_EMAIL, password: process.env.TEMP_PASSWORD }))")
+          for i in 1 2 3; do
+            CODE=$(curl -s -o /tmp/reset-out.txt -w "%{http_code}" -X POST "$SITE_URL/api/maintenance/reset-password" \
+              -H "Content-Type: application/json" \
+              -H "x-maintenance-token: $MAINT_TOKEN" \
+              -d "$BODY")
+            echo "attempt $i → HTTP $CODE"
+            [ "$CODE" = "200" ] && break
+            sleep 20
+          done
+          cat /tmp/reset-out.txt
+          [ "$CODE" = "200" ]
+
+      - name: Disarm maintenance mode (always — even on failure)
+        if: always()
+        run: |
+          vercel env rm MAINTENANCE_TOKEN production --yes --token=${{ secrets.VERCEL_TOKEN }} || true
+          vercel pull --yes --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+          vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Report outcome as commit comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OUT=$(cat /tmp/reset-out.txt 2>/dev/null || echo 'no output')
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+            -f body="admin-reset outcome (${{ job.status }}): $OUT" || true
