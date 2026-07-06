@@ -93,27 +93,52 @@ export function createCrudRoutes(table, opts = {}) {
   // P2 that means "any WRITER role" (admin/procurement/manager); read-only
   // roles get 403 from requireWriter.
   const writeGuard    = opts.writeRole === 'session' ? requireWriter : requireAdmin;
+  // Whitelisted equality filters for list(): `filterFields: ['material_id']`
+  // enables `?material_id=xxx` → .eq(...). Unlisted params are ignored so a
+  // client can never filter/probe arbitrary columns.
+  const filterFields  = Array.isArray(opts.filterFields) ? opts.filterFields : [];
+  // Columns selectable via ?fields= but NOT client-writable (e.g. a
+  // comparison's approvals_json is written only by the approve endpoint).
+  const readFields    = Array.isArray(opts.readFields) ? opts.readFields : [];
 
   async function list(req) {
     const { err } = await requireSession();
     if (err) return err;
     if (!isSupabaseConfigured) return NextResponse.json({ items: [] });
 
-    // Optional server-side pagination: ?limit=&offset=. Without params the
-    // full list returns exactly as before (screens that compute stats over
-    // the whole table keep working); with limit the response adds `total`
-    // so callers can render pagers as data grows.
-    let limit = 0, offset = 0;
+    // Performance params (all optional; omit them all and the response is
+    // byte-identical to the original full list):
+    //   ?limit=&offset=   server-side pagination (adds `total`)
+    //   ?id=              exactly one row — detail screens stop downloading
+    //                     whole tables (with their JSON blobs) to .find() one
+    //   ?fields=a,b,c     column projection, whitelisted against the route's
+    //                     field list — list views skip the heavy *_json blobs
+    //   ?<filterField>=   whitelisted equality filter (opts.filterFields)
+    let limit = 0, offset = 0, idFilter = null, selectCols = '*';
+    const eqFilters = [];
     try {
       const sp = new URL(req.url).searchParams;
       limit  = Math.min(Math.max(parseInt(sp.get('limit')  || '0', 10) || 0, 0), 1000);
       offset = Math.max(parseInt(sp.get('offset') || '0', 10) || 0, 0);
+      idFilter = sp.get('id') || null;
+      const fieldsParam = sp.get('fields');
+      if (fieldsParam) {
+        const legal = new Set([...allowedFields, ...readFields, 'id', 'created_at', 'updated_at', orderBy]);
+        const req2 = fieldsParam.split(',').map(s => s.trim()).filter(f => legal.has(f));
+        if (req2.length) selectCols = [...new Set(['id', ...req2])].join(', ');
+      }
+      for (const f of filterFields) {
+        const v = sp.get(f);
+        if (v !== null && v !== '') eqFilters.push([f, v]);
+      }
     } catch { /* no URL (older callers) → full list */ }
 
     let query = supabase
       .from(table)
-      .select('*', limit ? { count: 'exact' } : undefined)
+      .select(selectCols, limit ? { count: 'exact' } : undefined)
       .order(orderBy, { ascending: orderDir === 'asc' });
+    if (idFilter) query = query.eq('id', idFilter);
+    for (const [f, v] of eqFilters) query = query.eq(f, v);
     if (limit) query = query.range(offset, offset + limit - 1);
 
     const { data, error, count } = await query;

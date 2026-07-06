@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Av } from '../lib/shell';
 import { UnitPicker } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
+import { fetchCachedJSON, fetchCachedSafe } from '../lib/fetch-cache';
 
 /*
   Create RFQ — full build flow on one page.
@@ -312,39 +313,37 @@ export function ScreenRFQCreate({ go }) {
   useEffect(() => {
     (async () => {
       try {
-        const [rS, rP, rU, rMC, rSC, rM, rSubC, rSub, rAR, rUsers, rRfq] = await Promise.all([
-          fetch('/api/suppliers'),
-          fetch('/api/projects'),
-          fetch('/api/units'),
-          fetch('/api/material-main-categories'),
-          fetch('/api/material-sub-categories'),
-          fetch('/api/materials'),
-          fetch('/api/subcontract-categories'),
-          fetch('/api/subcontracts'),
-          fetch('/api/approval-roles'),
-          fetch('/api/users?scope=contacts'),
-          fetch('/api/rfqs'),
-        ]);
-        const dS = await rS.json();
-        const dP = await rP.json();
-        if (!rS.ok) { setLoadErr(dS.error || 'โหลด Supplier ไม่สำเร็จ'); return; }
-        if (!rP.ok) { setLoadErr(dP.error || 'โหลดโครงการไม่สำเร็จ'); return; }
+        // Master data goes through the shared 90s cache — opening this screen
+        // twice in a session reuses the earlier responses instead of refiring
+        // 10 full-table GETs. The RFQ fetch stays live (numbering must be
+        // fresh) but asks only for the columns the numbering needs.
+        const [dS, dP, dU, dMC, dSC, dM, dSubC, dSub, dAR, dUsers, dRfq] = await Promise.all([
+          fetchCachedJSON('/api/suppliers'),
+          fetchCachedJSON('/api/projects'),
+          fetchCachedSafe('/api/units'),
+          fetchCachedSafe('/api/material-main-categories'),
+          fetchCachedSafe('/api/material-sub-categories'),
+          fetchCachedSafe('/api/materials'),
+          fetchCachedSafe('/api/subcontract-categories'),
+          fetchCachedSafe('/api/subcontracts'),
+          fetchCachedSafe('/api/approval-roles'),
+          fetchCachedSafe('/api/users?scope=contacts'),
+          fetch('/api/rfqs?fields=no').then(r => r.ok ? r.json() : {}).catch(() => ({})),
+        ]).catch(e => { throw Object.assign(new Error(e?.message || 'load'), { friendly: e?.message }); });
         setSuppliers(dS.items || []);
         setProjects(dP.items || []);
-        if (rU.ok)    setUnits((await rU.json()).items || []);
-        if (rMC.ok)   setMainCats((await rMC.json()).items || []);
-        if (rSC.ok)   setSubCats((await rSC.json()).items || []);
-        if (rM.ok)    setMaterials((await rM.json()).items || []);
-        if (rSubC.ok) setSubcontractCats((await rSubC.json()).items || []);
-        if (rSub.ok)  setSubcontracts((await rSub.json()).items || []);
-        if (rAR.ok)   setApprovalRoles((await rAR.json()).items || []);
-        if (rUsers.ok) { const du = await rUsers.json(); setPeople(du.users || du.items || []); }
+        setUnits(dU.items || []);
+        setMainCats(dMC.items || []);
+        setSubCats(dSC.items || []);
+        setMaterials(dM.items || []);
+        setSubcontractCats(dSubC.items || []);
+        setSubcontracts(dSub.items || []);
+        setApprovalRoles(dAR.items || []);
+        setPeople(dUsers.users || dUsers.items || []);
         // Compute the next running RFQ number for the current year.
-        let existing = [];
-        if (rRfq.ok) { try { existing = (await rRfq.json()).items || []; } catch {} }
-        setRfqNo(nextRfqNo(existing));
-      } catch {
-        setLoadErr('เครือข่ายขัดข้อง');
+        setRfqNo(nextRfqNo(dRfq.items || []));
+      } catch (e) {
+        setLoadErr(e?.friendly || 'เครือข่ายขัดข้อง');
       }
     })();
   }, []);
@@ -487,7 +486,7 @@ export function ScreenRFQCreate({ go }) {
       let attempt = await postOnce(rfqNo);
       if (!attempt.ok && /duplicate|unique|already/i.test(attempt.d.error || '')) {
         try {
-          const lr = await fetch('/api/rfqs');
+          const lr = await fetch('/api/rfqs?fields=no');
           const ld = lr.ok ? await lr.json() : { items: [] };
           const fresh = nextRfqNo(ld.items || []);
           setRfqNo(fresh);

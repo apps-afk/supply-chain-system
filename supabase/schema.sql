@@ -374,3 +374,14 @@ begin
     execute format('alter table public.%I enable row level security', t.tablename);
   end loop;
 end $$;
+
+-- Performance: every document list orders by created_at desc (crud.js) and
+-- price history by captured_at desc — align indexes so those scans stay fast
+-- as data grows. Idempotent; run in the Supabase SQL editor on existing DBs.
+create index if not exists rfqs_created_idx            on rfqs (created_at desc);
+create index if not exists comparisons_created_idx     on comparisons (created_at desc);
+create index if not exists contracts_created_idx       on contracts (created_at desc);
+create index if not exists purchase_orders_created_idx on purchase_orders (created_at desc);
+create index if not exists price_points_captured_idx   on price_points (captured_at desc);
+create index if not exists price_points_mat_cap_idx    on price_points (material_id, captured_at desc);
+create index if not exists attachments_entity_idx      on file_attachments (entity_type, entity_id);

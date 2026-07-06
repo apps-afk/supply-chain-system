@@ -364,6 +364,10 @@ export function BulkUploadModal({ title, entity, columns, endpoint, transform, s
   const [progress, setProgress] = useState(null); // null | {done, total, errors}
   const [busy, setBusy] = useState(false);        // disable buttons during xlsx I/O
 
+  // Warm the exceljs chunk (~256KB gzip) while the user is still looking at
+  // the modal — the first click on อ่านไฟล์/ดาวน์โหลดแม่แบบ stops stalling.
+  useEffect(() => { import('exceljs').catch(() => {}); }, []);
+
   // Excel column letter for a 0-based index (handles AA+ past column Z).
   const colLetter = (i) => {
     let s = '', n = i;

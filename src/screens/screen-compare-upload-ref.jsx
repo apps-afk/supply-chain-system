@@ -70,11 +70,11 @@ export function ScreenCompareUploadRef({ go, comparisonId }) {
         try {
           let existingNotes = '';
           try {
-            const rC = await fetch('/api/comparisons');
+            // Single-row lookup — was a full-table download per upload.
+            const rC = await fetch(`/api/comparisons?id=${encodeURIComponent(cmpId)}&fields=notes`);
             if (rC.ok) {
               const dC = await rC.json();
-              const row = (dC.items || []).find(x => x.id === cmpId);
-              existingNotes = row?.notes || '';
+              existingNotes = ((dC.items || [])[0])?.notes || '';
             }
           } catch { /* fall back to appending onto empty */ }
           const decisionLine = `อัพโหลดเอกสารอนุมัติ: เลือก ${selectedSupplier} · อนุมัติโดย ${approvedBy} · ${approvedDate}${notes ? ' · ' + notes : ''}`;

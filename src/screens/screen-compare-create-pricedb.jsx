@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Icons, Chip, Av, money } from '../lib/shell';
 import { SettingsSearchBox } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
+import { fetchCachedSafe } from '../lib/fetch-cache';
 
 /*
   Compare Create — Mode A: From Price Database
@@ -16,7 +17,7 @@ async function makeCmpNo() {
   const y = new Date().getFullYear();
   const prefix = `CMP-${y}-`;
   try {
-    const r = await fetch('/api/comparisons');
+    const r = await fetch('/api/comparisons?fields=no');
     if (r.ok) {
       const d = await r.json();
       const used = new Set();
@@ -83,10 +84,10 @@ export function ScreenCompareCreatePriceDB({ go }) {
       setLoading(true); setLoadErr('');
       try {
         const [sR, mR, pR, uR] = await Promise.all([
-          fetch('/api/suppliers').then(r => r.json()),
-          fetch('/api/materials').then(r => r.json()),
+          fetchCachedSafe('/api/suppliers'),
+          fetchCachedSafe('/api/materials'),
           fetch('/api/prices').then(r => r.json()),
-          fetch('/api/units').then(r => r.json()),
+          fetchCachedSafe('/api/units'),
         ]);
         setSuppliers(sR.items || []);
         setMaterials(mR.items || []);

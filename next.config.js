@@ -15,9 +15,11 @@ const securityHeaders = [
     value: [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Next.js hydration/runtime
-      "style-src 'self' 'unsafe-inline'",
+      // Google Fonts: without these two hosts the CSP silently blocked the
+      // IBM Plex stylesheet + font files — production ran on fallback fonts.
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob: https:",               // Drive thumbnails / data-URI assets
-      "font-src 'self' data:",
+      "font-src 'self' data: https://fonts.gstatic.com",
       "connect-src 'self'",
       "frame-ancestors 'none'",
       "object-src 'none'",

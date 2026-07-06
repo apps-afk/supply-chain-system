@@ -8,6 +8,9 @@ const h = createCrudRoutes('price_points', {
   // Price points are written by the RFQ-confirm flow — any procurement user
   // must be able to add price observations, not just admins.
   writeRole: 'session',
+  // Price history grows unbounded — let detail views pull one material's
+  // series (?material_id=…) instead of the whole table.
+  filterFields: ['material_id', 'supplier_id'],
 });
 
 export const GET    = h.list;

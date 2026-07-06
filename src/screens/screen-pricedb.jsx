@@ -4,6 +4,7 @@ import { Icons, Chip, Stat, Spark, Delta, Av, money } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox, UnitPicker } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
 import { useTableView, Th, Pager, exportCSV } from '../lib/table-utils';
+import { fetchCachedSafe } from '../lib/fetch-cache';
 
 /*
   Price DB — list + detail.
@@ -33,11 +34,13 @@ export function ScreenPriceDB({ go }) {
   async function load() {
     setLoading(true); setErr('');
     try {
+      // Prices stay live (the whole point of this screen); master data
+      // (materials/suppliers/units) rides the shared 90s cache.
       const [pR, mR, sR, uR] = await Promise.all([
         fetch('/api/prices').then(r => r.json()),
-        fetch('/api/materials').then(r => r.json()),
-        fetch('/api/suppliers').then(r => r.json()),
-        fetch('/api/units').then(r => r.json()),
+        fetchCachedSafe('/api/materials'),
+        fetchCachedSafe('/api/suppliers'),
+        fetchCachedSafe('/api/units'),
       ]);
       setPrices(pR.items || []);
       setMaterials(mR.items || []);
@@ -610,13 +613,26 @@ export function ScreenPriceDBDetail({ go }) {
   async function load() {
     setLoading(true);
     try {
+      // Chart shows ONE material — pull only its price series instead of the
+      // whole unbounded price_points history. Master data rides the cache.
+      let stashedMat = null;
+      try { stashedMat = localStorage.getItem('pricedb.currentMaterialId'); } catch {}
       const [pR, mR, sR, uR] = await Promise.all([
-        fetch('/api/prices').then(r => r.json()),
-        fetch('/api/materials').then(r => r.json()),
-        fetch('/api/suppliers').then(r => r.json()),
-        fetch('/api/units').then(r => r.json()),
+        fetch(stashedMat
+          ? `/api/prices?material_id=${encodeURIComponent(stashedMat)}`
+          : '/api/prices?limit=1').then(r => r.json()),
+        fetchCachedSafe('/api/materials'),
+        fetchCachedSafe('/api/suppliers'),
+        fetchCachedSafe('/api/units'),
       ]);
-      setPrices(pR.items || []);
+      let pts = pR.items || [];
+      // No stashed material → resolve the newest point's material, then pull
+      // that material's series (two tiny requests instead of one huge one).
+      if (!stashedMat && pts[0]?.material_id) {
+        const r2 = await fetch(`/api/prices?material_id=${encodeURIComponent(pts[0].material_id)}`);
+        if (r2.ok) pts = ((await r2.json()).items || []);
+      }
+      setPrices(pts);
       setMaterials(mR.items || []);
       setSuppliers(sR.items || []);
       setUnits(uR.items || []);

@@ -10,7 +10,6 @@
  * folder. Since it's a Shared Drive, supportsAllDrives:true is required on
  * every API call.
  */
-import { google } from 'googleapis';
 import { Readable } from 'stream';
 
 export const isGDriveConfigured = !!(
@@ -22,10 +21,15 @@ let _client = null;
 let _folderCache = {};   // category-label → folder-id (avoid repeated lookups)
 let _folderInflight = {}; // category-label → in-flight Promise (de-duplicates concurrent creates)
 
-function getClient() {
+// googleapis is ~196MB and costs ~800ms to evaluate. It is imported LAZILY
+// so routes that merely link this module (contracts/comparisons/attachments
+// GET paths import deleteFile but never call it) don't pay that on every
+// cold start — only actual Drive operations do, once per instance.
+async function getClient() {
   if (_client) return _client;
   if (!isGDriveConfigured) throw new Error('ยังไม่ได้ตั้งค่า Google Drive — ต้องการ env vars GOOGLE_SERVICE_ACCOUNT_JSON + GOOGLE_DRIVE_PARENT_FOLDER_ID');
 
+  const { google } = await import('googleapis');
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
   const auth = new google.auth.GoogleAuth({
     credentials,
@@ -56,7 +60,7 @@ async function findOrCreateSubfolder(label) {
   if (_folderInflight[label]) return _folderInflight[label];
 
   _folderInflight[label] = (async () => {
-    const drive = getClient();
+    const drive = await getClient();
     const parent = PARENT_ID();
 
     // Escape Drive query special chars (' and \) to keep the q-filter safe
@@ -106,7 +110,7 @@ export async function uploadToCategory({ categoryKey, filename, mimeType, body, 
   const label = CATEGORIES[categoryKey];
   if (!label) throw new Error(`หมวดหมู่ไม่ถูกต้อง: ${categoryKey}`);
 
-  const drive = getClient();
+  const drive = await getClient();
 
   const safeFilename = (entityRef ? `${entityRef}_` : '') +
                        `${Date.now()}_${filename}`.replace(/[\/\\?%*:|"<>]/g, '_');
@@ -155,7 +159,7 @@ export async function uploadToCategory({ categoryKey, filename, mimeType, body, 
  * Delete a file by Drive file ID.
  */
 export async function deleteFile(fileId) {
-  const drive = getClient();
+  const drive = await getClient();
   await drive.files.delete({ fileId, supportsAllDrives: true });
   return true;
 }
@@ -164,7 +168,7 @@ export async function deleteFile(fileId) {
  * Generate a fresh viewable URL (links don't expire but this confirms access).
  */
 export async function getFile(fileId) {
-  const drive = getClient();
+  const drive = await getClient();
   const res = await drive.files.get({
     fileId,
     fields: 'id, name, webViewLink, mimeType, size, createdTime',
@@ -178,7 +182,7 @@ export async function getFile(fileId) {
  * PDF to the AI reviewer). Returns { buffer, mimeType, name, size }.
  */
 export async function getFileBytes(fileId) {
-  const drive = getClient();
+  const drive = await getClient();
   const meta = await drive.files.get({
     fileId,
     fields: 'mimeType, name, size',

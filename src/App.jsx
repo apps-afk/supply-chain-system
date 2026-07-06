@@ -144,6 +144,27 @@ export default function App() {
   // unrelated state in App changes
   const go = useCallback((id) => setScreen(id), []);
 
+  // Warm the core-workflow screen chunks during idle time after first paint —
+  // first navigation to each screen stops showing "กำลังโหลด…" while its
+  // JS downloads. Failures are ignored (prefetch is purely opportunistic).
+  useEffect(() => {
+    const warm = () => {
+      import('./screens/screen-rfq').catch(() => {});
+      import('./screens/screen-compare-list').catch(() => {});
+      import('./screens/screen-compare').catch(() => {});
+      import('./screens/screen-po').catch(() => {});
+      import('./screens/screen-contract').catch(() => {});
+      import('./screens/screen-pricedb').catch(() => {});
+    };
+    const id = ('requestIdleCallback' in window)
+      ? window.requestIdleCallback(warm, { timeout: 4000 })
+      : setTimeout(warm, 2500);
+    return () => {
+      if ('cancelIdleCallback' in window) window.cancelIdleCallback(id);
+      else clearTimeout(id);
+    };
+  }, []);
+
   const renderScreen = () => {
     switch (screen) {
       case 'dashboard':              return <ScreenDashboard go={go} />;

@@ -451,9 +451,14 @@ const NotificationBell = React.memo(function NotificationBell({ go }) {
 
   const load = useCallback(async () => {
     try {
+      // Slim projections — the alert builder reads a handful of scalar
+      // fields; without ?fields= this polled full tables (with JSON blobs)
+      // every 5 minutes for every logged-in user.
       const rs = await Promise.all([
-        fetch('/api/rfqs'), fetch('/api/contracts'),
-        fetch('/api/comparisons'), fetch('/api/approval-roles'),
+        fetch('/api/rfqs?fields=no,title,status,due_date'),
+        fetch('/api/contracts?fields=no,title,status,warranty,end_date,signed_at,retention_released_at'),
+        fetch('/api/comparisons?fields=no,title,status,approvals_json'),
+        fetch('/api/approval-roles'),
       ]);
       const [dR, dC, dM, dA] = await Promise.all(
         rs.map(r => (r.ok ? r.json() : Promise.resolve({ items: [] })))

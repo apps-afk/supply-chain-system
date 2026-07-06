@@ -4,6 +4,8 @@ import { Icons, Chip, Av, Spark, Delta, money, safeHref } from '../lib/shell';
 import { downloadRfqExcel, ExcelDocPreview, nextRfqNo } from './screen-rfq-create';
 import { findUnit } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
+import { cachedFetch } from '../lib/fetch-cache';
+import { useTableView, Pager } from '../lib/table-utils';
 
 // Read the supplier's filled-in quote workbook and pull out the unit price
 // they entered per line (matched by the item code in column B → price in
@@ -130,7 +132,7 @@ export function ScreenRFQ({ go }) {
     try {
       const [rR, rP] = await Promise.all([
         fetch('/api/rfqs'),
-        fetch('/api/projects'),
+        cachedFetch('/api/projects'),
       ]);
       const dR = await rR.json();
       const dP = await rP.json();
@@ -196,6 +198,9 @@ export function ScreenRFQ({ go }) {
       return true;
     });
   }, [rfqs, filter, q, projById]);
+
+  // Paginate — the table stops re-rendering hundreds of rows per keystroke.
+  const { view, page, pages, setPage, total } = useTableView(filtered, { pageSize: 25 });
 
   return (
     <div className="page">
@@ -298,7 +303,7 @@ export function ScreenRFQ({ go }) {
               <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>กำลังโหลด…</td></tr>
             ) : filtered.length === 0 ? (
               <tr><td colSpan={canWrite ? 7 : 6} style={{ textAlign:'center', padding:40, color:'var(--ink-3)' }}>ยังไม่มีข้อมูล</td></tr>
-            ) : filtered.map(r => {
+            ) : view.map(r => {
               const sp = RFQ_STATUS[r.status] || RFQ_STATUS.draft;
               const overdueFlag = r.status === 'sent' && r.due_date && r.due_date < today;
               return (
@@ -345,6 +350,7 @@ export function ScreenRFQ({ go }) {
             })}
           </tbody>
         </table>
+        <Pager page={page} pages={pages} setPage={setPage} total={total} />
       </div>
     </div>
   );
@@ -397,9 +403,14 @@ export function ScreenRFQConfirm({ go }) {
       setLoading(true); setErr('');
       try {
         const stashed = (typeof window !== 'undefined') ? window.localStorage.getItem('rfq.currentId') : null;
+        // One RFQ row instead of the whole table; price history slimmed to
+        // the columns the latest-price map & sparklines read; master data
+        // rides the shared cache.
         const [r, rP, rM, rU, rPx] = await Promise.all([
-          fetch('/api/rfqs'), fetch('/api/projects'),
-          fetch('/api/materials'), fetch('/api/units'), fetch('/api/prices'),
+          fetch(stashed ? `/api/rfqs?id=${encodeURIComponent(stashed)}` : '/api/rfqs?limit=1'),
+          cachedFetch('/api/projects'),
+          cachedFetch('/api/materials'), cachedFetch('/api/units'),
+          fetch('/api/prices?fields=material_id,supplier_id,price,unit_id,captured_at,source,source_id'),
         ]);
         const d = await r.json();
         if (!r.ok) { setErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
@@ -421,8 +432,12 @@ export function ScreenRFQConfirm({ go }) {
             setPricePts(pts);
           } catch {}
         }
-        const list = d.items || [];
-        const picked = (stashed && list.find(x => x.id === stashed)) || list[0] || null;
+        let picked = (d.items || [])[0] || null;
+        // Stale stashed id (deleted doc) → fall back to the most recent RFQ.
+        if (!picked && stashed) {
+          const rf = await fetch('/api/rfqs?limit=1');
+          if (rf.ok) picked = ((await rf.json()).items || [])[0] || null;
+        }
         setRfq(picked);
         // If notes contains stringified items, hydrate the items table
         if (picked?.notes) {
@@ -538,10 +553,11 @@ export function ScreenRFQConfirm({ go }) {
       // hydration parse failed while the row actually has data.
       let current = parsed || {};
       try {
-        const rNow = await fetch('/api/rfqs');
+        // Single-row refresh — was a full-table download per save.
+        const rNow = await fetch(`/api/rfqs?id=${encodeURIComponent(rfq.id)}&fields=notes`);
         if (rNow.ok) {
           const dNow = await rNow.json();
-          const rowNow = (dNow.items || []).find(x => x.id === rfq.id);
+          const rowNow = (dNow.items || [])[0];
           if (rowNow?.notes) {
             try { current = JSON.parse(rowNow.notes) || {}; }
             catch {
@@ -588,13 +604,24 @@ export function ScreenRFQConfirm({ go }) {
     }
     setSavePxBusy(true); setSavePxMsg('');
     const errs = [];
+    // Rows are independent — run POSTs with bounded concurrency instead of
+    // strictly one-at-a-time (a 30-line quote used to take 30 × RTT).
+    async function runChunked(list, worker, size = 6) {
+      for (let i = 0; i < list.length; i += size) {
+        await Promise.all(list.slice(i, i + size).map(worker));
+      }
+    }
     // Resolve a material id for each subcontract row — reuse an existing row
     // (real material or earlier shadow), else create the shadow material.
     const scReady = [];               // { it, mat } — rows cleared for the price POST
     const newShadows = {};            // code → matByCode entry, merged into state after
+    const scToCreate = [];
     for (const it of scRows) {
       const existing = matByCode[it.itemCode];
-      if (existing) { scReady.push({ it, mat: existing }); continue; }
+      if (existing) scReady.push({ it, mat: existing });
+      else scToCreate.push(it);
+    }
+    await runChunked(scToCreate, async (it) => {
       const shadowId = 'mat_sc_' + it.itemCode;
       const unit = findUnit(units, it.unit);
       try {
@@ -616,13 +643,13 @@ export function ScreenRFQConfirm({ go }) {
           // Duplicate = the shadow already exists (e.g. saved from another
           // RFQ) — that's success, use the deterministic id.
           const isDup = r.status === 409 || /duplicate|ซ้ำ/i.test(d.error || '');
-          if (!isDup) { errs.push(`${it.name}: ${d.error || 'สร้างรายการงานจ้างเหมาไม่สำเร็จ'}`); continue; }
+          if (!isDup) { errs.push(`${it.name}: ${d.error || 'สร้างรายการงานจ้างเหมาไม่สำเร็จ'}`); return; }
         }
         const mat = { id: shadowId, unit_id: unit?.id || null, name: it.name || '' };
         newShadows[it.itemCode] = mat;
         scReady.push({ it, mat });
       } catch (e) { errs.push(`${it.name}: ${e.message}`); }
-    }
+    });
     // Remember the shadows so a second click reuses them instead of re-POSTing.
     if (Object.keys(newShadows).length > 0) setMatByCode(prev => ({ ...prev, ...newShadows }));
     let okMat = 0, okSc = 0;
@@ -630,7 +657,7 @@ export function ScreenRFQConfirm({ go }) {
       ...matRows.map(it => ({ it, mat: matByCode[it.itemCode], isSc: false })),
       ...scReady.map(({ it, mat }) => ({ it, mat, isSc: true })),
     ];
-    for (const { it, mat, isSc } of toSave) {
+    await runChunked(toSave, async ({ it, mat, isSc }) => {
       const unit = findUnit(units, it.unit);
       try {
         const r = await fetch('/api/prices', {
@@ -647,7 +674,7 @@ export function ScreenRFQConfirm({ go }) {
         if (r.ok) { if (isSc) okSc++; else okMat++; }
         else { const d = await r.json().catch(()=>({})); errs.push(`${it.name}: ${d.error || 'ไม่สำเร็จ'}`); }
       } catch (e) { errs.push(`${it.name}: ${e.message}`); }
-    }
+    });
     const ok = okMat + okSc;
     // Close the RFQ once prices are captured
     if (ok > 0) {
@@ -690,7 +717,7 @@ export function ScreenRFQConfirm({ go }) {
     if (!rfq || !sups.length) return;
     setDupMsg('');
     try {
-      const lr = await fetch('/api/rfqs');
+      const lr = await fetch('/api/rfqs?fields=no');
       const existing = lr.ok ? ((await lr.json()).items || []) : [];
       const pool = [...existing];
       const made = [];

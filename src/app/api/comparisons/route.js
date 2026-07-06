@@ -39,6 +39,9 @@ const h = createCrudRoutes('comparisons', {
   // create/edit them (otherwise the whole Compare module is read-only).
   writeRole: 'session',
   guardMutation,
+  // approvals_json is readable in ?fields= projections (dashboard/bell need
+  // it for pending-approval alerts) but stays writable ONLY via ./approve.
+  readFields: ['approvals_json'],
 });
 
 export const GET    = h.list;
@@ -101,11 +104,14 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'ดึงรายการไฟล์ไม่สำเร็จ' }, { status: 500 });
     }
 
-    const driveErrors = [];
-    for (const a of (atts || [])) {
-      try { await deleteFile(a.drive_file_id); }
-      catch (e) { driveErrors.push(`${a.filename}: ${e.message}`); }
-    }
+    // Best-effort per file, in parallel (was a serial await loop).
+    const delResults = await Promise.allSettled(
+      (atts || []).map(a => deleteFile(a.drive_file_id))
+    );
+    const driveErrors = delResults
+      .map((r, i) => r.status === 'rejected'
+        ? `${(atts || [])[i].filename}: ${r.reason?.message || r.reason}` : null)
+      .filter(Boolean);
     if (atts && atts.length > 0) {
       const { error: delErr } = await supabase.from('file_attachments').delete()
         .eq('entity_type', 'comparison').eq('entity_id', body.id);

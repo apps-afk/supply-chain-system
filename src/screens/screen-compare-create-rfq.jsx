@@ -23,7 +23,7 @@ async function makeCmpNo() {
   const y = new Date().getFullYear();
   const prefix = `CMP-${y}-`;
   try {
-    const r = await fetch('/api/comparisons');
+    const r = await fetch('/api/comparisons?fields=no');
     if (r.ok) {
       const d = await r.json();
       const used = new Set();

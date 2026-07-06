@@ -40,11 +40,18 @@ export function ScreenDashboard({ go }) {
   useEffect(() => {
     (async () => {
       try {
+        // Column projections: the dashboard reads only scalar fields, so
+        // skip the heavy JSON blobs (rfq notes, comparison items/suppliers,
+        // PO items/receipts) — payload drops ~90% on real data.
         const [rPx, rR, rC, rCt, rM, rCmp, rAr, rPj, rPo] = await Promise.all([
-          fetch('/api/prices'), fetch('/api/rfqs'), fetch('/api/contracts'),
+          fetch('/api/prices?fields=material_id,supplier_id,price,captured_at'),
+          fetch('/api/rfqs?fields=no,title,status,due_date,project_id,created_at'),
+          fetch('/api/contracts?fields=no,title,status,amount,project_id,type_id,warranty,end_date,signed_at,retention_released_at'),
           fetch('/api/contract-types'), fetch('/api/materials'),
-          fetch('/api/comparisons'), fetch('/api/approval-roles'),
-          fetch('/api/projects'), fetch('/api/purchase-orders'),
+          fetch('/api/comparisons?fields=no,title,status,approvals_json,project_id'),
+          fetch('/api/approval-roles'),
+          fetch('/api/projects'),
+          fetch('/api/purchase-orders?fields=no,status,amount,project_id'),
         ]);
         if (rPx.ok) setPrices((await rPx.json()).items || []);
         if (rR.ok)  setRfqs((await rR.json()).items || []);

@@ -4,6 +4,7 @@ import { Icons, Chip, money, safeHref } from '../lib/shell';
 import { printDoc } from './screen-compare-create-pricedb';
 import { usePermissions } from '../lib/use-permissions';
 import { useTableView, Th, Pager } from '../lib/table-utils';
+import { cachedFetch } from '../lib/fetch-cache';
 
 /*
   ใบสั่งซื้อ (Purchase Orders) — PO registry (ทะเบียนเก็บ PO). The company
@@ -47,7 +48,8 @@ export async function nextPoNo() {
   const y = new Date().getFullYear();
   const prefix = `PO-${y}-`;
   try {
-    const r = await fetch('/api/purchase-orders');
+    // Only the numbers are needed — skip items_json/received_json blobs.
+    const r = await fetch('/api/purchase-orders?fields=no');
     if (r.ok) {
       const d = await r.json();
       const used = new Set();
@@ -121,7 +123,7 @@ export function ScreenPOList({ go }) {
   useEffect(() => {
     (async () => {
       try {
-        const [r, rP] = await Promise.all([fetch('/api/purchase-orders'), fetch('/api/projects')]);
+        const [r, rP] = await Promise.all([fetch('/api/purchase-orders'), cachedFetch('/api/projects')]);
         const d = await r.json();
         if (!r.ok) { setErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); }
         else setPos(d.items || []);
@@ -308,7 +310,7 @@ function POManualModal({ initial = null, existingNos = null, onClose, onSaved })
   useEffect(() => {
     (async () => {
       try {
-        const [rS, rP] = await Promise.all([fetch('/api/suppliers'), fetch('/api/projects')]);
+        const [rS, rP] = await Promise.all([cachedFetch('/api/suppliers'), cachedFetch('/api/projects')]);
         if (rS.ok) setSuppliers((await rS.json()).items || []);
         if (rP.ok) setProjects((await rP.json()).items || []);
       } catch { /* dropdowns just stay empty */ }
@@ -543,16 +545,32 @@ export function ScreenPODetail({ go }) {
     (async () => {
       try {
         const stashed = (typeof window !== 'undefined') ? localStorage.getItem('po.currentId') : null;
-        const [r, rP, rC] = await Promise.all([fetch('/api/purchase-orders'), fetch('/api/projects'), fetch('/api/contracts')]);
+        // Fetch ONE PO row instead of the whole table (rows carry
+        // items_json/received_json blobs); numbers + linked-contract scan use
+        // slim column projections; attachments start in parallel when the id
+        // is already known instead of waiting for the list.
+        if (stashed) loadAttachments(stashed);
+        const [r, rNos, rP, rC] = await Promise.all([
+          fetch(stashed
+            ? `/api/purchase-orders?id=${encodeURIComponent(stashed)}`
+            : '/api/purchase-orders?limit=1'),
+          fetch('/api/purchase-orders?fields=no'),
+          cachedFetch('/api/projects'),
+          fetch('/api/contracts?fields=no,title,status,notes'),
+        ]);
         const d = await r.json();
         if (!r.ok) { setErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
         if (rP.ok) setProjects((await rP.json()).items || []);
         if (rC.ok) setContracts((await rC.json()).items || []);
-        const list = d.items || [];
-        const picked = (stashed && list.find(x => x.id === stashed)) || list[0] || null;
+        let picked = (d.items || [])[0] || null;
+        // Stale stashed id (row deleted) → fall back to the most recent PO.
+        if (!picked && stashed) {
+          const rf = await fetch('/api/purchase-orders?limit=1');
+          if (rf.ok) picked = ((await rf.json()).items || [])[0] || null;
+        }
         setPo(picked);
-        setOtherNos(new Set(list.map(x => String(x.no || '').trim())));
-        if (picked) loadAttachments(picked.id);
+        if (rNos.ok) setOtherNos(new Set(((await rNos.json()).items || []).map(x => String(x.no || '').trim())));
+        if (picked && picked.id !== stashed) loadAttachments(picked.id);
       } catch { setErr('เครือข่ายขัดข้อง'); }
       setLoading(false);
     })();

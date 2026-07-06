@@ -5,6 +5,7 @@ import { SettingsSearchBox } from '../lib/settings-shared';
 import { usePermissions } from '../lib/use-permissions';
 import { useTableView, Th, Pager, exportCSV } from '../lib/table-utils';
 import AiAssistPanel from '../lib/ai-assist';
+import { cachedFetch } from '../lib/fetch-cache';
 import { PO_STATUS } from './screen-po';
 /*
   Contract module — upload-driven manual review workflow.
@@ -193,13 +194,15 @@ export function ScreenContractList({ go }) {
   async function releaseRetention(c) {
     if (!confirm(`บันทึกว่าคืนเงินประกันของ "${c.title || c.no}" แล้ว?`)) return;
     try {
-      const me = await fetch('/api/account/profile').then(r => r.ok ? r.json() : null).catch(() => null);
+      // No profile round-trip needed: the contracts guard stamps
+      // retention_released_by from the SESSION server-side regardless of
+      // what the client sends (anti-forgery), so sending '' is equivalent.
       const r = await fetch('/api/contracts', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: c.id,
           retention_released_at: new Date().toLocaleDateString('sv-SE'),
-          retention_released_by: me?.profile?.email || me?.email || '',
+          retention_released_by: '',
         }),
       });
       if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'บันทึกไม่สำเร็จ'); return; }
@@ -242,9 +245,9 @@ export function ScreenContractList({ go }) {
     try {
       const [rContracts, rSuppliers, rProjects, rTypes, rAtt] = await Promise.all([
         fetch('/api/contracts'),
-        fetch('/api/suppliers'),
-        fetch('/api/projects'),
-        fetch('/api/contract-types'),
+        cachedFetch('/api/suppliers'),
+        cachedFetch('/api/projects'),
+        cachedFetch('/api/contract-types'),
         fetch('/api/attachments?entity_type=contract&limit=500'),
       ]);
       const dContracts = await rContracts.json();
@@ -919,10 +922,12 @@ export function ScreenContract({ go }) {
     let base = {};        // preserve any other top-level keys in the payload
     let memoNow = memo;
     try {
-      const rNow = await fetch('/api/contracts');
+      // Single-row refresh — this used to download the ENTIRE contracts
+      // table (and ran on every checklist tick).
+      const rNow = await fetch(`/api/contracts?id=${encodeURIComponent(contract.id)}&fields=notes`);
       if (rNow.ok) {
         const dNow = await rNow.json();
-        const rowNow = (dNow.items || []).find(x => x.id === contract.id);
+        const rowNow = (dNow.items || [])[0];
         if (rowNow) {
           const cur = parseContractNotes(rowNow.notes);
           memoNow = cur.memo;
@@ -1058,8 +1063,8 @@ export function ScreenContract({ go }) {
         const stashed = (typeof window !== 'undefined') ? window.localStorage.getItem('contract.currentId') : null;
         const [rC, rS, rP, rA] = await Promise.all([
           fetch('/api/contracts'),
-          fetch('/api/suppliers'),
-          fetch('/api/projects'),
+          cachedFetch('/api/suppliers'),
+          cachedFetch('/api/projects'),
           fetch('/api/attachments?entity_type=contract&limit=500'),
         ]);
         const dC = await rC.json();

@@ -83,16 +83,15 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'ดึงรายการไฟล์ไม่สำเร็จ' }, { status: 500 });
     }
 
-    // 2) Best-effort delete from Drive (one by one — don't fail the whole
-    //    operation if a single Drive call errors out)
-    const driveErrors = [];
-    for (const a of (atts || [])) {
-      try {
-        await deleteFile(a.drive_file_id);
-      } catch (e) {
-        driveErrors.push(`${a.filename}: ${e.message}`);
-      }
-    }
+    // 2) Best-effort delete from Drive, in parallel — semantics identical to
+    //    the old serial loop (per-file error capture) but one round trip.
+    const delResults = await Promise.allSettled(
+      (atts || []).map(a => deleteFile(a.drive_file_id))
+    );
+    const driveErrors = delResults
+      .map((r, i) => r.status === 'rejected'
+        ? `${(atts || [])[i].filename}: ${r.reason?.message || r.reason}` : null)
+      .filter(Boolean);
 
     // 3) Delete attachment rows in DB. If this fails after Drive succeeded,
     //    surface — returning 200 would leave ghost rows pointing at deleted

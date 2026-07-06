@@ -46,8 +46,18 @@ export function ScreenCompare({ go }) {
       setLoading(true); setErr('');
       try {
         const stashed = (typeof window !== 'undefined') ? window.localStorage.getItem('cmp.currentId') : null;
-        const [r, rP, rR] = await Promise.all([
-          fetch('/api/comparisons'), fetch('/api/projects'), fetch('/api/approval-roles'),
+        // One comparison row instead of the whole table (rows carry
+        // items_json/suppliers_json blobs); attachments fetched in PARALLEL
+        // using the stashed id instead of waiting for the list to resolve.
+        const [r, rP, rR, rA] = await Promise.all([
+          fetch(stashed
+            ? `/api/comparisons?id=${encodeURIComponent(stashed)}`
+            : '/api/comparisons?limit=1'),
+          fetch('/api/projects'),
+          fetch('/api/approval-roles'),
+          stashed
+            ? fetch(`/api/attachments?entity_type=comparison&entity_id=${encodeURIComponent(stashed)}`).catch(() => null)
+            : Promise.resolve(null),
         ]);
         const d = await r.json();
         if (!r.ok) { setErr(d.error || 'โหลดข้อมูลไม่สำเร็จ'); setLoading(false); return; }
@@ -58,13 +68,19 @@ export function ScreenCompare({ go }) {
             setSignRoles(roleItems.filter(x => x.active).sort((a, b) => (a.level || 0) - (b.level || 0)));
           } catch {}
         }
-        const list = d.items || [];
-        const picked = (stashed && list.find(x => x.id === stashed)) || list[0] || null;
+        let picked = (d.items || [])[0] || null;
+        // Stale stashed id (deleted doc) → fall back to the most recent one.
+        if (!picked && stashed) {
+          const rf = await fetch('/api/comparisons?limit=1');
+          if (rf.ok) picked = ((await rf.json()).items || [])[0] || null;
+        }
         setCmp(picked);
-        if (picked) {
+        if (rA && rA.ok && picked && picked.id === stashed) {
+          try { setAttachments((await rA.json()).items || []); } catch { /* optional */ }
+        } else if (picked) {
           try {
-            const rA = await fetch(`/api/attachments?entity_type=comparison&entity_id=${encodeURIComponent(picked.id)}`);
-            if (rA.ok) setAttachments((await rA.json()).items || []);
+            const rA2 = await fetch(`/api/attachments?entity_type=comparison&entity_id=${encodeURIComponent(picked.id)}`);
+            if (rA2.ok) setAttachments((await rA2.json()).items || []);
           } catch { /* attachments optional */ }
         }
       } catch { setErr('เครือข่ายขัดข้อง'); }
