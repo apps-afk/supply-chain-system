@@ -234,7 +234,7 @@ export default function LoginPage() {
             </div>
             {!fSent ? (
               <>
-                <p style={S.modalSub}>กรอกอีเมลของคุณ เราจะส่งลิงก์รีเซ็ตรหัสผ่านให้</p>
+                <p style={S.modalSub}>กรอกอีเมลของคุณ — คำขอจะถูกส่งถึงผู้ดูแลระบบเพื่อรีเซ็ตรหัสผ่านให้ (ไม่มีอีเมลอัตโนมัติ)</p>
                 <form onSubmit={handleForgot} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <input
                     type="email" value={fEmail} onChange={e => setFEmail(e.target.value)}
@@ -246,12 +246,12 @@ export default function LoginPage() {
               </>
             ) : (
               <div style={{ textAlign: 'center', padding: '16px 0' }}>
-                <div style={{ fontSize: 36, marginBottom: 12 }}>📧</div>
-                <div style={{ fontWeight: 500, marginBottom: 8, fontFamily: 'var(--font-serif)' }}>ส่งอีเมลแล้ว!</div>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>📨</div>
+                <div style={{ fontWeight: 500, marginBottom: 8, fontFamily: 'var(--font-serif)' }}>ส่งคำขอถึงผู้ดูแลระบบแล้ว</div>
                 <p style={S.modalSub}>
-                  หากอีเมล <strong>{fEmail}</strong> มีในระบบ<br/>
-                  คุณจะได้รับลิงก์รีเซ็ตรหัสผ่านในไม่ช้า<br/>
-                  กรุณาตรวจสอบกล่องข้อความ (รวมถึง Spam)
+                  คำขอรีเซ็ตรหัสผ่านของ <strong>{fEmail}</strong> ถูกบันทึกแล้ว<br/>
+                  ผู้ดูแลระบบจะรีเซ็ตและแจ้งรหัสผ่านชั่วคราวกลับให้คุณโดยตรง<br/>
+                  (ระบบไม่ส่งอีเมลอัตโนมัติ — หากเร่งด่วน ติดต่อผู้ดูแลระบบได้เลย)
                 </p>
                 <button style={{ ...S.submitBtn, marginTop: 8 }} onClick={() => { setShowForgot(false); setFSent(false); setFEmail(''); }}>
                   ปิด

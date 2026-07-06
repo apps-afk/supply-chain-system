@@ -42,9 +42,19 @@ function fmtD(iso) {
   catch { return iso; }
 }
 
-export function buildAlerts({ rfqs = [], contracts = [], comparisons = [], signRoles = [], canApprove = false } = {}) {
+export function buildAlerts({ rfqs = [], contracts = [], comparisons = [], signRoles = [], canApprove = false, forgotPending = 0 } = {}) {
   const out = [];
   const today = new Date().toLocaleDateString('sv-SE'); // local YYYY-MM-DD
+
+  // Forgot-password requests waiting on an admin (there is no SMTP — a human
+  // must reset and hand back the password, so surface it prominently).
+  if (forgotPending > 0) {
+    out.push({
+      id: `forgot-pending-${forgotPending}`, icon: '🔑', tone: 'var(--clay)',
+      text: `มีคำขอลืมรหัสผ่านค้างอยู่ ${forgotPending} รายการ — รีเซ็ตให้ที่หน้า ทีมงานและสิทธิ์`,
+      screen: 'settings-workspace', storeKey: 'noop', storeVal: '1',
+    });
+  }
 
   for (const r of rfqs) {
     if (r.status === 'sent' && r.due_date && r.due_date < today) {

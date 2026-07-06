@@ -454,24 +454,30 @@ const NotificationBell = React.memo(function NotificationBell({ go }) {
       // Slim projections — the alert builder reads a handful of scalar
       // fields; without ?fields= this polled full tables (with JSON blobs)
       // every 5 minutes for every logged-in user.
+      const isAdmin = session?.user?.role === 'admin';
       const rs = await Promise.all([
         fetch('/api/rfqs?fields=no,title,status,due_date'),
         fetch('/api/contracts?fields=no,title,status,warranty,end_date,signed_at,retention_released_at'),
         fetch('/api/comparisons?fields=no,title,status,approvals_json'),
         fetch('/api/approval-roles'),
+        // Admins also see pending forgot-password requests — without SMTP a
+        // human must action these, so they belong in the bell.
+        isAdmin ? fetch('/api/forgot-password') : Promise.resolve(null),
       ]);
-      const [dR, dC, dM, dA] = await Promise.all(
-        rs.map(r => (r.ok ? r.json() : Promise.resolve({ items: [] })))
+      const [dR, dC, dM, dA, dF] = await Promise.all(
+        rs.map(r => (r && r.ok ? r.json() : Promise.resolve({ items: [] })))
       );
       const signRoles = (dA.items || [])
         .filter(x => x.active)
         .sort((a, b) => (a.level || 0) - (b.level || 0));
+      const forgotPending = (dF.items || []).filter(x => !x.resolved_at).length;
       setAlerts(buildAlerts({
         rfqs: dR.items || [], contracts: dC.items || [],
         comparisons: dM.items || [], signRoles, canApprove: approver,
+        forgotPending,
       }));
     } catch { /* bell is best-effort — never break the topbar */ }
-  }, [approver]);
+  }, [approver, session?.user?.role]);
 
   useEffect(() => {
     if (!authed) return;
