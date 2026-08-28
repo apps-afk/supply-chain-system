@@ -61,6 +61,7 @@ export default function middleware(req, event) {
 
 export const config = {
   // /api/* now passes THROUGH the middleware (for the navigation block above);
-  // static assets, favicon, and /login stay excluded.
-  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|login).*)'],
+  // static assets, /login, and /reset-password (reached from an emailed
+  // link — the visitor is by definition NOT signed in yet) stay excluded.
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico|login|reset-password).*)'],
 };
