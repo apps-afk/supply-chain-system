@@ -302,10 +302,7 @@ export default function LoginPage() {
               <input type="email" value={email} onChange={e => setEmail(e.target.value)}
                 placeholder="yourname@initialestate.com" required style={S.input} autoComplete="email" />
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                <label style={S.label}>รหัสผ่าน</label>
-                <button type="button" style={S.forgotLink} onClick={() => setShowForgot(true)}>ลืมรหัสผ่าน?</button>
-              </div>
+              <label style={S.label}>รหัสผ่าน</label>
               <PasswordInput value={password} onChange={e => setPassword(e.target.value)}
                 autoComplete="current-password" />
 
@@ -328,6 +325,10 @@ export default function LoginPage() {
               <button type="submit" disabled={loading} style={{ ...S.submitBtn, opacity: loading ? 0.7 : 1 }}>
                 {loading ? 'กำลังเข้าสู่ระบบ…' : (needOtp ? 'ยืนยันรหัส OTP' : 'เข้าสู่ระบบ')}
               </button>
+
+              <div style={{ textAlign: 'center', marginTop: 14 }}>
+                <button type="button" style={S.forgotLink} onClick={() => setShowForgot(true)}>ลืมรหัสผ่าน?</button>
+              </div>
             </form>
           </div>
         )}
