@@ -46,12 +46,14 @@ export function buildAlerts({ rfqs = [], contracts = [], comparisons = [], signR
   const out = [];
   const today = new Date().toLocaleDateString('sv-SE'); // local YYYY-MM-DD
 
-  // Forgot-password requests waiting on an admin (there is no SMTP — a human
-  // must reset and hand back the password, so surface it prominently).
+  // Forgot-password requests are normally self-service (emailed reset link).
+  // This only accumulates when the mailed link wasn't used — e.g. mail
+  // delivery failed or the user never followed it — so it's a fallback
+  // signal for an admin to check in and reset manually if needed.
   if (forgotPending > 0) {
     out.push({
       id: `forgot-pending-${forgotPending}`, icon: '🔑', tone: 'var(--clay)',
-      text: `มีคำขอลืมรหัสผ่านค้างอยู่ ${forgotPending} รายการ — รีเซ็ตให้ที่หน้า ทีมงานและสิทธิ์`,
+      text: `มีคำขอลืมรหัสผ่านที่ยังไม่เสร็จ ${forgotPending} รายการ — ตรวจสอบที่หน้า ทีมงานและสิทธิ์`,
       screen: 'settings-workspace', storeKey: 'noop', storeVal: '1',
     });
   }

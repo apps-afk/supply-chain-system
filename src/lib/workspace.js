@@ -306,5 +306,5 @@ export async function createDsar({ applicantEmail, type, note }) {
 export const SUB_PROCESSORS = [
   { code: 'anthropic', name: 'Anthropic Claude API',         purpose: 'ให้คะแนน AI และเตรียมข้อมูลก่อนนำเสนอ', region: 'สหรัฐฯ',    note: 'ข้อมูลไม่ถูกใช้ฝึกโมเดล' },
   { code: 'aws-s3',    name: 'Amazon S3 (ap-southeast-1)',   purpose: 'เก็บไฟล์เอกสารและใบเสนอราคา',            region: 'สิงคโปร์',   note: '' },
-  { code: 'postmark',  name: 'Postmark',                     purpose: 'อีเมลธุรกรรม (แจ้งเตือน, OTP, รีเซ็ต)',  region: 'สหรัฐฯ',    note: '' },
+  { code: 'postmark',  name: 'Postmark',                     purpose: 'อีเมลธุรกรรม (ลิงก์ตั้งรหัสผ่านใหม่)',  region: 'สหรัฐฯ',    note: '' },
 ];
