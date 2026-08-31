@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Icons } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Settings → Project List
@@ -15,6 +16,9 @@ import { settingsInputStyle, SettingsField, SettingsModal, SettingsSearchBox, St
 const STATUS_OPTIONS = ['Planning', 'Active', 'Closed'];
 
 export function ScreenSettingsProjects({ go }) {
+  // Writes on this screen are admin-only server-side — hide the controls
+  // instead of letting a filled-in form fail on save.
+  const { isAdmin: canEdit } = usePermissions();
   const [items, setItems]         = useState([]);
   const [projectTypes, setTypes]  = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -91,7 +95,7 @@ export function ScreenSettingsProjects({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่มโครงการ</button>
+          {canEdit && <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่มโครงการ</button>}
         </div>
       </div>
 
@@ -185,8 +189,8 @@ export function ScreenSettingsProjects({ go }) {
                   <td style={{ fontSize:12, color:'var(--ink-3)' }}>{p.start_date || '—'}</td>
                   <td><StatusPill status={statusLabel} /></td>
                   <td style={{ textAlign:'right' }}>
-                    <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(p)} title="แก้ไข">{Icons.edit}</button>
-                    <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(p)} title="ลบ">×</button>
+                    {canEdit && <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(p)} title="แก้ไข">{Icons.edit}</button>}
+                    {canEdit && <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(p)} title="ลบ">×</button>}
                   </td>
                 </tr>
               );

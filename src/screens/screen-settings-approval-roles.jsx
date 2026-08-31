@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Icons } from '../lib/shell';
 import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, SettingsSearchBox, StatusPill, StatusToggle } from '../lib/settings-shared';
+import { usePermissions } from '../lib/use-permissions';
 
 /*
   Settings → ตำแหน่งผู้อนุมัติ (Approval Roles)
@@ -14,6 +15,9 @@ import { settingsInputStyle, SettingsField, SettingsModal, SettingsStatStrip, Se
 
 
 export function ScreenSettingsApprovalRoles({ go }) {
+  // Writes on this screen are admin-only server-side — hide the controls
+  // instead of letting a filled-in form fail on save.
+  const { isAdmin: canEdit } = usePermissions();
   const [items, setItems]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr]         = useState('');
@@ -78,7 +82,7 @@ export function ScreenSettingsApprovalRoles({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่มตำแหน่ง</button>
+          {canEdit && <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่มตำแหน่ง</button>}
         </div>
       </div>
 
@@ -139,8 +143,8 @@ export function ScreenSettingsApprovalRoles({ go }) {
                 <td style={{ fontWeight:500 }}>{r.name}</td>
                 <td><StatusPill status={r.active ? 'Active' : 'Non-Active'} /></td>
                 <td style={{ textAlign:'right' }}>
-                  <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(r)} title="แก้ไข">{Icons.edit}</button>
-                  <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(r)} title="ลบ">×</button>
+                  {canEdit && <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(r)} title="แก้ไข">{Icons.edit}</button>}
+                  {canEdit && <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(r)} title="ลบ">×</button>}
                 </td>
               </tr>
             ))}

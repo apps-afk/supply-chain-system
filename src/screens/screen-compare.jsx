@@ -307,12 +307,17 @@ export function ScreenCompare({ go }) {
               go('compare-upload-ref');
             }}>{Icons.upload} Upload Ref</button>
           )}
-          {/* Manual status override: admin only once an approval chain exists —
-              otherwise finalize must flow through the chain below. */}
-          {(isAdmin || (canWrite && signRoles.length === 0)) && (
+          {/* Status control. Draft and archive stay manual, but "อนุมัติแล้ว"
+              is dropped from the options while an approval chain is active —
+              it is the chain's outcome, not a field. The server refuses it on
+              this route too, so the two cannot drift apart. An already
+              finalized doc keeps the option so its own value still renders. */}
+          {(isAdmin || canWrite) && (
             <select value={cmp.status || 'draft'} onChange={e => changeStatus(e.target.value)} disabled={statusBusy}
               style={{ padding: '8px 12px', fontSize: 13, border: '1px solid var(--rule-2)', borderRadius: 6, background: 'var(--paper)', fontFamily: 'inherit', cursor: 'pointer' }}>
-              {Object.keys(STATUS_TH).map(s => <option key={s} value={s}>{STATUS_TH[s].label}</option>)}
+              {Object.keys(STATUS_TH)
+                .filter(s => s !== 'finalized' || signRoles.length === 0 || cmp.status === 'finalized')
+                .map(s => <option key={s} value={s}>{STATUS_TH[s].label}</option>)}
             </select>
           )}
           {isAdmin && (

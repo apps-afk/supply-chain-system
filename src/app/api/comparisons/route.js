@@ -49,19 +49,28 @@ export const GET    = h.list;
 export const POST   = h.create;
 
 // PATCH wrapper: "finalized" is an approval outcome, not an editable field.
-// When an active approval chain exists, the ONLY paths to finalized are the
-// /approve endpoint (chain complete) or an admin override — otherwise any
-// writer could skip the whole chain (the old Upload-Ref side door).
+// While an active approval chain exists, /approve is the ONLY path to it —
+// for everyone, admins included. An admin override here would have made the
+// signature requirement advisory: one dropdown could mark a document approved
+// with nobody having signed, and the trail would only show a status edit.
+//
+// The escape hatch is deliberate and one level up: an admin who genuinely
+// must finalize without signatures deactivates the approval levels in
+// Settings first. That is visible, audited, and applies to the workspace
+// rather than quietly to one document.
 export async function PATCH(request) {
   let body;
   try { body = await request.clone().json(); } catch { body = null; }
-  if (body?.status === 'finalized') {
+  if (body?.status === 'finalized' && isSupabaseConfigured) {
     const session = await getServerSession(authOptions);
-    if (session?.user && !isAdmin(session.user.role) && isSupabaseConfigured) {
+    if (session?.user) {
       const { count } = await supabase
         .from('approval_roles').select('id', { count: 'exact', head: true }).eq('active', true);
       if ((count || 0) > 0) {
-        return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
+        return NextResponse.json(
+          { error: 'เอกสารนี้ต้องผ่านการอนุมัติตามลำดับ — เปลี่ยนสถานะเป็น "อนุมัติแล้ว" โดยตรงไม่ได้' },
+          { status: 403 }
+        );
       }
     }
   }

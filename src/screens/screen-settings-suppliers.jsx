@@ -14,6 +14,9 @@ import { usePermissions } from '../lib/use-permissions';
 */
 
 export function ScreenSettingsSuppliers({ go }) {
+  // Writes on this screen are admin-only server-side — hide the controls
+  // instead of letting a filled-in form fail on save.
+  const { isAdmin: canEdit } = usePermissions();
   const [items, setItems]     = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr]         = useState('');
@@ -97,8 +100,8 @@ export function ScreenSettingsSuppliers({ go }) {
           </p>
         </div>
         <div style={{ display:'flex', gap:8 }}>
-          <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} เพิ่มหลายรายการ</button>
-          <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่ม Supplier</button>
+          {canEdit && <button className="btn" onClick={() => setBulkOpen(true)}>{Icons.upload} เพิ่มหลายรายการ</button>}
+          {canEdit && <button className="btn primary" onClick={() => setEditing('new')}>{Icons.plus} เพิ่ม Supplier</button>}
         </div>
       </div>
 
@@ -197,8 +200,8 @@ export function ScreenSettingsSuppliers({ go }) {
                         {Icons.chevronD}
                       </span>
                     </button>
-                    <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(s)} title="แก้ไข">{Icons.edit}</button>
-                    <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(s)} title="ลบ">×</button>
+                    {canEdit && <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--ink-3)' }} onClick={() => setEditing(s)} title="แก้ไข">{Icons.edit}</button>}
+                    {canEdit && <button className="btn ghost sm" style={{ padding:'2px 6px', color:'var(--clay)' }} onClick={() => remove(s)} title="ลบ">×</button>}
                   </td>
                 </tr>
                 {expanded === s.id && (
