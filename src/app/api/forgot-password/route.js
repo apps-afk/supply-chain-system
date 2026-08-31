@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server';
 import { requireAuth } from '../../../lib/api-auth';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
 import { appendAudit } from '../../../lib/workspace';
+import { ADMIN_ROLES } from '../../../lib/permissions';
 
 async function requireAdmin() {
-  const gate = await requireAuth(['admin']);
+  const gate = await requireAuth(ADMIN_ROLES);
   return gate.ok ? { session: gate.session } : { err: gate.response };
 }
 

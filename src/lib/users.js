@@ -30,10 +30,9 @@ function likeEscape(s) {
 
 export const ROLES = [
   { value: 'admin',       label: 'ผู้ดูแลระบบ' },
-  { value: 'hr_manager',  label: 'ผู้จัดการ HR' },
-  { value: 'procurement', label: 'ฝ่ายจัดซื้อ' },
-  { value: 'accountant',  label: 'ฝ่ายบัญชี' },
+  { value: 'coo',         label: 'ผู้บริหาร (COO)' },
   { value: 'manager',     label: 'ผู้จัดการ' },
+  { value: 'procurement', label: 'ฝ่ายจัดซื้อ' },
   { value: 'user',        label: 'ผู้ใช้งานทั่วไป' },
 ];
 

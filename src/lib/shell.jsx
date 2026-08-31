@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { buildAlerts } from './alerts';
-import { canApprove as roleCanApprove } from './permissions';
+import { canApprove as roleCanApprove, isAdmin } from './permissions';
 
 /* ----------------------- Icons (inline SVG) ----------------------- */
 const Icon = ({ d, size = 16, fill }) => (
@@ -166,7 +166,7 @@ function SideCollapse({ id, icon, label, childIds, current, onNav, children }) {
 function SidebarImpl({ current, onNav }) {
   const Item = (props) => <SideItem {...props} current={current} onNav={onNav} />;
   const { data: session } = useSession();
-  const isAdmin = session?.user?.role === 'admin';
+  const userIsAdmin = isAdmin(session?.user?.role);
   return (
     <aside className="side">
       <div className="side-brand">
@@ -203,7 +203,7 @@ function SidebarImpl({ current, onNav }) {
       {/* Bottom group: admin functions — pushed to bottom via marginTop:auto.
           User identity + logout moved to Topbar avatar dropdown (UserMenu).
           Hidden for non-admin (the pages behind them are admin-gated anyway). */}
-      {isAdmin && (
+      {userIsAdmin && (
         <div className="side-group" style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--rule)' }}>
           <div className="side-group-label">ระบบ</div>
           <Item id="workspace" icon="settings"  label="ตั้งค่าพื้นที่ทำงาน" />
@@ -225,7 +225,7 @@ function TwoFaNag({ go }) {
   const { data: session } = useSession();
   const [show, setShow] = useState(false);
   useEffect(() => {
-    if (session?.user?.role !== 'admin') return;
+    if (!isAdmin(session?.user?.role)) return;
     let alive = true;
     fetch('/api/auth/2fa').then(r => r.ok ? r.json() : null).then(d => {
       if (alive && d && d.required && !d.enabled) setShow(true);
@@ -454,7 +454,7 @@ const NotificationBell = React.memo(function NotificationBell({ go }) {
       // Slim projections — the alert builder reads a handful of scalar
       // fields; without ?fields= this polled full tables (with JSON blobs)
       // every 5 minutes for every logged-in user.
-      const isAdmin = session?.user?.role === 'admin';
+      const userIsAdmin = isAdmin(session?.user?.role);
       const rs = await Promise.all([
         fetch('/api/rfqs?fields=no,title,status,due_date'),
         fetch('/api/contracts?fields=no,title,status,warranty,end_date,signed_at,retention_released_at'),
@@ -462,7 +462,7 @@ const NotificationBell = React.memo(function NotificationBell({ go }) {
         fetch('/api/approval-roles'),
         // Admins also see pending forgot-password requests — without SMTP a
         // human must action these, so they belong in the bell.
-        isAdmin ? fetch('/api/forgot-password') : Promise.resolve(null),
+        userIsAdmin ? fetch('/api/forgot-password') : Promise.resolve(null),
       ]);
       const [dR, dC, dM, dA, dF] = await Promise.all(
         rs.map(r => (r && r.ok ? r.json() : Promise.resolve({ items: [] })))
@@ -595,10 +595,9 @@ const NotificationBell = React.memo(function NotificationBell({ go }) {
 /* ----------------------- Topbar user menu (avatar + dropdown) ----- */
 const ROLE_LABEL = {
   admin:       'ผู้ดูแลระบบ',
-  hr_manager:  'ผู้จัดการ HR',
-  procurement: 'ฝ่ายจัดซื้อ',
-  accountant:  'ฝ่ายบัญชี',
+  coo:         'ผู้บริหาร (COO)',
   manager:     'ผู้จัดการ',
+  procurement: 'ฝ่ายจัดซื้อ',
   user:        'ผู้ใช้งานทั่วไป',
 };
 

@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
+import { isAdmin } from '../lib/permissions';
 
 const MODELS = [
   { value: 'claude-opus-4-8',   label: 'Claude Opus 4.8 (ฉลาดที่สุด)' },
@@ -124,7 +125,7 @@ export function ScreenSettingsWorkspace({ go }) {
     setSettings(JSON.parse(JSON.stringify(original)));
   }
 
-  if (me && me.role !== 'admin') {
+  if (me && !isAdmin(me.role)) {
     return (
       <div className="page">
         <div className="page-head">

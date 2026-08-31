@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { UNAUTHORIZED_MESSAGE, FORBIDDEN_MESSAGE } from '../../../../lib/auth-messages';
 import { requireSession } from '../../../../lib/crud';
-import { canApprove } from '../../../../lib/permissions';
+import { canApprove, isAdmin } from '../../../../lib/permissions';
 import { supabase, isSupabaseConfigured } from '../../../../lib/supabase';
 import { appendAudit } from '../../../../lib/workspace';
 
@@ -117,7 +117,7 @@ export async function POST(request) {
       );
     }
     const isOwner = entry.by_email === session.user.email;
-    if (!isOwner && session.user.role !== 'admin') {
+    if (!isOwner && !isAdmin(session.user.role)) {
       return NextResponse.json(
         { error: FORBIDDEN_MESSAGE }, { status: 403 }
       );

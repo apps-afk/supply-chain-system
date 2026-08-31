@@ -4,11 +4,12 @@ import {
   listUsers, updateUserRole, deleteUser, adminCreateUser, adminResetPassword,
 } from '../../../lib/users';
 import { appendAudit } from '../../../lib/workspace';
+import { ADMIN_ROLES, isAdmin } from '../../../lib/permissions';
 
 const DOMAIN = 'initialestate.com';
 
 async function requireAdmin() {
-  const gate = await requireAuth(['admin']);
+  const gate = await requireAuth(ADMIN_ROLES);
   return gate.ok ? { session: gate.session } : { err: gate.response };
 }
 
@@ -21,7 +22,7 @@ export async function GET(request) {
   // management data stays admin-only.
   const url = new URL(request.url);
   const contactsOnly = url.searchParams.get('scope') === 'contacts';
-  if (!contactsOnly && session.user.role !== 'admin') {
+  if (!contactsOnly && !isAdmin(session.user.role)) {
     return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
   }
   const users = await listUsers();

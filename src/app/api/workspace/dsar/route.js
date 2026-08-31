@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '../../../../lib/api-auth';
 import { getDsarQueue, getDsarStats, resolveDsar, createDsar } from '../../../../lib/workspace';
+import { ADMIN_ROLES } from '../../../../lib/permissions';
 
 async function adminGuard() {
-  const gate = await requireAuth(['admin']);
+  const gate = await requireAuth(ADMIN_ROLES);
   return gate.ok ? { session: gate.session } : { err: gate.response };
 }
 

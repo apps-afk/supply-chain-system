@@ -3,6 +3,7 @@ import { FORBIDDEN_MESSAGE, requireAuth } from '../../../lib/api-auth';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
 import { deleteFile } from '../../../lib/gdrive';
 import { appendAudit } from '../../../lib/workspace';
+import { isAdmin } from '../../../lib/permissions';
 
 export const runtime = 'nodejs';
 
@@ -25,7 +26,7 @@ export async function GET(request) {
   // organizational data — anyone on the team can see them. But unscoped
   // listings (no entity filter) would let any user enumerate every file in
   // the workspace, so we restrict those to admin or the uploader.
-  if (!et && !ei && session.user.role !== 'admin') {
+  if (!et && !ei && !isAdmin(session.user.role)) {
     q = q.eq('uploaded_by', session.user.email);
   }
   const rawLimit = parseInt(url.searchParams.get('limit') || '200', 10);
@@ -55,7 +56,7 @@ export async function DELETE(request) {
       if (!row) return NextResponse.json({ error: 'ไม่พบ attachment' }, { status: 404 });
 
       // Only the uploader or admin can delete
-      if (row.uploaded_by !== session.user.email && session.user.role !== 'admin') {
+      if (row.uploaded_by !== session.user.email && !isAdmin(session.user.role)) {
         return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
       }
 

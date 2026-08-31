@@ -5,6 +5,7 @@ import { getTotp, setTotp, appendAudit } from '../../../../lib/workspace';
 import { getPolicy } from '../../../../lib/policy';
 import { generateSecret, verifyTOTP, otpauthURL } from '../../../../lib/totp';
 import { rateLimit, clientKey } from '../../../../lib/rate-limit';
+import { isAdmin } from '../../../../lib/permissions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ export async function GET() {
   let required = false;
   try {
     const sec = (await getPolicy()).security || {};
-    required = !!sec.require2FA && gate.user.role === 'admin';
+    required = !!sec.require2FA && isAdmin(gate.user.role);
   } catch { /* policy unavailable */ }
   return NextResponse.json({ enabled: !!t?.enabled, required });
 }

@@ -6,6 +6,7 @@ import { createCrudRoutes } from '../../../lib/crud';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
 import { deleteFile } from '../../../lib/gdrive';
 import { appendAudit } from '../../../lib/workspace';
+import { isAdmin } from '../../../lib/permissions';
 
 export const runtime = 'nodejs';   // googleapis (used in cascade delete) needs node runtime
 
@@ -57,7 +58,7 @@ export async function DELETE(request) {
   if (!session?.user) {
     return NextResponse.json({ error: UNAUTHORIZED_MESSAGE }, { status: 401 });
   }
-  if (session.user.role !== 'admin') {
+  if (!isAdmin(session.user.role)) {
     return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
   }
 

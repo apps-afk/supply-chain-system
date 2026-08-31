@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '../../../lib/api-auth';
 import { getAuditLog } from '../../../lib/workspace';
+import { ADMIN_ROLES } from '../../../lib/permissions';
 
 export async function GET(request) {
-  const gate = await requireAuth(['admin']);
+  const gate = await requireAuth(ADMIN_ROLES);
   if (!gate.ok) return gate.response;
   const url = new URL(request.url);
   const rawLimit = parseInt(url.searchParams.get('limit') || '200', 10);

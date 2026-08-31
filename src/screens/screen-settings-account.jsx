@@ -4,10 +4,9 @@ import { useSession, signOut } from 'next-auth/react';
 
 const ROLE_LABEL = {
   admin:       'ผู้ดูแลระบบ',
-  hr_manager:  'ผู้จัดการ HR',
-  procurement: 'ฝ่ายจัดซื้อ',
-  accountant:  'ฝ่ายบัญชี',
+  coo:         'ผู้บริหาร (COO)',
   manager:     'ผู้จัดการ',
+  procurement: 'ฝ่ายจัดซื้อ',
   user:        'ผู้ใช้งานทั่วไป',
 };
 

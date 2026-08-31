@@ -18,7 +18,7 @@
 import { NextResponse } from 'next/server';
 import { supabase, isSupabaseConfigured } from './supabase';
 import { appendAudit } from './workspace';
-import { WRITER_ROLES } from './permissions';
+import { WRITER_ROLES, ADMIN_ROLES } from './permissions';
 import { requireAuth } from './api-auth';
 
 // All three guards ride on the central requireAuth (lib/api-auth.js) so the
@@ -31,7 +31,7 @@ async function requireSession() {
 }
 
 async function requireAdmin() {
-  const gate = await requireAuth(['admin']);
+  const gate = await requireAuth(ADMIN_ROLES);
   return gate.ok ? { session: gate.session } : { err: gate.response };
 }
 

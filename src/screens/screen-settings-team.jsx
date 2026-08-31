@@ -1,13 +1,13 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
+import { isAdmin } from '../lib/permissions';
 
 const ROLES = [
   { value: 'admin',       label: 'ผู้ดูแลระบบ' },
-  { value: 'hr_manager',  label: 'ผู้จัดการ HR' },
-  { value: 'procurement', label: 'ฝ่ายจัดซื้อ' },
-  { value: 'accountant',  label: 'ฝ่ายบัญชี' },
+  { value: 'coo',         label: 'ผู้บริหาร (COO)' },
   { value: 'manager',     label: 'ผู้จัดการ' },
+  { value: 'procurement', label: 'ฝ่ายจัดซื้อ' },
   { value: 'user',        label: 'ผู้ใช้งานทั่วไป' },
 ];
 
@@ -84,7 +84,7 @@ export function ScreenSettingsTeam() {
   }
 
   // Permission gate
-  if (me && me.role !== 'admin') {
+  if (me && !isAdmin(me.role)) {
     return (
       <div className="page">
         <div className="page-head">

@@ -6,6 +6,7 @@ import { createCrudRoutes } from '../../../lib/crud';
 import { supabase, isSupabaseConfigured } from '../../../lib/supabase';
 import { deleteFile } from '../../../lib/gdrive';
 import { appendAudit } from '../../../lib/workspace';
+import { isAdmin } from '../../../lib/permissions';
 
 export const runtime = 'nodejs';   // googleapis (used in cascade delete) needs node runtime
 
@@ -56,7 +57,7 @@ export async function PATCH(request) {
   try { body = await request.clone().json(); } catch { body = null; }
   if (body?.status === 'finalized') {
     const session = await getServerSession(authOptions);
-    if (session?.user && session.user.role !== 'admin' && isSupabaseConfigured) {
+    if (session?.user && !isAdmin(session.user.role) && isSupabaseConfigured) {
       const { count } = await supabase
         .from('approval_roles').select('id', { count: 'exact', head: true }).eq('active', true);
       if ((count || 0) > 0) {
@@ -78,7 +79,7 @@ export async function DELETE(request) {
   // Cascade delete is destructive (removes Drive files). Restrict to admin
   // like the contracts DELETE — non-admins can still cancel/draft a compare
   // doc via PATCH but cannot wipe attachments.
-  if (session.user.role !== 'admin') {
+  if (!isAdmin(session.user.role)) {
     return NextResponse.json({ error: FORBIDDEN_MESSAGE }, { status: 403 });
   }
 

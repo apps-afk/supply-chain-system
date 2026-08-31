@@ -5,6 +5,7 @@ import { getSettings, updateSettings, appendAudit, getAiUsage,
 import { invalidatePolicyCache, parseAllowlist, isValidAllowlistEntry, ipAllowed } from '../../../lib/policy';
 import { clientKey } from '../../../lib/rate-limit';
 import { AI_MODELS } from '../../../lib/ai';
+import { ADMIN_ROLES } from '../../../lib/permissions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,7 +13,7 @@ export const dynamic = 'force-dynamic';
 // Full settings are ADMIN-only — they contain the IP allowlist and security
 // posture. Non-admin screens that need enforcement values use ./policy.
 export async function GET() {
-  const gate = await requireAuth(['admin']);
+  const gate = await requireAuth(ADMIN_ROLES);
   if (!gate.ok) return gate.response;
   return NextResponse.json({
     settings: stripPrivateSettings(await getSettings()),
@@ -22,7 +23,7 @@ export async function GET() {
 }
 
 export async function PATCH(request) {
-  const gate = await requireAuth(['admin']);
+  const gate = await requireAuth(ADMIN_ROLES);
   if (!gate.ok) return gate.response;
   try {
     const patch = await request.json();
