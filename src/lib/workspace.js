@@ -35,7 +35,7 @@ const DEFAULTS = {
     allowTrainingData: false,
     requireHumanReview: true,
     blockExternalProviders: true,
-    dataResidency: 'สหรัฐฯ (Anthropic) / สิงคโปร์ (S3)',
+    dataResidency: 'สหรัฐฯ (Anthropic) / Google Workspace ของบริษัท (ไฟล์แนบ)',
   },
   privacy: {
     dsarResponseDays: 30,
@@ -304,7 +304,9 @@ export async function createDsar({ applicantEmail, type, note }) {
    Sub-processors registry (static — same in all modes)
    ============================================================ */
 export const SUB_PROCESSORS = [
-  { code: 'anthropic', name: 'Anthropic Claude API',         purpose: 'ให้คะแนน AI และเตรียมข้อมูลก่อนนำเสนอ', region: 'สหรัฐฯ',    note: 'ข้อมูลไม่ถูกใช้ฝึกโมเดล' },
-  { code: 'aws-s3',    name: 'Amazon S3 (ap-southeast-1)',   purpose: 'เก็บไฟล์เอกสารและใบเสนอราคา',            region: 'สิงคโปร์',   note: '' },
-  { code: 'postmark',  name: 'Postmark',                     purpose: 'อีเมลธุรกรรม (ลิงก์ตั้งรหัสผ่านใหม่)',  region: 'สหรัฐฯ',    note: '' },
+  { code: 'supabase',  name: 'Supabase (PostgreSQL)',          purpose: 'ฐานข้อมูลหลักของระบบ — เอกสารจัดซื้อ ผู้ใช้ และบันทึกการใช้งานทั้งหมด', region: 'สิงคโปร์ (ap-southeast-1)', note: 'ข้อมูลส่วนใหญ่ของระบบอยู่ที่นี่' },
+  { code: 'vercel',    name: 'Vercel',                         purpose: 'ให้บริการเว็บและประมวลผลคำขอ',           region: 'สหรัฐฯ',    note: 'ข้อมูลไหลผ่านระหว่างประมวลผล ไม่ได้จัดเก็บถาวร' },
+  { code: 'gdrive',    name: 'Google Drive (Google Workspace)', purpose: 'เก็บไฟล์เอกสารและใบเสนอราคา',           region: 'ตามการตั้งค่า Data Region ของ Google Workspace บริษัท', note: 'เก็บใน Shared Drive ขององค์กรเอง' },
+  { code: 'postmark',  name: 'Postmark',                       purpose: 'อีเมลธุรกรรม (ลิงก์ตั้งรหัสผ่านใหม่)',  region: 'สหรัฐฯ',    note: 'ส่งเฉพาะอีเมลพนักงานและลิงก์รีเซ็ต' },
+  { code: 'anthropic', name: 'Anthropic Claude API',           purpose: 'ให้คะแนน AI และเตรียมข้อมูลก่อนนำเสนอ',  region: 'สหรัฐฯ',    note: 'ใช้เมื่อเปิดฟีเจอร์ AI เท่านั้น · ข้อมูลไม่ถูกใช้ฝึกโมเดล' },
 ];
