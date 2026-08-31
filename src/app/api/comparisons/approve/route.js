@@ -76,6 +76,19 @@ export async function POST(request) {
     if (approvedLevels.has(level)) {
       return NextResponse.json({ error: 'ลำดับนี้อนุมัติไปแล้ว' }, { status: 409 });
     }
+    // One person, one signature per document. Without this, a multi-level
+    // chain is decorative: a single approver could sign every level of any
+    // document they didn't personally create, and the trail would show three
+    // positions signed off when only one human ever looked at it.
+    const alreadySigned = approvals.find(
+      a => (a.by_email || '').toLowerCase() === session.user.email.toLowerCase()
+    );
+    if (alreadySigned) {
+      return NextResponse.json(
+        { error: `คุณอนุมัติในลำดับ ${alreadySigned.level} (${alreadySigned.role_name || '—'}) ของเอกสารนี้ไปแล้ว — หนึ่งคนเซ็นได้ลำดับเดียวต่อหนึ่งเอกสาร` },
+        { status: 403 }
+      );
+    }
     // Sequential: every active level below this one must be approved first.
     const missing = chain.filter(r => r.level < level && !approvedLevels.has(r.level));
     if (missing.length > 0) {
